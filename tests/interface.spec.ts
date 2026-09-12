@@ -551,14 +551,16 @@ test("the account panel keeps its content off the panel border", async ({
   page,
 }) => {
   await nativeMock(page, "success");
-  const section = page.locator("section.accounts");
-  const panel = await section.boundingBox();
-  const heading = await section
-    .getByText("Apple account")
-    .first()
-    .boundingBox();
-  // Text flush against the border reads as a broken layout; keep the inset the other rows use.
-  expect(panel && heading && heading.x - panel.x).toBeGreaterThanOrEqual(16);
+  // Text flush against the border reads as a broken layout; every panel keeps the same inset.
+  for (const [container, label] of [
+    ["section.accounts", "Apple account"],
+    [".local-signing", "Local signing identities"],
+  ] as const) {
+    const section = page.locator(container);
+    const panel = await section.boundingBox();
+    const heading = await section.getByText(label).first().boundingBox();
+    expect(panel && heading && heading.x - panel.x).toBeGreaterThanOrEqual(16);
+  }
 });
 
 test("registering an iPhone needs a device, a team, and an explicit acknowledgement", async ({

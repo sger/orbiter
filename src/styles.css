@@ -924,8 +924,9 @@ details[open] > summary > svg {
 
 .local-signing {
   border-top: 1px solid var(--border, #e1e7df);
-  margin: 20px 0;
-  padding-top: 20px;
+  /* Same inset as the account panel and the destination rows above it. */
+  margin: 20px 0 0;
+  padding: 20px 22px 0;
 }
 .signing-identities {
   padding-left: 20px;
