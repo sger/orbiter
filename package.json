@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev:test": "vite --host 127.0.0.1 --port 1421 --strictPort",
     "build": "tsc && vite build",
     "tauri": "tauri",
     "test": "playwright test"
@@ -18,10 +19,12 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "2.11.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "prettier": "3.9.6",
+    "tailwindcss": "^4.3.3",
     "typescript": "5.9.3",
     "vite": "7.3.6"
   }

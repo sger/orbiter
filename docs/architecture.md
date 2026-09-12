@@ -173,3 +173,11 @@ Each step of the pipeline renders as a stage: a heading, its controls while it n
 Collapsing is not sequencing. Apple does not require a registered device before issuing a certificate, and identifiers can be registered before either; only the prerequisites that genuinely exist gate a step. A collapsed stage always offers **Change**, so a completed step is never a dead end — a team, a Watch choice or a device can all be revisited.
 
 The rail carries one dot per stage, so the position in the pipeline is visible without scrolling, and a Help button opening a slide-over beside the work rather than a modal over it. Help holds the prose the panels used to carry: what Orbiter does, what a free team cannot carry and why, the seven-day limit, the "Untrusted Developer" step, what is stored, and how to diagnose a failure — including that a web view's failures never reach the device log. Each stage links to its section, which is what allows the stages themselves to be a control and a result rather than three paragraphs.
+
+### Styling
+
+Tailwind v4 via the Vite plugin, with the palette the interface already had declared once in `@theme` in `src/styles.css`. Those tokens are the source of truth: the stylesheet's rules read them through `var(--color-…)` rather than repeating hex values, which is what had already gone wrong — the audit found three dead rule blocks and a dozen near-duplicate greens that had drifted apart.
+
+New surfaces are written as utilities in the markup. The remaining component rules stay in `styles.css` because they are genuinely shared across elements; they draw from the same tokens, so there is one palette and no second place for it to drift.
+
+Browser tests run their own Vite server on port 1421, never the one `npm run tauri dev` occupies on 1420. Reusing that server meant tests silently exercised whatever bundle it had started with: a Vite config added afterwards was invisible to them, so a run could pass green against a build nobody was shipping. It cost real time to notice, and the fix is one port and `reuseExistingServer: false`.

@@ -8,7 +8,6 @@ import {
 import type { LogLine, LogSummary } from "../../types";
 import { LoaderCircle } from "lucide-react";
 
-
 /// Reads the iPhone's log while a person reproduces a failure, keeping only the lines about the
 /// app being diagnosed. The rest of the device's log is read and dropped, never shown or stored.
 export function DeviceLog({
@@ -46,8 +45,8 @@ export function DeviceLog({
   }, [deviceId, subjectKey]);
   const ready = isTauri() && deviceId !== null && subjects.length > 0;
   return (
-    <div className="device-log">
-      <div className="device-log-head">
+    <div className="mt-[18px] border-t border-line-soft pt-4">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
         <strong>Device log</strong>
         <button
           className="text-button"
@@ -101,7 +100,7 @@ export function DeviceLog({
         </p>
       )}
       {lines.length > 0 && (
-        <pre className="device-log-lines">
+        <pre className="mt-2.5 max-h-[260px] overflow-auto rounded-control border border-line bg-surface-soft px-3 py-2.5 text-xs leading-relaxed break-words whitespace-pre-wrap">
           {lines.map((line) => line.text).join("\n")}
         </pre>
       )}

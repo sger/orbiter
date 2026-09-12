@@ -1,3 +1,48 @@
+@import "tailwindcss";
+
+/* The palette the interface already had, named once so it stops being retyped as hex.
+   These are the values that were scattered through the stylesheet, not a new design. */
+@theme {
+  --font-sans:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Ink */
+  --color-ink: #263c39;
+  --color-ink-strong: #2f4a3c;
+  --color-ink-muted: #708071;
+  --color-ink-soft: #8a9588;
+  --color-ink-faint: #9ba698;
+
+  /* Ground */
+  --color-canvas: #f5f7f5;
+  --color-surface: #ffffff;
+  --color-surface-soft: #fafbf9;
+  --color-surface-tint: #f4f8f1;
+
+  /* Lines */
+  --color-line: #e2e7df;
+  --color-line-soft: #eef2ec;
+  --color-line-strong: #dce3da;
+
+  /* The rail, which is the one dark surface. */
+  --color-rail: #173e37;
+  --color-rail-line: #527268;
+  --color-rail-ink: #d0e2d7;
+  --color-rail-bright: #f0f5de;
+  --color-rail-dim: #9fb8aa;
+
+  /* Accents */
+  --color-go: #8fd3a8;
+  --color-go-deep: #3d6b46;
+
+  /* Two more that recur; the remaining literals below are genuine one-offs. */
+  --color-line-warm: #edf1e9;
+  --color-line-cool: #e0e8e0;
+
+  --radius-panel: 8px;
+  --radius-control: 6px;
+}
+
 :root {
   font-family:
     Inter,
@@ -5,8 +50,8 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  color: #263c39;
-  background: #f5f7f5;
+  color: var(--color-ink);
+  background: var(--color-canvas);
   font-synthesis: none;
   font-weight: 400;
 }
@@ -52,36 +97,6 @@ pre {
 .shell {
   display: flex;
   min-height: 100vh;
-}
-.rail {
-  position: fixed;
-  inset: 0 auto 0 0;
-  width: 68px;
-  background: #173e37;
-  display: flex;
-  align-items: center;
-  flex-direction: column;
-  padding: 27px 0;
-  color: #d0e2d7;
-}
-.brand {
-  color: #f0f5de;
-  display: flex;
-  text-decoration: none;
-}
-.rail-active {
-  margin-top: 48px;
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #527268;
-  border-radius: 11px;
-  background: #31554c;
-}
-.rail-bottom {
-  margin-top: auto;
-  color: #9fb8aa;
 }
 main {
   width: 100%;
@@ -234,7 +249,7 @@ header {
   font-size: 13px;
   color: #879885;
   background: #fcfdfa;
-  border-top: 1px solid #edf1e9;
+  border-top: 1px solid var(--color-line-warm);
 }
 .destination {
   padding-bottom: 18px;
@@ -250,18 +265,18 @@ header {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #708071;
+  color: var(--color-ink-muted);
   margin-bottom: 7px;
 }
 .select-wrap {
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid #e2e7df;
-  background: #fafbf9;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-soft);
   border-radius: 6px;
   padding: 10px 11px;
-  color: #9ba698;
+  color: var(--color-ink-faint);
 }
 .select-wrap select {
   appearance: none;
@@ -280,7 +295,7 @@ header {
 }
 .hint {
   font-size: 13px;
-  color: #8a9588;
+  color: var(--color-ink-soft);
   line-height: 1.65;
   margin-bottom: 0;
 }
@@ -367,7 +382,7 @@ summary::-webkit-details-marker {
   padding: 15px 21px;
   display: flex;
   gap: 8px;
-  border-top: 1px solid #edf1e9;
+  border-top: 1px solid var(--color-line-warm);
   font-size: 13px;
   color: #96a08f;
   background: #fdfefa;
@@ -470,7 +485,7 @@ summary::-webkit-details-marker {
   gap: 34px;
   white-space: nowrap;
   color: #99aaa0;
-  background: #e0e8e0;
+  background: var(--color-line-cool);
   padding: 14px 18px;
   border-radius: 7px;
   font-size: 15px;
@@ -649,7 +664,7 @@ footer {
   margin: 0 22px 17px;
 }
 .bundle-detail {
-  border-top: 1px solid #edf1e9;
+  border-top: 1px solid var(--color-line-warm);
 }
 .bundle-detail > summary {
   display: flex;
@@ -727,9 +742,6 @@ details[open] > summary > svg {
   }
 }
 @media (max-width: 760px) {
-  .rail {
-    width: 52px;
-  }
   main {
     margin-left: 52px;
     padding: 0 18px;
@@ -811,7 +823,7 @@ details[open] > summary > svg {
   font-size: 14px;
 }
 .review-button:disabled {
-  background: #e0e8e0;
+  background: var(--color-line-cool);
   color: #82927c;
 }
 .install-review,
@@ -883,7 +895,7 @@ details[open] > summary > svg {
 .accounts select {
   width: 100%;
   min-width: 0;
-  border: 1px solid #dce3da;
+  border: 1px solid var(--color-line-strong);
   border-radius: 6px;
   padding: 12px;
   color: inherit;
@@ -901,7 +913,7 @@ details[open] > summary > svg {
   text-overflow: ellipsis;
 }
 .accounts select:disabled {
-  color: #9ba698;
+  color: var(--color-ink-faint);
   opacity: 1;
 }
 .accounts select:focus-visible {
@@ -964,7 +976,7 @@ details[open] > summary > svg {
   font-size: 13px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #708071;
+  color: var(--color-ink-muted);
 }
 .account-header {
   display: flex;
@@ -981,7 +993,7 @@ details[open] > summary > svg {
 }
 .header-account-name {
   font-size: 13px;
-  color: #708071;
+  color: var(--color-ink-muted);
   max-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -991,7 +1003,7 @@ details[open] > summary > svg {
 .signing-log {
   margin-top: 10px;
   font-size: 13px;
-  color: #8a9588;
+  color: var(--color-ink-soft);
 }
 .signing-log summary {
   cursor: pointer;
@@ -1001,9 +1013,9 @@ details[open] > summary > svg {
 .signing-log pre {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid #e2e7df;
+  border: 1px solid var(--color-line);
   border-radius: 6px;
-  background: #fafbf9;
+  background: var(--color-surface-soft);
   font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;
@@ -1016,7 +1028,7 @@ details[open] > summary > svg {
   padding: 12px 14px;
   border: 1px solid #dbe6d6;
   border-radius: 8px;
-  background: #f4f8f1;
+  background: var(--color-surface-tint);
 }
 .install-next strong {
   display: block;
@@ -1026,80 +1038,14 @@ details[open] > summary > svg {
   margin: 0;
 }
 
-.device-log {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid #e6ebe4;
-}
-.device-log-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
-}
 /* Log lines are read as lines: keep the breaks, and keep the block from growing the page. */
-.device-log-lines {
-  margin: 10px 0 0;
-  padding: 10px 12px;
-  max-height: 260px;
-  overflow: auto;
-  border: 1px solid #e2e7df;
-  border-radius: 6px;
-  background: #fafbf9;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 
 .diagnostics {
   margin: 6px 0 22px;
   padding: 4px 22px 18px;
 }
-.diagnostics .device-log {
-  border-top: 0;
-  padding-top: 14px;
-}
 
 /* Where you are in the pipeline, one dot per stage. */
-.rail-progress {
-  list-style: none;
-  margin: 34px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: center;
-}
-.rail-progress li {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1px solid #527268;
-}
-.rail-progress li.done {
-  background: #8fd3a8;
-  border-color: #8fd3a8;
-}
-.rail-progress li.current {
-  background: #f0f5de;
-  border-color: #f0f5de;
-  box-shadow: 0 0 0 3px rgba(240, 245, 222, 0.18);
-}
-.rail-help {
-  margin-top: auto;
-  background: none;
-  border: 0;
-  padding: 6px;
-  color: #9fb8aa;
-  display: grid;
-  place-items: center;
-}
-.rail-help:hover,
-.rail-help[aria-expanded="true"] {
-  color: #f0f5de;
-}
 /* Visible to a screen reader, absent from the layout. */
 .sr-only {
   position: absolute;
@@ -1114,36 +1060,7 @@ details[open] > summary > svg {
 }
 
 /* Beside the work, never over it: the finding being explained stays readable. */
-.help-panel {
-  position: fixed;
-  inset: 0 0 0 auto;
-  width: min(460px, 100vw - 68px);
-  background: #ffffff;
-  border-left: 1px solid #e1e7df;
-  box-shadow: -18px 0 40px rgba(23, 62, 55, 0.08);
-  display: flex;
-  flex-direction: column;
-  z-index: 20;
-}
-.help-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 22px;
-  border-bottom: 1px solid #eef2ec;
-}
-.help-body {
-  overflow-y: auto;
-  padding: 4px 22px 32px;
-  font-size: 14px;
-  line-height: 1.7;
-  color: #5c6a5d;
-}
-.help-body h3 {
-  font-size: 15px;
-  color: #2f4a3c;
-  margin: 24px 0 8px;
-}
+/* Lists inside help keep their own rhythm; utilities on every <li> in prose is noise. */
 .help-body ul {
   margin: 8px 0;
   padding-left: 18px;
@@ -1153,89 +1070,10 @@ details[open] > summary > svg {
 }
 
 /* One step of the pipeline. Done collapses to its result; waiting shows only why it is waiting. */
-.stage {
-  padding: 14px 0;
-  border-top: 1px solid #eef2ec;
-}
-.stage:first-of-type {
-  border-top: 0;
-}
-.stage-head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.stage-head strong {
-  font-size: 14px;
-  color: #2f4a3c;
-}
-.stage-mark {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid #dce3da;
-  color: #8a9588;
-  background: #fafbf9;
-}
-.stage-done .stage-mark {
-  background: #e4f1e4;
-  border-color: #bcd9bf;
-  color: #3d6b46;
-}
-.stage-current .stage-mark {
-  background: #2f4a3c;
-  border-color: #2f4a3c;
-  color: #f4f8f1;
-}
-.stage-summary {
-  font-size: 13px;
-  color: #8a9588;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.stage-help {
-  margin-left: auto;
-  background: none;
-  border: 0;
-  padding: 2px;
-  color: #a9b5a6;
-  display: grid;
-  place-items: center;
-}
-.stage-help:hover {
-  color: #2f4a3c;
-}
-.stage-body {
-  padding-top: 10px;
-}
-.stage-blocked {
-  margin: 6px 0 0 29px;
-  font-size: 13px;
-  color: #9ba698;
-}
-.stage-waiting .stage-head strong {
-  color: #9ba698;
-}
 
-.stage-change {
-  margin-left: auto;
-  background: none;
-  border: 0;
-  padding: 2px 4px;
-  font-size: 13px;
-  color: #5d7c63;
-}
-.stage-change:hover {
-  color: #2f4a3c;
-  text-decoration: underline;
-}
 /* When both are present the help icon sits last, so Change keeps the auto margin. */
-.stage-change + .stage-help {
-  margin-left: 6px;
+
+/* Kept as a hook: the summary is the one part of a stage a test identifies by role-free text. */
+.stage-summary {
+  min-width: 0;
 }

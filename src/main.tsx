@@ -293,14 +293,31 @@ function App() {
     ).length ?? 0;
   return (
     <div className="shell">
-      <aside className="rail">
-        <a className="brand" href="#" aria-label="Orbiter home">
+      <aside className="fixed inset-y-0 left-0 flex w-[52px] flex-col items-center bg-rail px-0 py-[27px] text-rail-ink md:w-[68px]">
+        <a
+          className="flex text-rail-bright no-underline"
+          href="#"
+          aria-label="Orbiter home"
+        >
           <Orbit size={29} />
         </a>
         {/* Where you are in the pipeline, without scrolling the column to find out. */}
-        <ol className="rail-progress" aria-label="Progress">
+        <ol
+          className="mt-[34px] flex list-none flex-col items-center gap-2.5 p-0"
+          aria-label="Progress"
+        >
           {steps.map((entry) => (
-            <li key={entry.id} className={entry.state} title={entry.title}>
+            <li
+              key={entry.id}
+              title={entry.title}
+              className={`h-[9px] w-[9px] rounded-full border ${
+                entry.state === "done"
+                  ? "border-go bg-go"
+                  : entry.state === "current"
+                    ? "border-rail-bright bg-rail-bright shadow-[0_0_0_3px_rgba(240,245,222,0.18)]"
+                    : "border-rail-line"
+              }`}
+            >
               <span className="sr-only">
                 {entry.title}: {entry.state}
               </span>
@@ -308,7 +325,7 @@ function App() {
           ))}
         </ol>
         <button
-          className="rail-help"
+          className="mt-auto grid place-items-center border-0 bg-transparent p-1.5 text-rail-dim hover:text-rail-bright aria-expanded:text-rail-bright"
           title="Help"
           aria-label="Help"
           aria-expanded={help}

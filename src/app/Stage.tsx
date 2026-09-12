@@ -38,20 +38,35 @@ export function Stage({
   const open = state === "current" || reopened;
   return (
     <section
-      className={`stage stage-${state}`}
+      className="border-t border-line-soft py-3.5 first-of-type:border-t-0"
       aria-current={open || undefined}
     >
-      <div className="stage-head">
-        <span className="stage-mark" aria-hidden>
+      <div className="flex items-center gap-2.5">
+        <span
+          className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-[11px] font-semibold ${
+            state === "done"
+              ? "border-[#bcd9bf] bg-[#e4f1e4] text-go-deep"
+              : state === "current"
+                ? "border-ink-strong bg-ink-strong text-surface-tint"
+                : "border-line-strong bg-surface-soft text-ink-soft"
+          }`}
+          aria-hidden
+        >
           {state === "done" ? <Check size={13} /> : index}
         </span>
-        <strong>{title}</strong>
+        <strong
+          className={`text-sm ${state === "waiting" ? "text-ink-faint" : "text-ink-strong"}`}
+        >
+          {title}
+        </strong>
         {summary && state === "done" && !reopened && (
-          <span className="stage-summary">{summary}</span>
+          <span className="stage-summary overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-ink-soft">
+            {summary}
+          </span>
         )}
         {state === "done" && (
           <button
-            className="stage-change"
+            className="ml-auto border-0 bg-transparent px-1 py-0.5 text-[13px] text-[#5d7c63] hover:text-ink-strong hover:underline"
             // Names what it changes: several stages offer one, and so does the build panel.
             aria-label={`${reopened ? "Hide" : "Change"} ${title}`}
             onClick={() => setReopened((value) => !value)}
@@ -61,7 +76,7 @@ export function Stage({
         )}
         {help && onHelp && (
           <button
-            className="stage-help"
+            className="ml-1.5 grid place-items-center border-0 bg-transparent p-0.5 text-[#a9b5a6] last:ml-auto hover:text-ink-strong"
             // Deliberately does not repeat the stage title: a control whose accessible name
             // contains another control's name makes both ambiguous to anything matching by name.
             aria-label={`Help, step ${index}`}
@@ -72,9 +87,9 @@ export function Stage({
           </button>
         )}
       </div>
-      {open && <div className="stage-body">{children}</div>}
+      {open && <div className="pt-2.5">{children}</div>}
       {state === "waiting" && blocked && (
-        <p className="stage-blocked">{blocked}</p>
+        <p className="mt-1.5 ml-[29px] text-[13px] text-ink-faint">{blocked}</p>
       )}
     </section>
   );
