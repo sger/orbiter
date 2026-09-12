@@ -1,6 +1,10 @@
 # Orbiter
 
-A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript. Inspection, device discovery, reviewed existing-signature installation, and a **Phase 3 Apple account sign-in preview** are implemented. The user confirmed installation and app operation on an already provisioned iPhone. Re-signing now produces a signed IPA from a reviewed plan; automatic weekly refresh remains unavailable. Live Apple sign-in now works in the desktop app: a personal account signed in and its team was listed and selected. Federated company accounts are not supported. Windows remains unverified.
+A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript.
+
+It exists for one problem: a company team's 100-device allowance is full, so testers outside it cannot install the company build. Orbiter re-signs that build with a tester's own free Apple ID and installs it on their iPhone.
+
+The whole path works and has been run end to end on a physical device: Apple sign-in, device registration, a development certificate whose key stays in this Mac's Keychain, App ID and profile registration, re-signing, installation, and the app launching. **Automatic weekly re-signing is not implemented** — a free team's profile expires after seven days and the build must be re-signed by hand. Federated company accounts are not supported. Windows is unverified.
 
 ## Run
 
@@ -11,7 +15,7 @@ npm ci
 npm run tauri dev
 ```
 
-Choose an IPA or drop one file into the desktop window. The UI reads real metadata through the Rust core. `npm run dev` runs a browser preview; native operations are disabled there. Only real connected-device data is shown; no sample accounts or successful signing results are provided.
+Choose an IPA or drop one file into the desktop window. The UI reads real metadata through the Rust core. `npm run dev` runs a browser preview; native operations are disabled there. Only real connected-device data is shown; no sample accounts or fabricated results are provided.
 
 Run inspection without the desktop shell:
 
@@ -59,7 +63,7 @@ cargo run --locked -p orbiter-core --bin orbiter-devices
 
 This CLI returns device display metadata and ephemeral transport IDs, not UDIDs or pairing secrets. If trust is missing, establish it in Finder or Apple's Windows device app and approve it on the phone. Orbiter does not initiate pairing. Discovery uses only `/var/run/usbmuxd` on macOS or loopback port 27015 on Windows, ignores remote-daemon environment overrides, and performs no account/portal requests.
 
-## Install an already-signed IPA (transport preview)
+## Install an already-signed IPA
 
 1. Select the company IPA and a paired USB iPhone.
 2. In **Install existing signature**, choose **Review installation**. This makes a private local snapshot, checks iPhone platform/OS support, executable inspection, profile expiry and the phone's profile membership, and queries only the selected bundle ID on the phone. It does not upload or install the IPA.
@@ -77,23 +81,22 @@ cargo run --locked -p orbiter-core --bin orbiter-install-review -- /path/to/comp
 
 Replace `1` with the ephemeral transport ID from `orbiter-devices`. The CLI discards its snapshot on exit. Review output includes app/device display information; handle it as private company information.
 
-The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time during this preview.
+The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time.
 
-### Local signing identity preview (macOS)
-
-In **Destination & identity**, click **Check Keychain** to list valid iOS signing identities from the current macOS Keychain search list. This is a read-only inventory; it does not export private keys, sign an IPA, contact Apple, or establish profile compatibility. Certificate names are labels, not proof of team authorization. A matching profile for each app/extension and a reviewed signing plan are still required before re-signing can be enabled. Apple account sign-in is available separately as an unvalidated live-account preview. Windows identity discovery is not implemented.
-
-
-## Apple account sign-in preview — local macOS support
+## Re-sign for a tester's Apple ID (macOS)
 
 1. Run `npm run tauri dev`. A connected iPhone or IPA is not required.
-2. Read **Local authentication & Apple communication**, confirm direct Apple authentication, and enter your test account/password in the application only. Local macOS authentication support is resolved as part of signing in; its failure stops sign-in and says so.
-4. Choose **Sign in to Apple**, complete trusted-device/SMS verification, and select the intended signing team explicitly.
-5. **Refresh teams** checks developer access again. **Sign out** clears the local session. Sessions expire on access after 30 minutes or when the process exits.
+2. Confirm direct Apple authentication and enter the tester's account and password in the application only. Local macOS authentication support is resolved as part of signing in; its failure stops sign-in and says so.
+3. Choose **Sign in to Apple**, complete trusted-device/SMS verification, and select the signing team explicitly. Nothing is auto-selected.
+4. Work through the four steps: register the iPhone on the team, get a development certificate, register the plan's rewritten identifiers and download their profiles, then **Re-sign IPA**.
+5. **Review installation** and install the re-signed build. On the iPhone, trust the developer under Settings → General → VPN & Device Management before launching; this is asked once per certificate.
+6. **Refresh teams** checks developer access again. **Sign out** clears the local session. Sessions expire on access after 30 minutes or when the process exits.
+
+The re-signed build installs under a rewritten bundle identifier, so it appears as a **second app** beside the company one rather than replacing it. Apple grants a free personal team no capabilities, so push notifications, universal links, Apple Pay and app-group sharing do not work in it, and any service that recognises the app by its bundle identifier — social sign-in, a backend that pins it — will not recognise the re-signed one until that identifier is registered with it.
 
 No remote Anisette provider or proxy fallback is available. Local support failure stops sign-in. Passwords/codes are never persisted; account sessions remain in memory. macOS manages its own authentication support data. Windows local authentication is not yet implemented. Direct Apple HTTPS access is required, including on corporate networks.
 
-Local generation passed on this Mac; live Apple sign-in still needs a designated test-account acceptance run. No provisioning/certificate/device mutation or re-signing is performed by account sign-in. **Sign & Install** remains unavailable. See [local authentication and data handling](docs/local-authentication.md), including cleanup of any obsolete state from the retired remote preview.
+Every step that writes to the Apple account — registering a device, requesting a certificate, registering identifiers — is behind its own explicit acknowledgement, and none happens automatically. See [local authentication and data handling](docs/local-authentication.md), including cleanup of any obsolete state from the retired remote preview.
 
 ## Device log capture (macOS)
 

@@ -410,19 +410,6 @@ function App() {
                 capability restrictions.
               </p>
             </section>
-            <details className="card advanced">
-              <summary>
-                Advanced options <ChevronDown size={16} />
-              </summary>
-              <div>
-                <p>
-                  Bundle changes, profile import, and Watch or extension removal
-                  require a reviewable signing plan. These options are not
-                  available yet.
-                </p>
-                <p>Your app identifiers and capabilities are left intact.</p>
-              </div>
-            </details>
           </section>
           <section className="card compatibility">
             <div className="section-heading">
@@ -555,9 +542,9 @@ function App() {
             <div className="action-label">
               <Clock3 size={16} />
               {signing
-                ? "Signing"
+                ? "Re-signing"
                 : signed
-                  ? "Signed build expires"
+                  ? "Re-signed build expires"
                   : preparation?.profiles.length
                     ? "Prepared profile expiration"
                     : app?.profile?.expires_at
@@ -571,7 +558,7 @@ function App() {
                     ? `${signStep.stage} · ${signStep.done} of ${signStep.total}`
                     : "Signing. This reads and rewrites the whole app, so it takes a while."
                   : signed
-                    ? `${date(signed.expires)} · Signed ${signed.bundles_signed} bundle(s)${
+                    ? `${date(signed.expires)} · Re-signed ${signed.bundles_signed} bundle(s)${
                         signed.removed.length
                           ? `, removed ${signed.removed.length}`
                           : ""
@@ -583,16 +570,16 @@ function App() {
                             .sort()[0],
                         )} · ${
                           certificate
-                            ? "Sign to produce an installable build. The original IPA is never changed."
-                            : "Get a signing certificate in step 3 before signing."
+                            ? "Re-sign to produce an installable build. The original IPA is never changed."
+                            : "Get a development certificate in step 3 before re-signing."
                         }`
                       : app?.profile?.expires_at
                         ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "The company build's own profile"}`
-                        : "Re-signing requires a signing certificate and prepared profiles. Use the existing-signature flow below for an authorized build.")}
+                        : "Re-signing needs a development certificate and prepared profiles. Use the existing-signature flow below for a build this iPhone is already provisioned for.")}
             </p>
             {signed && (
               <details className="signing-log">
-                <summary>What signing did</summary>
+                <summary>What re-signing did</summary>
                 <pre>{(signed.log ?? []).join("\n")}</pre>
               </details>
             )}
@@ -633,7 +620,7 @@ function App() {
                 });
             }}
           >
-            {signing ? "Signing…" : "Sign IPA"} <ArrowRight size={17} />
+            {signing ? "Re-signing…" : "Re-sign IPA"} <ArrowRight size={17} />
           </button>
         </section>
         <InstallSigned

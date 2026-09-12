@@ -43,14 +43,12 @@ test("browser preview keeps native and signing actions unavailable", async ({
   await expect(
     page.getByText("Browser preview.", { exact: false }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Re-sign IPA" }),
+  ).toBeDisabled();
   await expect(
     page.getByRole("button", { name: /Drop your IPA/ }),
   ).toBeDisabled();
-  await page.getByText("Advanced options", { exact: true }).click();
-  await expect(
-    page.getByText("Your app identifiers and capabilities are left intact."),
-  ).toBeVisible();
   await page.screenshot({ path: "test-results/preview.png", fullPage: true });
 });
 async function nativeMock(
@@ -355,7 +353,9 @@ test("selected file renders inspection and retains unavailable signing", async (
   await expect(
     page.getByText("Inspection complete", { exact: false }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Re-sign IPA" }),
+  ).toBeDisabled();
   await expect(page.getByLabel("Signing team")).toBeDisabled();
   await page.getByText("Bundle inspection details", { exact: false }).click();
   await page.getByText("Main app", { exact: true }).click();
@@ -376,7 +376,9 @@ test("failed inspection gives a recovery instruction and permits retry", async (
   await expect(
     page.getByRole("button", { name: /Drop your IPA/ }),
   ).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Re-sign IPA" }),
+  ).toBeDisabled();
 });
 test("cancel waits for worker acknowledgement and permits another inspection", async ({
   page,
@@ -434,7 +436,9 @@ test("device refresh removes disconnected selection and surfaces service errors"
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
   await expect(page.getByText("Synthetic service unavailable.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Re-sign IPA" }),
+  ).toBeDisabled();
 });
 
 async function readyForReview(
@@ -595,7 +599,9 @@ test("account flow works without a manual support check, requires consent, and n
   await expect(page.getByLabel("Signing team")).toHaveValue("");
   await page.getByLabel("Signing team").selectOption("TEAM2");
   await expect(page.getByLabel("Signing team")).toHaveValue("TEAM2");
-  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Re-sign IPA" }),
+  ).toBeDisabled();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   // Signing out clears the secrets, not the account address or the consent already given, so
   // signing back in needs only the password. The sign-in button must not be stuck disabled.
@@ -761,7 +767,7 @@ test("registering an iPhone needs a device, a team, and an explicit acknowledgem
   ).toEqual({ deviceId: 1, acknowledged: true });
   // The certificate is a separate acknowledgement: registering does not imply it.
   const certificate = page.getByRole("button", {
-    name: "Get signing certificate",
+    name: "Get development certificate",
   });
   await expect(certificate).toBeDisabled();
   await page
@@ -942,12 +948,14 @@ test("signing produces a separate build and the installer moves to it", async ({
   await page.getByLabel("Signing team").selectOption("TEAM2");
 
   // Nothing may be signed before there is a certificate and Apple has returned profiles.
-  const sign = page.getByRole("button", { name: "Sign IPA" });
+  const sign = page.getByRole("button", { name: "Re-sign IPA" });
   await expect(sign).toBeDisabled();
   await page
     .getByLabel("I understand this uses one of the team's", { exact: false })
     .check();
-  await page.getByRole("button", { name: "Get signing certificate" }).click();
+  await page
+    .getByRole("button", { name: "Get development certificate" })
+    .click();
   await expect(sign).toBeDisabled();
   await page
     .getByLabel("I understand ten identifiers per seven days", { exact: false })
@@ -959,11 +967,13 @@ test("signing produces a separate build and the installer moves to it", async ({
   await sign.click();
 
   // The result names the build that was produced, not the one that was chosen.
-  await expect(page.getByText("Signed build expires")).toBeVisible();
-  await expect(page.getByText("Signed 3 bundle(s), removed 1")).toBeVisible();
+  await expect(page.getByText("Re-signed build expires")).toBeVisible();
+  await expect(
+    page.getByText("Re-signed 3 bundle(s), removed 1"),
+  ).toBeVisible();
   await expect(page.getByText("Install the signed build")).toBeVisible();
   // The record of what happened is in the interface, not only in a terminal.
-  await page.getByText("What signing did").click();
+  await page.getByText("What re-signing did").click();
   await expect(
     page.getByText("signed main app as com.example.app.abc123"),
   ).toBeVisible();
@@ -1042,7 +1052,9 @@ test("withdrawing a certificate is offered only when it is the only way forward"
   await page
     .getByLabel("I understand this uses one of the team's", { exact: false })
     .check();
-  await page.getByRole("button", { name: "Get signing certificate" }).click();
+  await page
+    .getByRole("button", { name: "Get development certificate" })
+    .click();
 
   const withdraw = page.getByRole("button", {
     name: "Withdraw the team's certificate",
@@ -1169,15 +1181,17 @@ test("the device log is offered only for a signed build and keeps only its lines
   await page
     .getByLabel("I understand this uses one of the team's", { exact: false })
     .check();
-  await page.getByRole("button", { name: "Get signing certificate" }).click();
+  await page
+    .getByRole("button", { name: "Get development certificate" })
+    .click();
   await page
     .getByLabel("I understand ten identifiers per seven days", { exact: false })
     .check();
   await page
     .getByRole("button", { name: "Prepare identifiers & profiles" })
     .click();
-  await page.getByRole("button", { name: "Sign IPA" }).click();
-  await expect(page.getByText("Signed build expires")).toBeVisible();
+  await page.getByRole("button", { name: "Re-sign IPA" }).click();
+  await expect(page.getByText("Re-signed build expires")).toBeVisible();
 
   await page
     .getByRole("button", { name: "Capture while you reproduce it" })

@@ -6,7 +6,7 @@ Public sources rechecked on 2026-09-12. Source inspection is not an API integrat
 
 Use Tauri 2 and React/TypeScript for the desktop UI, Tokio for off-thread work, and an independent Rust core. Parsing uses `zip` with deflate only, `plist`, and RustCrypto `cms`/`der`. CMS decoding is portable and requires neither the macOS `security` executable nor OpenSSL. The small Mach-O inspector reads only bounded headers, load commands, and XML entitlement blobs; this is not signing-protocol implementation.
 
-Direct versions are exact and both Cargo/npm lockfiles are tracked. The chosen stable versions build locally; Vite 7 is retained because it supports this host's Node version. The authentication preview now pulls in isideload’s unconditional signing dependencies, but does not call its signer. Read-only discovery now uses exact-pinned `idevice` 0.1.65 with `usbmuxd` and `ring`, plus `afc`/`installation_proxy` for the unchanged-IPA installation preview. The repository manifest says 0.1.66, but that version was not published when queried; the downloaded 0.1.65 API was compiled and exercised.
+Direct versions are exact and both Cargo/npm lockfiles are tracked. The chosen stable versions build locally; Vite 7 is retained because it supports this host's Node version. Orbiter uses isideload's vendored authentication and portal APIs, and calls the `apple-codesign` fork it resolves directly from `signer.rs` — one copy of the signing implementation in the graph rather than two. Read-only discovery now uses exact-pinned `idevice` 0.1.65 with `usbmuxd` and `ring`, plus `afc`/`installation_proxy` for the unchanged-IPA installation preview. The repository manifest says 0.1.66, but that version was not published when queried; the downloaded 0.1.65 API was compiled and exercised.
 
 ## Evaluated projects
 
@@ -34,7 +34,7 @@ An IPA's supported device families and a profile's device list are metadata/snap
 
 `dependencies-aarch64-apple-darwin.json` records the resolved host Cargo graph and npm lockfile metadata. Regenerate with `python3 scripts/dependency-inventory.py`; pass a Rust target triple for another platform. This includes build/test dependencies and optional npm platform packages, not only shipped code.
 
-The host metadata includes MIT/Apache alternatives, BSD, Zlib, Unicode, and MPL-2.0. The MPL components include HTML/CSS helpers and an option utility (`cssparser`, `cssparser-macros`, `dtoa-short`, `selectors`, `option-ext`). The authentication increment now includes the unmodified MPL signing fork transitively; Orbiter does not yet invoke it. Preserve required notices, review MPL file-level obligations and any modified covered files, and generate actual distribution notices/license texts before release. Package metadata is an initial transitive review, not legal approval or a completed distribution license bundle. Windows-specific Cargo dependencies still need their own resolved inventory and review. First-party repository licensing has not been chosen on behalf of the company.
+The host metadata includes MIT/Apache alternatives, BSD, Zlib, Unicode, and MPL-2.0. The MPL components include HTML/CSS helpers and an option utility (`cssparser`, `cssparser-macros`, `dtoa-short`, `selectors`, `option-ext`). Orbiter now invokes the unmodified MPL-licensed signing fork (`isideload-apple-codesign`) directly: it is shipped code, not merely a transitive dependency, and its notice obligations apply in full. Preserve required notices, review MPL file-level obligations and any modified covered files, and generate actual distribution notices/license texts before release. Package metadata is an initial transitive review, not legal approval or a completed distribution license bundle. Windows-specific Cargo dependencies still need their own resolved inventory and review. First-party repository licensing has not been chosen on behalf of the company.
 
 The discovery increment adds idevice/ring/TLS dependencies to the generated host license inventory. Published metadata declares idevice MIT, ring Apache-2.0 AND ISC (both notice sets), rustls Apache-2.0 OR ISC OR MIT, and untrusted ISC. This was true for the discovery increment; the local account preview now links the authentication adapter. The existing no-plaintext/no-secret-logging rules also apply to device pairing material; upstream verbose protocol logs are filtered out.
 
@@ -47,11 +47,6 @@ The downloaded idevice 0.1.65 source provides AFC chunk writes and InstallationP
 `tempfile`, SHA-256 (`sha2`), and UUID v4 support private snapshots, reviewed-byte identity, atomic journal replacement, and staging ownership. The dependency inventory was regenerated for the enabled installation features. These are not Apple signing or authentication libraries.
 
 The installation additions declare MIT (async_zip) or MIT/Apache alternatives (async-compression, compression-codecs, sha2, tempfile, uuid). No missing license metadata was found in the regenerated host inventory; Windows-specific review and release notice assembly remain pending.
-
-## Start signing with local identities
-
-The first signing increment inventories existing macOS identities using the OS-supplied `security` command. Its installed help documents `find-identity -v -p codesigning` as valid-identity discovery in the current Keychain search list. This avoids introducing an authentication support service just to discover existing certificates. It does not replace the planned portable signing/authentication work. No signing library or remote service is added. Certificate labels are filtered for presentation only; a future signing plan must compare actual certificates, profiles, device authorization, and per-bundle entitlements.
-
 
 ## Local authentication decision — 2026-09-12
 

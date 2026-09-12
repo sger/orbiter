@@ -284,19 +284,6 @@ header {
   line-height: 1.65;
   margin-bottom: 0;
 }
-.advanced summary {
-  display: flex;
-  justify-content: space-between;
-  font-size: 14px;
-  padding: 16px 21px;
-  cursor: pointer;
-  list-style: none;
-}
-.advanced > div {
-  padding: 0 21px 14px;
-  font-size: 14px;
-  color: #758573;
-}
 summary::-webkit-details-marker {
   display: none;
 }
@@ -923,14 +910,6 @@ details[open] > summary > svg {
 }
 .accounts .secondary {
   margin: 12px 0;
-}
-.auth-disclosure {
-  margin: 12px 0;
-  font-size: 14px;
-  line-height: 1.6;
-}
-.auth-disclosure summary {
-  cursor: pointer;
 }
 .auth-consent {
   display: flex;

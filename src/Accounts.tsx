@@ -242,30 +242,16 @@ export function Accounts({
           }}
         >
           <p className="hint">
-            Four steps prepare this team to sign the build: sign in, register
-            the iPhone, get a certificate, and register the identifiers. Signing
-            itself is still being built.
+            Four steps prepare this team to re-sign the build: sign in, register
+            the iPhone, get a development certificate, and register the
+            identifiers.
           </p>
-          <details className="auth-disclosure">
-            <summary>Local authentication & Apple communication</summary>
-            <p>
-              Authentication support is generated using Apple frameworks on this
-              Mac. Orbiter’s authentication requests go directly to Apple over
-              HTTPS; remote support servers and proxy settings are disabled.
-            </p>
-            <p>
-              Your Apple account email, authentication exchange, verification
-              code, and local device authentication data are used with Apple.
-              Passwords and codes are not saved. Account sessions stay in memory
-              and expire locally after 30 minutes or when Orbiter closes. macOS
-              manages its own authentication support data.
-            </p>
-            <p>
-              This preview uses private macOS APIs that may change. If local
-              support fails, sign-in stops. Windows local authentication is not
-              implemented.
-            </p>
-          </details>
+          <p className="hint">
+            Orbiter authenticates directly with Apple over HTTPS using macOS's
+            own authentication support; no proxy or remote server is involved.
+            Passwords and codes are never saved, and the session stays in memory
+            and expires after 30 minutes.
+          </p>
           <label className="auth-consent">
             <input
               type="checkbox"
@@ -530,7 +516,7 @@ export function Accounts({
                   {registration.team_devices}.
                 </p>
               )}
-              <strong className="step">3 · Signing certificate</strong>
+              <strong className="step">3 · Development certificate</strong>
               <p className="hint">
                 The signing key is generated on this Mac and never leaves it;
                 only a certificate request goes to Apple. It is kept in this
@@ -577,7 +563,7 @@ export function Accounts({
               >
                 {certBusy
                   ? "Requesting certificate…"
-                  : "Get signing certificate"}
+                  : "Get development certificate"}
               </button>
               <p className="hint" role="status">
                 {certError ??
