@@ -356,7 +356,7 @@ test("selected file renders inspection and retains unavailable signing", async (
   await expect(
     page.getByRole("button", { name: "Re-sign IPA" }),
   ).toBeDisabled();
-  await expect(page.getByLabel("Signing team")).toBeDisabled();
+  await expect(page.getByLabel("Signing team", { exact: true })).toBeDisabled();
   await page.getByText("Bundle inspection details", { exact: false }).click();
   await page.getByText("Main app", { exact: true }).click();
   await expect(
@@ -414,7 +414,9 @@ test("device refresh removes disconnected selection and surfaces service errors"
     };
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
-  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await expect(page.getByLabel("Physical iPhone", { exact: true })).toHaveValue(
+    "1",
+  );
   await expect(page.getByText("Synthetic pairing verified.")).toBeVisible();
   await page.evaluate(() => {
     (window as any).__deviceResult = {
@@ -424,8 +426,12 @@ test("device refresh removes disconnected selection and surfaces service errors"
     };
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
-  await expect(page.getByLabel("Physical iPhone")).toHaveValue("");
-  await expect(page.getByLabel("Physical iPhone")).toBeDisabled();
+  await expect(page.getByLabel("Physical iPhone", { exact: true })).toHaveValue(
+    "",
+  );
+  await expect(
+    page.getByLabel("Physical iPhone", { exact: true }),
+  ).toBeDisabled();
   await expect(page.getByText("Synthetic pairing verified.")).toHaveCount(0);
   await page.evaluate(() => {
     (window as any).__deviceResult = {
@@ -596,9 +602,14 @@ test("account flow works without a manual support check, requires consent, and n
   ).toBeDisabled();
   await page.getByLabel("Verification code").fill("123456");
   await page.getByRole("button", { name: "Verify code" }).click();
-  await expect(page.getByLabel("Signing team")).toHaveValue("");
-  await page.getByLabel("Signing team").selectOption("TEAM2");
-  await expect(page.getByLabel("Signing team")).toHaveValue("TEAM2");
+  await expect(page.getByLabel("Signing team", { exact: true })).toHaveValue(
+    "",
+  );
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
+  await page.getByRole("button", { name: "Change Signing team" }).click();
+  await expect(page.getByLabel("Signing team", { exact: true })).toHaveValue(
+    "TEAM2",
+  );
   await expect(
     page.getByRole("button", { name: "Re-sign IPA" }),
   ).toBeDisabled();
@@ -614,7 +625,7 @@ test("account flow works without a manual support check, requires consent, and n
       exact: false,
     }),
   ).toBeChecked();
-  await expect(page.getByLabel("Signing team")).toBeDisabled();
+  await expect(page.getByLabel("Signing team", { exact: true })).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Sign in to Apple" }),
   ).toBeDisabled();
@@ -639,7 +650,7 @@ test("provisioning replaces unverified findings with what the team established",
   await page.getByRole("button", { name: "Sign in to Apple" }).click();
   await page.getByLabel("Verification code").fill("123456");
   await page.getByRole("button", { name: "Verify code" }).click();
-  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
   await page
     .getByLabel("I understand ten identifiers per seven days", { exact: false })
     .check();
@@ -670,7 +681,7 @@ test("provisioning replaces unverified findings with what the team established",
   await expect(page.getByText("Prepared profile expiration")).toBeVisible();
 
   // Changing the IPA invalidates all of it rather than describing a build that is gone.
-  await page.getByRole("button", { name: "Change" }).click();
+  await page.getByRole("button", { name: "Change", exact: true }).click();
   await expect(page.getByText("Identifiers and profiles prepared")).toHaveCount(
     0,
   );
@@ -735,7 +746,9 @@ test("registering an iPhone needs a device, a team, and an explicit acknowledgem
     };
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
-  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await expect(page.getByLabel("Physical iPhone", { exact: true })).toHaveValue(
+    "1",
+  );
   await page.getByLabel("Apple account email").fill("test@example.invalid");
   await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
   await page
@@ -748,7 +761,7 @@ test("registering an iPhone needs a device, a team, and an explicit acknowledgem
   await expect(
     page.getByRole("button", { name: "Register iPhone on team" }),
   ).toHaveCount(0);
-  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
   const register = page.getByRole("button", {
     name: "Register iPhone on team",
   });
@@ -786,6 +799,10 @@ test("registering an iPhone needs a device, a team, and an explicit acknowledgem
     (window as any).__certificateFailure =
       "Apple refused the request: this team already has 2 active development certificate(s), its maximum. Revoke one at developer.apple.com if it is no longer in use.";
   });
+  // The step collapsed once it succeeded, so asking again means reopening it, as a person would.
+  await page
+    .getByRole("button", { name: "Change Development certificate" })
+    .click();
   await certificate.click();
   await expect(
     page.getByText("already has 2 active development certificate", {
@@ -796,8 +813,10 @@ test("registering an iPhone needs a device, a team, and an explicit acknowledgem
     (window as any).__certificateFailure = undefined;
   });
 
-  // Changing the team invalidates the result rather than carrying it across.
-  await page.getByLabel("Signing team").selectOption("TEAM1");
+  // Changing the team invalidates the result rather than carrying it across. The step collapsed
+  // when it was satisfied, so reopening it is how a person gets back to the control.
+  await page.getByRole("button", { name: "Change Signing team" }).click();
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM1");
   await expect(
     page.getByText("now registered on the selected team", { exact: false }),
   ).toHaveCount(0);
@@ -828,9 +847,10 @@ test("cancelled verification clears secrets and failed team refresh clears selec
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await signIn();
   await page.getByRole("button", { name: "Send SMS", exact: false }).click();
-  await page.getByLabel("Signing team").selectOption("TEAM1");
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM1");
+  await page.getByRole("button", { name: "Change Signing team" }).click();
   await page.getByRole("button", { name: "Refresh teams" }).click();
-  await expect(page.getByLabel("Signing team")).toBeDisabled();
+  await expect(page.getByLabel("Signing team", { exact: true })).toBeDisabled();
   await expect(
     page.getByText("Developer session could not be refreshed.", {
       exact: false,
@@ -888,7 +908,7 @@ test("a Watch app must be decided before any identifier is registered", async ({
   await page.getByRole("button", { name: "Sign in to Apple" }).click();
   await page.getByLabel("Verification code").fill("123456");
   await page.getByRole("button", { name: "Verify code" }).click();
-  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
   await page
     .getByLabel("I understand ten identifiers per seven days", { exact: false })
     .check();
@@ -902,7 +922,7 @@ test("a Watch app must be decided before any identifier is registered", async ({
     page.getByText("Choose what happens to the Watch app."),
   ).toBeVisible();
 
-  await page.getByLabel("Watch app").selectOption("remove");
+  await page.getByLabel("Watch app", { exact: true }).selectOption("remove");
   await expect(prepare).toBeEnabled();
   await prepare.click();
   // The choice reaches the backend, which decides what it means for the plan.
@@ -936,7 +956,9 @@ test("signing produces a separate build and the installer moves to it", async ({
     };
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
-  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await expect(page.getByLabel("Physical iPhone", { exact: true })).toHaveValue(
+    "1",
+  );
   await page.getByLabel("Apple account email").fill("test@example.invalid");
   await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
   await page
@@ -945,7 +967,7 @@ test("signing produces a separate build and the installer moves to it", async ({
   await page.getByRole("button", { name: "Sign in to Apple" }).click();
   await page.getByLabel("Verification code").fill("123456");
   await page.getByRole("button", { name: "Verify code" }).click();
-  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
 
   // Nothing may be signed before there is a certificate and Apple has returned profiles.
   const sign = page.getByRole("button", { name: "Re-sign IPA" });
@@ -1043,7 +1065,7 @@ test("withdrawing a certificate is offered only when it is the only way forward"
   await page.getByRole("button", { name: "Sign in to Apple" }).click();
   await page.getByLabel("Verification code").fill("123456");
   await page.getByRole("button", { name: "Verify code" }).click();
-  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
 
   // Not offered until Apple has actually refused for that reason.
   await expect(
@@ -1125,7 +1147,9 @@ test("a signed build says how to trust it before it will launch", async ({
     };
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
-  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await expect(page.getByLabel("Physical iPhone", { exact: true })).toHaveValue(
+    "1",
+  );
 
   // An unchanged company build is already trusted on a provisioned device: no instruction.
   await page.getByRole("button", { name: "Review installation" }).click();
@@ -1164,7 +1188,9 @@ test("the device log is offered only for a signed build and keeps only its lines
     };
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
-  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await expect(page.getByLabel("Physical iPhone", { exact: true })).toHaveValue(
+    "1",
+  );
 
   // Nothing to diagnose before there is a build Orbiter signed.
   await expect(page.getByText("Device log")).toHaveCount(0);
@@ -1177,7 +1203,7 @@ test("the device log is offered only for a signed build and keeps only its lines
   await page.getByRole("button", { name: "Sign in to Apple" }).click();
   await page.getByLabel("Verification code").fill("123456");
   await page.getByRole("button", { name: "Verify code" }).click();
-  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
   await page
     .getByLabel("I understand this uses one of the team's", { exact: false })
     .check();
@@ -1209,4 +1235,60 @@ test("the device log is offered only for a signed build and keeps only its lines
   expect(
     await page.evaluate(() => (window as any).__logRequested?.subjects),
   ).toContain("com.example.app.abc123");
+});
+
+test("help explains the losses without the panels having to", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  // Closed until asked for: it must not occupy the window by default.
+  await expect(page.getByRole("dialog", { name: "Help" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Help" }).click();
+  const help = page.getByRole("dialog", { name: "Help" });
+  await expect(help).toBeVisible();
+  // The four capability losses and the seven-day rule are stated in one place.
+  await expect(help.getByText("Push notifications")).toBeVisible();
+  await expect(help.getByText("The seven-day limit")).toBeVisible();
+  await expect(
+    help.getByText("Untrusted Developer", { exact: false }).first(),
+  ).toBeVisible();
+  // The work stays visible beside it rather than being covered.
+  await expect(
+    page.getByRole("button", { name: /Drop your IPA/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close help" }).click();
+  await expect(page.getByRole("dialog", { name: "Help" })).toHaveCount(0);
+});
+
+test("a finished step collapses to its result and can be reopened", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+
+  // Unfinished: the control is there and there is nothing to collapse.
+  const select = page.getByLabel("Signing team", { exact: true });
+  await expect(select).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Change Signing team" }),
+  ).toHaveCount(0);
+
+  await select.selectOption("TEAM2");
+  // Finished: the control gives way to what it established.
+  await expect(select).toHaveCount(0);
+  await expect(page.locator(".stage-summary").first()).toContainText(
+    "Free personal team",
+  );
+
+  // And it is never a dead end: the choice can be revisited.
+  await page.getByRole("button", { name: "Change Signing team" }).click();
+  await expect(select).toBeVisible();
+  await expect(select).toHaveValue("TEAM2");
 });

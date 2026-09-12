@@ -14,6 +14,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowRight,
   Box,
+  CircleHelp,
   Check,
   ChevronDown,
   Clock3,
@@ -36,12 +37,18 @@ import type {
   SigningProgress,
   TeamStatus,
 } from "./types";
-import { hasWatchApp, signBlocked, type Pipeline } from "./state/pipeline";
+import {
+  hasWatchApp,
+  signBlocked,
+  stages,
+  type Pipeline,
+} from "./state/pipeline";
 import "./styles.css";
 import { Devices } from "./features/device/Devices";
 import { InstallSigned } from "./features/install/InstallSigned";
 import { DeviceLog } from "./features/diagnose/DeviceLog";
-const stages = [
+import { HelpPanel } from "./features/help/HelpPanel";
+const inspectionStages = [
   "Checking archive",
   "Reading bundles and signatures",
   "Assessing compatibility",
@@ -197,7 +204,7 @@ function App() {
     setIpaPath(null);
     setError("");
     setCancelled(false);
-    setStage(stages[0]);
+    setStage(inspectionStages[0]);
     const progress = channel<string>(setStage);
     try {
       setReport(await inspectIpa(path, progress));
@@ -262,6 +269,12 @@ function App() {
     }
   }
   const app = report?.bundles.find((b) => b.path === report.main_path);
+  const [help, setHelp] = useState(false);
+  const [helpSection, setHelpSection] = useState<string | null>(null);
+  const openHelp = useCallback((section: string) => {
+    setHelpSection(section);
+    setHelp(true);
+  }, []);
   const pipeline: Pipeline = {
     report,
     ipaPath,
@@ -271,6 +284,7 @@ function App() {
     signed,
   };
   const blocked = signBlocked(pipeline);
+  const steps = stages(pipeline);
   const frameworks =
     report?.bundles.filter((b) => b.kind === "Framework").length ?? 0;
   const nested =
@@ -283,12 +297,28 @@ function App() {
         <a className="brand" href="#" aria-label="Orbiter home">
           <Orbit size={29} />
         </a>
-        <div className="rail-active" title="Install workspace">
-          <Box size={21} />
-        </div>
-        <div className="rail-bottom" title="Local inspection">
-          <ShieldCheck size={19} />
-        </div>
+        {/* Where you are in the pipeline, without scrolling the column to find out. */}
+        <ol className="rail-progress" aria-label="Progress">
+          {steps.map((entry) => (
+            <li key={entry.id} className={entry.state} title={entry.title}>
+              <span className="sr-only">
+                {entry.title}: {entry.state}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <button
+          className="rail-help"
+          title="Help"
+          aria-label="Help"
+          aria-expanded={help}
+          onClick={() => {
+            setHelpSection(null);
+            setHelp((open) => !open);
+          }}
+        >
+          <CircleHelp size={19} />
+        </button>
       </aside>
       <main>
         <header>
@@ -431,6 +461,7 @@ function App() {
                 hasWatchApp={hasWatchApp(report)}
                 onPrepared={prepared}
                 onStatus={setTeam}
+                onHelp={openHelp}
               />
               <p className="hint">
                 A different account on the same company team shares that team's
@@ -552,10 +583,12 @@ function App() {
               )}
             </div>
             <div className="stages">
-              {stages.map((s, i) => (
+              {inspectionStages.map((s, i) => (
                 <span
                   className={
-                    report || stages.indexOf(stage) >= i ? "reached" : ""
+                    report || inspectionStages.indexOf(stage) >= i
+                      ? "reached"
+                      : ""
                   }
                   key={s}
                 >
@@ -682,6 +715,11 @@ function App() {
           <span>Inspection & install transport · macOS & Windows targets</span>
         </footer>
       </main>
+      <HelpPanel
+        open={help}
+        section={helpSection}
+        onClose={() => setHelp(false)}
+      />
     </div>
   );
 }

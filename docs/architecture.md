@@ -165,3 +165,11 @@ Components never name a command string. The whole IPC surface is one file, so wh
 `state/pipeline.ts` exists because of a real defect. Each control used to derive its own enabled state from whatever was in scope, and "Re-sign IPA" ended up clickable in a session holding no certificate: the button knew about prepared profiles and nothing else, so it offered an action the backend then refused with a sentence the screen never showed. Gates now come from `signBlocked` and `installBlocked` over one `Pipeline` value, and each returns the sentence explaining the refusal — so a disabled control and the reason beside it cannot disagree. The order of the checks is deliberate: the earliest unmet requirement is the one a person can act on.
 
 The team panel reports one `TeamStatus` upward rather than several callbacks, which keeps the derivation above it and stops the same state being reconstructed in two places.
+
+### Stages and help
+
+Each step of the pipeline renders as a stage: a heading, its controls while it needs attention, and its result once it has one. A satisfied stage collapses to that result, because the column previously showed every control of every step at once and the one thing to do next was indistinguishable from the six already done.
+
+Collapsing is not sequencing. Apple does not require a registered device before issuing a certificate, and identifiers can be registered before either; only the prerequisites that genuinely exist gate a step. A collapsed stage always offers **Change**, so a completed step is never a dead end — a team, a Watch choice or a device can all be revisited.
+
+The rail carries one dot per stage, so the position in the pipeline is visible without scrolling, and a Help button opening a slide-over beside the work rather than a modal over it. Help holds the prose the panels used to carry: what Orbiter does, what a free team cannot carry and why, the seven-day limit, the "Untrusted Developer" step, what is stored, and how to diagnose a failure — including that a web view's failures never reach the device log. Each stage links to its section, which is what allows the stages themselves to be a control and a result rather than three paragraphs.

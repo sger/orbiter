@@ -10,6 +10,8 @@ import {
   withdrawCertificates,
 } from "../../ipc/commands";
 import { invoke } from "@tauri-apps/api/core";
+import { Stage } from "../../app/Stage";
+import type { StageState } from "../../state/pipeline";
 import type {
   AccountView,
   Certificate,
@@ -34,6 +36,7 @@ export function Accounts({
   hasWatchApp,
   onPrepared,
   onStatus,
+  onHelp,
 }: {
   paused: boolean;
   deviceId: number | null;
@@ -44,6 +47,8 @@ export function Accounts({
   /// Everything above this panel needs to know, in one shape: the pipeline derives its gates from
   /// it, the header shows the account, and the signer is given the same Watch choice the plan had.
   onStatus: (status: TeamStatus) => void;
+  /// Opens the help panel at the section that explains this step.
+  onHelp: (section: string) => void;
 }) {
   const [view, setView] = useState<AccountView>(initial);
   const [email, setEmail] = useState("");
@@ -185,6 +190,23 @@ export function Accounts({
       if (mounted.current) setBusy(false);
     }
   }
+  /// A step collapses to its result once it is done, and stays open until then.
+  ///
+  /// It does not impose an order beyond the real one. Apple does not require a registered device
+  /// before issuing a certificate, and identifiers can be registered before either; pretending
+  /// otherwise would block work that is actually allowed. Only the prerequisites that genuinely
+  /// exist — an account, and a chosen team — gate a step, and those already gate the whole panel.
+  const stageState = (done: boolean, reachable: boolean): StageState =>
+    done ? "done" : reachable ? "current" : "waiting";
+  const teamLabel = team
+    ? `${team.name}${
+        team.free === true
+          ? " · Free personal team"
+          : team.free === false
+            ? ` · ${team.membership ?? "Paid membership"}`
+            : ""
+      }`
+    : null;
   const active = view.stage === "signing_in" || view.stage === "two_factor";
   const disabled = !desktop || !ready || busy || paused;
   const signInBlocker = !desktop
@@ -373,371 +395,422 @@ export function Accounts({
       )}
       {signedIn && (
         <>
-          <strong className="step">1 · Signing team</strong>
-          <label htmlFor="team">Signing team</label>
-          <select
-            id="team"
-            disabled={disabled || !view.teams.length}
-            value={view.selected_team ?? ""}
-            onChange={(e) =>
-              void command("account_select_team", { id: e.target.value })
-            }
+          <Stage
+            index={1}
+            title="Signing team"
+            state={stageState(!!view.selected_team, true)}
+            summary={teamLabel ?? ""}
+            help="what"
+            onHelp={onHelp}
           >
-            <option value="" disabled>
-              Select a team
-            </option>
-            {view.teams.map((team) => (
-              <option value={team.id} key={team.id}>
-                {team.name} · {team.id}
-                {team.kind ? ` · ${team.kind}` : ""}
-                {team.free === true
-                  ? " · Free personal team"
-                  : team.free === false
-                    ? ` · ${team.membership ?? "Paid membership"}`
-                    : ""}
+            <label htmlFor="team">Signing team</label>
+            <select
+              id="team"
+              disabled={disabled || !view.teams.length}
+              value={view.selected_team ?? ""}
+              onChange={(e) =>
+                void command("account_select_team", { id: e.target.value })
+              }
+            >
+              <option value="" disabled>
+                Select a team
               </option>
-            ))}
-          </select>
-          {!view.teams.length && (
-            <p className="hint">
-              Apple returned no developer teams for this account. If it has
-              never been used for development, accept the Apple Developer
-              Agreement once at developer.apple.com and refresh.
-            </p>
-          )}
-          {(() => {
-            const team = view.teams.find((t) => t.id === view.selected_team);
-            if (!team) return null;
-            // What the chosen team means for re-signing, stated before any signing exists.
-            return (
-              <p className="hint" role="status">
-                {team.free === true
-                  ? "Free personal team: profiles expire after seven days, so the app must be re-signed weekly, and capabilities this team cannot create are removed from the build."
-                  : team.free === false
-                    ? "Paid membership: installs use this team's device allowance, which is shared with everyone signing on it."
-                    : `Apple's answer does not establish whether this is a free personal team or a paid membership, so expiry and capability limits are unknown.${
-                        team.membership
-                          ? ` Apple reported the membership as "${team.membership}".`
-                          : " Apple reported no membership."
-                      }`}
+              {view.teams.map((team) => (
+                <option value={team.id} key={team.id}>
+                  {team.name} · {team.id}
+                  {team.kind ? ` · ${team.kind}` : ""}
+                  {team.free === true
+                    ? " · Free personal team"
+                    : team.free === false
+                      ? ` · ${team.membership ?? "Paid membership"}`
+                      : ""}
+                </option>
+              ))}
+            </select>
+            {!view.teams.length && (
+              <p className="hint">
+                Apple returned no developer teams for this account. If it has
+                never been used for development, accept the Apple Developer
+                Agreement once at developer.apple.com and refresh.
               </p>
-            );
-          })()}
-          <button
-            className="text-button"
-            disabled={disabled}
-            onClick={() => void command("account_refresh_teams")}
-          >
-            Refresh teams
-          </button>
+            )}
+            {(() => {
+              const team = view.teams.find((t) => t.id === view.selected_team);
+              if (!team) return null;
+              // What the chosen team means for re-signing, stated before any signing exists.
+              return (
+                <p className="hint" role="status">
+                  {team.free === true
+                    ? "Free personal team: profiles expire after seven days, so the app must be re-signed weekly, and capabilities this team cannot create are removed from the build."
+                    : team.free === false
+                      ? "Paid membership: installs use this team's device allowance, which is shared with everyone signing on it."
+                      : `Apple's answer does not establish whether this is a free personal team or a paid membership, so expiry and capability limits are unknown.${
+                          team.membership
+                            ? ` Apple reported the membership as "${team.membership}".`
+                            : " Apple reported no membership."
+                        }`}
+                </p>
+              );
+            })()}
+            <button
+              className="text-button"
+              disabled={disabled}
+              onClick={() => void command("account_refresh_teams")}
+            >
+              Refresh teams
+            </button>
+          </Stage>
           {view.selected_team && (
             <div className="register-device">
-              <strong className="step">2 · Register this iPhone</strong>
-              <p className="hint">
-                Re-signing for a device requires it registered on the signing
-                team. This writes to your Apple account; nothing else is
-                changed, and the device identifier is sent only to Apple.
-              </p>
-              <label className="auth-consent">
-                <input
-                  type="checkbox"
-                  checked={registerAck}
-                  disabled={disabled || registering || !deviceId}
-                  onChange={(e) => setRegisterAck(e.target.checked)}
-                />
-                I understand a free personal team allows three devices, and a
-                paid team consumes one of its 100 slots for the membership year,
-                which removing the device later does not return.
-              </label>
-              <button
-                className="secondary"
-                disabled={disabled || registering || !deviceId || !registerAck}
-                onClick={() => {
-                  setRegistering(true);
-                  setRegisterError(null);
-                  setRegistration(null);
-                  registerDevice(deviceId!, registerAck)
-                    .then((result) => {
-                      if (mounted.current) setRegistration(result);
-                    })
-                    .catch((error) => {
-                      if (mounted.current)
-                        setRegisterError(
-                          reason(
-                            error,
-                            "Registration did not complete. Check the account at developer.apple.com before trying again.",
-                          ),
-                        );
-                    })
-                    .finally(() => {
-                      if (mounted.current) setRegistering(false);
-                    });
-                }}
+              <Stage
+                index={2}
+                title="Register this iPhone"
+                state={stageState(!!registration, true)}
+                summary={registration?.message ?? ""}
+                help="what"
+                onHelp={onHelp}
               >
-                {registering ? "Registering…" : "Register iPhone on team"}
-              </button>
-              <p className="hint" role="status">
-                {registerError ??
-                  registration?.message ??
-                  (!deviceId
-                    ? "Select a connected iPhone above first."
-                    : !registerAck
-                      ? "Acknowledge the device allowance to enable registration."
-                      : "Ready to register.")}
-              </p>
-              {registration && (
                 <p className="hint">
-                  Devices on this team after the check:{" "}
-                  {registration.team_devices}.
+                  Re-signing for a device requires it registered on the signing
+                  team. This writes to your Apple account; nothing else is
+                  changed, and the device identifier is sent only to Apple.
                 </p>
-              )}
-              <strong className="step">3 · Development certificate</strong>
-              <p className="hint">
-                The signing key is generated on this Mac and never leaves it;
-                only a certificate request goes to Apple. It is kept in this
-                Mac's Keychain for this account and team, so a restart reuses
-                the same certificate instead of spending another slot.
-              </p>
-              <label className="auth-consent">
-                <input
-                  type="checkbox"
-                  checked={certAck}
-                  disabled={disabled || certBusy}
-                  onChange={(e) => setCertAck(e.target.checked)}
-                />
-                I understand this uses one of the team's few active certificate
-                slots, and that Orbiter will never revoke a certificate, because
-                revoking invalidates every app already signed with it.
-              </label>
-              <button
-                className="secondary"
-                disabled={disabled || certBusy || !certAck}
-                onClick={() => {
-                  setCertBusy(true);
-                  setCertError(null);
-                  setCertificate(null);
-                  requestCertificate(certAck)
-                    .then((result) => {
-                      if (mounted.current) setCertificate(result);
-                    })
-                    .catch((error) => {
-                      if (mounted.current)
-                        setCertError(
-                          reason(
-                            error,
-                            "The certificate request did not complete. Check developer.apple.com before requesting another.",
-                          ),
-                        );
-                    })
-                    .finally(() => {
-                      if (mounted.current) setCertBusy(false);
-                    });
-                }}
-              >
-                {certBusy
-                  ? "Requesting certificate…"
-                  : "Get development certificate"}
-              </button>
-              <p className="hint" role="status">
-                {certError ??
-                  certificate?.message ??
-                  (certAck
-                    ? "Ready to request. Generating the key takes a moment."
-                    : "Acknowledge the certificate limit to enable the request.")}
-              </p>
-              {certificate && (
-                <p className="hint">
-                  Active development certificates on this team:{" "}
-                  {certificate.active}
-                  {certificate.expires
-                    ? `. This one expires ${certificate.expires}.`
-                    : "."}
+                <label className="auth-consent">
+                  <input
+                    type="checkbox"
+                    checked={registerAck}
+                    disabled={disabled || registering || !deviceId}
+                    onChange={(e) => setRegisterAck(e.target.checked)}
+                  />
+                  I understand a free personal team allows three devices, and a
+                  paid team consumes one of its 100 slots for the membership
+                  year, which removing the device later does not return.
+                </label>
+                <button
+                  className="secondary"
+                  disabled={
+                    disabled || registering || !deviceId || !registerAck
+                  }
+                  onClick={() => {
+                    setRegistering(true);
+                    setRegisterError(null);
+                    setRegistration(null);
+                    registerDevice(deviceId!, registerAck)
+                      .then((result) => {
+                        if (mounted.current) setRegistration(result);
+                      })
+                      .catch((error) => {
+                        if (mounted.current)
+                          setRegisterError(
+                            reason(
+                              error,
+                              "Registration did not complete. Check the account at developer.apple.com before trying again.",
+                            ),
+                          );
+                      })
+                      .finally(() => {
+                        if (mounted.current) setRegistering(false);
+                      });
+                  }}
+                >
+                  {registering ? "Registering…" : "Register iPhone on team"}
+                </button>
+                <p className="hint" role="status">
+                  {registerError ??
+                    registration?.message ??
+                    (!deviceId
+                      ? "Select a connected iPhone above first."
+                      : !registerAck
+                        ? "Acknowledge the device allowance to enable registration."
+                        : "Ready to register.")}
                 </p>
-              )}
-              {certError?.includes("which is its maximum") && (
-                <>
-                  <label className="auth-consent">
-                    <input
-                      type="checkbox"
-                      checked={withdrawAck}
-                      disabled={disabled || certBusy}
-                      onChange={(e) => setWithdrawAck(e.target.checked)}
-                    />
-                    I understand withdrawing this team's certificate stops every
-                    app already signed with it from launching, on every device,
-                    and that this cannot be undone.
-                  </label>
-                  <button
-                    className="secondary"
-                    disabled={disabled || certBusy || !withdrawAck}
-                    onClick={() => {
-                      setCertBusy(true);
-                      setCertError(null);
-                      setCertificate(null);
-                      withdrawCertificates(withdrawAck)
-                        .then((message) => {
-                          if (mounted.current)
-                            setCertError(
-                              reason(message, "The certificate was withdrawn."),
-                            );
-                        })
-                        .catch((error) => {
-                          if (mounted.current)
-                            setCertError(
-                              reason(
-                                error,
-                                "The certificate could not be withdrawn.",
-                              ),
-                            );
-                        })
-                        .finally(() => {
-                          if (mounted.current) setCertBusy(false);
-                        });
-                    }}
-                  >
-                    Withdraw the team's certificate
-                  </button>
-                </>
-              )}
-              <button
-                className="text-button"
-                disabled={disabled || certBusy}
-                onClick={() => {
-                  setCertBusy(true);
-                  setCertError(null);
-                  setCertificate(null);
-                  forgetSigningKey()
-                    .then((message) => {
-                      if (mounted.current)
-                        setCertError(reason(message, "Signing key removed."));
-                    })
-                    .catch((error) => {
-                      if (mounted.current)
-                        setCertError(
-                          reason(
-                            error,
-                            "The stored signing key could not be removed.",
-                          ),
-                        );
-                    })
-                    .finally(() => {
-                      if (mounted.current) setCertBusy(false);
-                    });
-                }}
-              >
-                Forget stored signing key
-              </button>
-              <strong className="step">4 · App identifiers and profiles</strong>
-              <p className="hint">
-                Registers the plan's rewritten identifiers on this team and
-                downloads their profiles. Apple, not Orbiter, decides which
-                capabilities the identifiers may carry.
-              </p>
-              {hasWatchApp && (
-                <>
-                  <label htmlFor="watch-choice">Watch app</label>
-                  <select
-                    id="watch-choice"
-                    value={watch}
-                    disabled={disabled || provBusy}
-                    onChange={(e) => setWatch(e.target.value as WatchChoice)}
-                  >
-                    <option value="undecided">Choose what happens to it</option>
-                    <option value="remove">
-                      Remove it — the iPhone app installs without the Watch app
-                    </option>
-                    <option value="sign">
-                      Sign it too — unverified on this team, and it spends
-                      another identifier
-                    </option>
-                  </select>
+                {registration && (
                   <p className="hint">
-                    This build includes a Watch app. It is never dropped
-                    silently, so choose before identifiers are registered.
+                    Devices on this team after the check:{" "}
+                    {registration.team_devices}.
                   </p>
-                </>
-              )}
-              <label className="auth-consent">
-                <input
-                  type="checkbox"
-                  checked={provAck}
-                  disabled={disabled || provBusy || !ipaPath}
-                  onChange={(e) => setProvAck(e.target.checked)}
-                />
-                I understand ten identifiers per seven days is the limit on a
-                free personal team, and that an identifier cannot be reused by
-                another team afterwards.
-              </label>
-              <button
-                className="secondary"
-                disabled={
-                  disabled ||
-                  provBusy ||
-                  !ipaPath ||
-                  !provAck ||
-                  (hasWatchApp && watch === "undecided")
-                }
-                onClick={() => {
-                  setProvBusy(true);
-                  setProvError(null);
-                  setPreparation(null);
-                  prepareProvisioning(ipaPath!, provAck, watch)
-                    .then((result) => {
-                      if (!mounted.current) return;
-                      setPreparation(result);
-                      onPrepared(result);
-                    })
-                    .catch((error) => {
-                      if (mounted.current)
-                        setProvError(
-                          reason(
-                            error,
-                            "Provisioning did not complete. Check developer.apple.com before retrying.",
-                          ),
-                        );
-                    })
-                    .finally(() => {
-                      if (mounted.current) setProvBusy(false);
-                    });
-                }}
+                )}
+              </Stage>
+              <Stage
+                index={3}
+                title="Development certificate"
+                state={stageState(!!certificate, true)}
+                summary={certificate?.message ?? ""}
+                help="account"
+                onHelp={onHelp}
               >
-                {provBusy ? "Provisioning…" : "Prepare identifiers & profiles"}
-              </button>
-              <p className="hint" role="status">
-                {provError ??
-                  (!ipaPath
-                    ? "Select an IPA first."
-                    : !provAck
-                      ? "Acknowledge the identifier limit to enable provisioning."
-                      : hasWatchApp && watch === "undecided"
-                        ? "Choose what happens to the Watch app."
-                        : preparation
-                          ? `Plan identifier: ${preparation.plan.new_main_identifier}`
-                          : "Ready to provision.")}
-              </p>
-              {preparation && preparation.plan.blockers.length > 0 && (
-                <ul className="hint">
-                  {preparation.plan.blockers.map((blocker) => (
-                    <li key={blocker}>{blocker}</li>
-                  ))}
-                </ul>
-              )}
-              {preparation?.app_ids.map((appId) => (
-                <p className="hint" key={appId.identifier}>
-                  {appId.identifier} · {appId.created ? "registered" : "reused"}
-                  {appId.capabilities.length
-                    ? ` · Apple enabled: ${appId.capabilities.join(", ")}`
-                    : " · Apple enabled no capabilities"}
-                  {appId.remaining !== null
-                    ? ` · ${appId.remaining} identifier(s) left this week`
-                    : ""}
+                <p className="hint">
+                  The signing key is generated on this Mac and never leaves it;
+                  only a certificate request goes to Apple. It is kept in this
+                  Mac's Keychain for this account and team, so a restart reuses
+                  the same certificate instead of spending another slot.
                 </p>
-              ))}
-              {preparation?.profiles.map((profile) => (
-                <p className="hint" key={profile.uuid}>
-                  Profile for {profile.identifier} expires {profile.expires}.
+                <label className="auth-consent">
+                  <input
+                    type="checkbox"
+                    checked={certAck}
+                    disabled={disabled || certBusy}
+                    onChange={(e) => setCertAck(e.target.checked)}
+                  />
+                  I understand this uses one of the team's few active
+                  certificate slots, and that Orbiter will never revoke a
+                  certificate, because revoking invalidates every app already
+                  signed with it.
+                </label>
+                <button
+                  className="secondary"
+                  disabled={disabled || certBusy || !certAck}
+                  onClick={() => {
+                    setCertBusy(true);
+                    setCertError(null);
+                    setCertificate(null);
+                    requestCertificate(certAck)
+                      .then((result) => {
+                        if (mounted.current) setCertificate(result);
+                      })
+                      .catch((error) => {
+                        if (mounted.current)
+                          setCertError(
+                            reason(
+                              error,
+                              "The certificate request did not complete. Check developer.apple.com before requesting another.",
+                            ),
+                          );
+                      })
+                      .finally(() => {
+                        if (mounted.current) setCertBusy(false);
+                      });
+                  }}
+                >
+                  {certBusy
+                    ? "Requesting certificate…"
+                    : "Get development certificate"}
+                </button>
+                <p className="hint" role="status">
+                  {certError ??
+                    certificate?.message ??
+                    (certAck
+                      ? "Ready to request. Generating the key takes a moment."
+                      : "Acknowledge the certificate limit to enable the request.")}
                 </p>
-              ))}
+                {certificate && (
+                  <p className="hint">
+                    Active development certificates on this team:{" "}
+                    {certificate.active}
+                    {certificate.expires
+                      ? `. This one expires ${certificate.expires}.`
+                      : "."}
+                  </p>
+                )}
+                {certError?.includes("which is its maximum") && (
+                  <>
+                    <label className="auth-consent">
+                      <input
+                        type="checkbox"
+                        checked={withdrawAck}
+                        disabled={disabled || certBusy}
+                        onChange={(e) => setWithdrawAck(e.target.checked)}
+                      />
+                      I understand withdrawing this team's certificate stops
+                      every app already signed with it from launching, on every
+                      device, and that this cannot be undone.
+                    </label>
+                    <button
+                      className="secondary"
+                      disabled={disabled || certBusy || !withdrawAck}
+                      onClick={() => {
+                        setCertBusy(true);
+                        setCertError(null);
+                        setCertificate(null);
+                        withdrawCertificates(withdrawAck)
+                          .then((message) => {
+                            if (mounted.current)
+                              setCertError(
+                                reason(
+                                  message,
+                                  "The certificate was withdrawn.",
+                                ),
+                              );
+                          })
+                          .catch((error) => {
+                            if (mounted.current)
+                              setCertError(
+                                reason(
+                                  error,
+                                  "The certificate could not be withdrawn.",
+                                ),
+                              );
+                          })
+                          .finally(() => {
+                            if (mounted.current) setCertBusy(false);
+                          });
+                      }}
+                    >
+                      Withdraw the team's certificate
+                    </button>
+                  </>
+                )}
+                <button
+                  className="text-button"
+                  disabled={disabled || certBusy}
+                  onClick={() => {
+                    setCertBusy(true);
+                    setCertError(null);
+                    setCertificate(null);
+                    forgetSigningKey()
+                      .then((message) => {
+                        if (mounted.current)
+                          setCertError(reason(message, "Signing key removed."));
+                      })
+                      .catch((error) => {
+                        if (mounted.current)
+                          setCertError(
+                            reason(
+                              error,
+                              "The stored signing key could not be removed.",
+                            ),
+                          );
+                      })
+                      .finally(() => {
+                        if (mounted.current) setCertBusy(false);
+                      });
+                  }}
+                >
+                  Forget stored signing key
+                </button>
+              </Stage>
+              <Stage
+                index={4}
+                title="App identifiers and profiles"
+                state={stageState(
+                  !!preparation && preparation.plan.blockers.length === 0,
+                  true,
+                )}
+                summary={
+                  preparation
+                    ? `${preparation.app_ids.length} identifier(s) registered`
+                    : ""
+                }
+                help="losses"
+                onHelp={onHelp}
+              >
+                <p className="hint">
+                  Registers the plan's rewritten identifiers on this team and
+                  downloads their profiles. Apple, not Orbiter, decides which
+                  capabilities the identifiers may carry.
+                </p>
+                {hasWatchApp && (
+                  <>
+                    <label htmlFor="watch-choice">Watch app</label>
+                    <select
+                      id="watch-choice"
+                      value={watch}
+                      disabled={disabled || provBusy}
+                      onChange={(e) => setWatch(e.target.value as WatchChoice)}
+                    >
+                      <option value="undecided">
+                        Choose what happens to it
+                      </option>
+                      <option value="remove">
+                        Remove it — the iPhone app installs without the Watch
+                        app
+                      </option>
+                      <option value="sign">
+                        Sign it too — unverified on this team, and it spends
+                        another identifier
+                      </option>
+                    </select>
+                    <p className="hint">
+                      This build includes a Watch app. It is never dropped
+                      silently, so choose before identifiers are registered.
+                    </p>
+                  </>
+                )}
+                <label className="auth-consent">
+                  <input
+                    type="checkbox"
+                    checked={provAck}
+                    disabled={disabled || provBusy || !ipaPath}
+                    onChange={(e) => setProvAck(e.target.checked)}
+                  />
+                  I understand ten identifiers per seven days is the limit on a
+                  free personal team, and that an identifier cannot be reused by
+                  another team afterwards.
+                </label>
+                <button
+                  className="secondary"
+                  disabled={
+                    disabled ||
+                    provBusy ||
+                    !ipaPath ||
+                    !provAck ||
+                    (hasWatchApp && watch === "undecided")
+                  }
+                  onClick={() => {
+                    setProvBusy(true);
+                    setProvError(null);
+                    setPreparation(null);
+                    prepareProvisioning(ipaPath!, provAck, watch)
+                      .then((result) => {
+                        if (!mounted.current) return;
+                        setPreparation(result);
+                        onPrepared(result);
+                      })
+                      .catch((error) => {
+                        if (mounted.current)
+                          setProvError(
+                            reason(
+                              error,
+                              "Provisioning did not complete. Check developer.apple.com before retrying.",
+                            ),
+                          );
+                      })
+                      .finally(() => {
+                        if (mounted.current) setProvBusy(false);
+                      });
+                  }}
+                >
+                  {provBusy
+                    ? "Provisioning…"
+                    : "Prepare identifiers & profiles"}
+                </button>
+                <p className="hint" role="status">
+                  {provError ??
+                    (!ipaPath
+                      ? "Select an IPA first."
+                      : !provAck
+                        ? "Acknowledge the identifier limit to enable provisioning."
+                        : hasWatchApp && watch === "undecided"
+                          ? "Choose what happens to the Watch app."
+                          : preparation
+                            ? `Plan identifier: ${preparation.plan.new_main_identifier}`
+                            : "Ready to provision.")}
+                </p>
+                {preparation && preparation.plan.blockers.length > 0 && (
+                  <ul className="hint">
+                    {preparation.plan.blockers.map((blocker) => (
+                      <li key={blocker}>{blocker}</li>
+                    ))}
+                  </ul>
+                )}
+                {preparation?.app_ids.map((appId) => (
+                  <p className="hint" key={appId.identifier}>
+                    {appId.identifier} ·{" "}
+                    {appId.created ? "registered" : "reused"}
+                    {appId.capabilities.length
+                      ? ` · Apple enabled: ${appId.capabilities.join(", ")}`
+                      : " · Apple enabled no capabilities"}
+                    {appId.remaining !== null
+                      ? ` · ${appId.remaining} identifier(s) left this week`
+                      : ""}
+                  </p>
+                ))}
+                {preparation?.profiles.map((profile) => (
+                  <p className="hint" key={profile.uuid}>
+                    Profile for {profile.identifier} expires {profile.expires}.
+                  </p>
+                ))}
+              </Stage>
             </div>
           )}
         </>
