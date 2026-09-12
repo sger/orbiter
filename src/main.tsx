@@ -97,12 +97,16 @@ function preparedFindings(preparation: Preparation) {
         status: "requires_configuration",
         title: consequence.includes("seven days")
           ? "Weekly re-signing"
-          : "Watch app",
+          : consequence.includes("bundle identifier")
+            ? "Services that know the old identifier"
+            : "Watch app",
         label: consequence.includes("seven days")
           ? "Every seven days"
-          : consequence.includes("removed")
-            ? "Removed by your choice"
-            : "Kept, unverified",
+          : consequence.includes("bundle identifier")
+            ? "Needs registering"
+            : consequence.includes("removed")
+              ? "Removed by your choice"
+              : "Kept, unverified",
         detail: consequence,
         bundle: null,
       });

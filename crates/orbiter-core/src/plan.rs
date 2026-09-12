@@ -137,6 +137,25 @@ fn rewrite_identifier(identifier: &str, main: &str, new_main: &str) -> String {
     }
 }
 
+/// Third-party SDKs in the build whose service checks the bundle identifier server-side.
+///
+/// Named only when their framework is actually present. This is not a complete list of what may
+/// pin an identifier — a company's own backend commonly does — so the consequence says so too.
+fn pinning_services(report: &Report) -> Vec<&'static str> {
+    let mut named: Vec<&'static str> = report
+        .bundles
+        .iter()
+        .filter_map(|bundle| match bundle.identifier.as_str() {
+            id if id.starts_with("com.facebook.sdk") => Some("the Facebook SDK"),
+            id if id.starts_with("com.google.GoogleSignIn") => Some("Google Sign-In"),
+            _ => None,
+        })
+        .collect();
+    named.sort();
+    named.dedup();
+    named
+}
+
 fn consumes_app_id(kind: &str) -> bool {
     // Frameworks are signed with the app's identity but hold no App ID of their own.
     kind != "Framework"
@@ -348,6 +367,19 @@ pub fn build(report: &Report, target: &Target) -> Plan {
     if target.kind == TeamKind::Personal && app_ids_required > PERSONAL_APP_ID_BUDGET {
         blockers.push(format!(
             "This IPA needs {app_ids_required} App IDs, above the {PERSONAL_APP_ID_BUDGET} a Personal Team can register in seven days."
+        ));
+    }
+    // Nothing in the build changes here, and no entitlement is involved: the identifier itself is
+    // the credential these services check, and it had to change for another team to sign at all.
+    if !new_main_identifier.is_empty() {
+        let named = pinning_services(report);
+        consequences.push(format!(
+            "The build installs as {new_main_identifier}, so any service that recognises the app by its bundle identifier will not recognise this one{}. Sign-in through those providers fails until the new identifier is registered with them, and a backend that pins the identifier refuses it too. Each team produces a different identifier, so each tester needs registering separately.",
+            if named.is_empty() {
+                String::new()
+            } else {
+                format!(" — this build embeds {}", named.join(" and "))
+            }
         ));
     }
     if target.kind == TeamKind::Personal {
@@ -584,6 +616,31 @@ mod tests {
         assert!(plan.blockers.iter().any(|b| b.contains("encrypted")));
         // Signing a Watch app is a choice, and its uncertainty is stated rather than hidden.
         assert!(plan.consequences.iter().any(|c| c.contains("unverified")));
+    }
+
+    #[test]
+    fn the_rewritten_identifier_is_stated_as_something_services_will_not_recognise() {
+        let plan = build(
+            &report(vec![
+                bundle("Payload/App.app", "Main app", "com.company.app", vec![]),
+                bundle(
+                    "Payload/App.app/Frameworks/FBSDKCoreKit.framework",
+                    "Framework",
+                    "com.facebook.sdk.FBSDKCoreKit",
+                    vec![],
+                ),
+            ]),
+            &personal(),
+        );
+        let stated = plan
+            .consequences
+            .iter()
+            .find(|c| c.contains("bundle identifier"))
+            .expect("the identifier change is a consequence in its own right");
+        // The new identifier, the named SDK found in the build, and the per-tester cost.
+        assert!(stated.contains(&plan.new_main_identifier));
+        assert!(stated.contains("Facebook"));
+        assert!(stated.contains("each tester"));
     }
 
     #[test]
