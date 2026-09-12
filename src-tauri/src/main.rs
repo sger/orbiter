@@ -239,6 +239,7 @@ struct LogCapture {
 async fn start_device_log(
     device_id: u32,
     subjects: Vec<String>,
+    superseded: Vec<String>,
     progress: Channel<orbiter_core::diagnostics::LogLine>,
     state: State<'_, LogCapture>,
 ) -> Result<orbiter_core::diagnostics::Summary, String> {
@@ -252,6 +253,7 @@ async fn start_device_log(
     let result = orbiter_core::diagnostics::capture(
         device_id,
         subjects,
+        superseded,
         state.cancel.clone(),
         move |line| {
             let _ = progress.send(line);

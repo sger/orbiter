@@ -45,13 +45,30 @@ pub fn refusal(subjects: &[String]) -> Option<&'static str> {
     None
 }
 
-/// Whether a log line is about one of the subjects. Case-insensitive substring: the system log
-/// names a process in several forms, and this is a filter for keeping less, not a parser.
-fn about(line: &str, subjects: &[String]) -> bool {
+/// Whether a log line is about the app being diagnosed.
+///
+/// Case-insensitive substring: the system log names a process in several forms, and this is a
+/// filter for keeping less, not a parser. `subjects` is what must appear, the first being the
+/// signed build's identifier; `superseded` is the identifier of the build this one was made from.
+///
+/// Both apps are usually installed side by side and their processes share a name, so a line that
+/// names the superseded build and not this one belongs to the other app and is dropped. The
+/// rewritten identifier contains the original as a substring, so a line about this build names
+/// both and survives.
+fn about(line: &str, subjects: &[String], superseded: &[String]) -> bool {
     let line = line.to_ascii_lowercase();
-    subjects
-        .iter()
-        .any(|subject| !subject.is_empty() && line.contains(&subject.to_ascii_lowercase()))
+    let mentions = |needles: &[String]| {
+        needles
+            .iter()
+            .any(|needle| !needle.trim().is_empty() && line.contains(&needle.to_ascii_lowercase()))
+    };
+    if !mentions(subjects) {
+        return false;
+    }
+    let this_build = subjects
+        .first()
+        .is_some_and(|identifier| line.contains(&identifier.to_ascii_lowercase()));
+    !(mentions(superseded) && !this_build)
 }
 
 /// Trim a kept line to something a person reads, without the trailing newline the relay sends.
@@ -100,6 +117,7 @@ async fn provider(device_id: u32) -> Result<UsbmuxdProvider, String> {
 pub async fn capture(
     device_id: u32,
     subjects: Vec<String>,
+    superseded: Vec<String>,
     cancel: Arc<AtomicBool>,
     mut sink: impl FnMut(LogLine),
 ) -> Result<Summary, String> {
@@ -155,7 +173,7 @@ pub async fn capture(
                 });
             }
         };
-        if about(&line, &subjects) {
+        if about(&line, &subjects, &superseded) {
             matched += 1;
             sink(LogLine { text: tidy(&line) });
         } else {
@@ -179,18 +197,49 @@ mod tests {
     #[test]
     fn only_lines_about_the_app_are_kept_and_the_rest_of_the_device_is_not() {
         let subjects = vec!["com.example.app.ab12".to_string(), "Example".to_string()];
+        let superseded = vec!["com.example.app".to_string()];
         assert!(about(
             "Sep 12 21:40 iPhone com.example.app.ab12[431]: refused",
-            &subjects
+            &subjects,
+            &superseded
         ));
         // The system log names processes in several cases; the filter must not miss those.
-        assert!(about("... COM.EXAMPLE.APP.AB12 ...", &subjects));
+        assert!(about(
+            "... COM.EXAMPLE.APP.AB12 ...",
+            &subjects,
+            &superseded
+        ));
+        // A line carrying only the process name is this app's: the other is told apart by id.
+        assert!(about("iPhone Example(WebKit)[7702]: ready", &subjects, &[]));
         // Someone else's messages, someone else's business.
         assert!(!about(
             "Sep 12 21:40 iPhone Messages[88]: delivered to a friend",
-            &subjects
+            &subjects,
+            &superseded
         ));
-        assert!(!about("Sep 12 21:40 iPhone locationd[77]: fix", &subjects));
+        assert!(!about(
+            "Sep 12 21:40 iPhone locationd[77]: fix",
+            &subjects,
+            &superseded
+        ));
+    }
+
+    #[test]
+    fn the_company_build_installed_beside_this_one_is_not_mistaken_for_it() {
+        let subjects = vec!["com.example.app.ab12".to_string(), "Example".to_string()];
+        let superseded = vec!["com.example.app".to_string()];
+        // Both apps run a process called Example, so the identifier is what separates them.
+        assert!(!about(
+            "Data Usage for com.example.app on flow 1318991",
+            &subjects,
+            &superseded
+        ));
+        // The rewritten identifier contains the original, so this build's lines still match.
+        assert!(about(
+            "Data Usage for com.example.app.ab12 on flow 1318991",
+            &subjects,
+            &superseded
+        ));
     }
 
     #[test]

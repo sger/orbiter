@@ -649,6 +649,7 @@ function App() {
             <DeviceLog
               deviceId={deviceId}
               subjects={[signed.identifier, app?.name ?? ""].filter(Boolean)}
+              superseded={[app?.identifier ?? ""].filter(Boolean)}
               disabled={installBusy}
             />
           </section>

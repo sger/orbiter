@@ -10,11 +10,15 @@ type Summary = { matched: number; discarded: number; message: string };
 export function DeviceLog({
   deviceId,
   subjects,
+  superseded,
   disabled,
 }: {
   deviceId: number | null;
   /// What a kept line must mention: the signed build's identifier and its app name.
   subjects: string[];
+  /// The identifier this build was made from. Both apps are usually installed side by side and
+  /// their processes share a name, so lines naming only that one belong to the other app.
+  superseded: string[];
   disabled: boolean;
 }) {
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -59,6 +63,7 @@ export function DeviceLog({
             invoke<Summary>("start_device_log", {
               deviceId,
               subjects,
+              superseded,
               progress,
             })
               .then((result) => {
