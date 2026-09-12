@@ -31,6 +31,15 @@ pub const STAGES: [&str; 5] = [
     "Repackaging",
 ];
 
+/// How far along a signing run is. Counts of real things — files, bundles — never a percentage
+/// invented to look like movement.
+#[derive(Clone, Copy, serde::Serialize)]
+pub struct Progress {
+    pub stage: &'static str,
+    pub done: usize,
+    pub total: usize,
+}
+
 /// A record of what the signer did, for a person checking whether it did anything at all.
 ///
 /// It carries counts, sizes, and the identifiers already shown in the interface — never a path
@@ -106,7 +115,12 @@ fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
 
 /// Extract the archive, applying the same refusals inspection applies. Symlinks, special files,
 /// absolute or traversing paths, and case-colliding duplicates are rejected rather than written.
-fn extract(ipa: &Path, dest: &Path, cancel: &AtomicBool) -> Result<usize, String> {
+fn extract(
+    ipa: &Path,
+    dest: &Path,
+    cancel: &AtomicBool,
+    progress: &mut impl FnMut(Progress),
+) -> Result<usize, String> {
     let file = fs::File::open(ipa).map_err(|_| "The IPA could not be opened.".to_string())?;
     let size = file
         .metadata()
@@ -120,6 +134,7 @@ fn extract(ipa: &Path, dest: &Path, cancel: &AtomicBool) -> Result<usize, String
     if archive.len() > 50_000 {
         return Err("The IPA has more entries than the 50,000 limit.".into());
     }
+    let entries = archive.len();
     let mut seen = std::collections::BTreeSet::new();
     let mut written = 0u64;
     let mut files = 0usize;
@@ -169,6 +184,14 @@ fn extract(ipa: &Path, dest: &Path, cancel: &AtomicBool) -> Result<usize, String
             let _ = fs::set_permissions(&target, fs::Permissions::from_mode(mode & 0o777));
         }
         files += 1;
+        // Often enough to show movement, rarely enough not to flood the interface.
+        if files.is_multiple_of(64) {
+            progress(Progress {
+                stage: STAGES[0],
+                done: files,
+                total: entries,
+            });
+        }
     }
     Ok(files)
 }
@@ -224,23 +247,36 @@ fn collect_bundle_directories(
     Ok(())
 }
 
-/// Replace every occurrence of an old identifier with its new one, anywhere in an Info.plist.
+/// Whether a key's value is a bundle identifier.
 ///
-/// Only exact, whole-string matches are replaced. That covers `CFBundleIdentifier` and every
-/// cross-reference a bundle holds to another — `WKCompanionAppBundleIdentifier` on a Watch app,
-/// `WKAppBundleIdentifier` on a companion, `NSExtension` attributes on an extension — without
-/// guessing at substrings inside unrelated text.
-fn rewrite(value: &mut plist::Value, map: &BTreeMap<String, String>) {
+/// Matching on the key, not on the string, is the whole point. A framework whose identifier is
+/// `VirtualStadiumDataSDK` carries that same word as `CFBundleExecutable` — the name of a file on
+/// disk — and as `CFBundleName`. Rewriting by value alone renamed all three, leaving the plist
+/// pointing at an executable that does not exist. `NSExtensionPointIdentifier` is excluded for the
+/// same reason: it names one of Apple's extension points, not a bundle here.
+fn identifier_key(key: &str) -> bool {
+    key == "CFBundleIdentifier" || key.ends_with("BundleIdentifier")
+}
+
+/// Replace old identifiers with new ones under identifier-bearing keys, at any depth.
+///
+/// That covers `CFBundleIdentifier` and every cross-reference a bundle holds to another —
+/// `WKCompanionAppBundleIdentifier` on a Watch app, `WKAppBundleIdentifier` on a companion,
+/// `NSExtension` attributes on an extension — and nothing else. Matches are whole strings, so an
+/// identifier that merely begins with another is left alone.
+fn rewrite(identifier_valued: bool, value: &mut plist::Value, map: &BTreeMap<String, String>) {
     match value {
-        plist::Value::String(text) => {
+        plist::Value::String(text) if identifier_valued => {
             if let Some(new) = map.get(text.as_str()) {
                 *text = new.clone();
             }
         }
-        plist::Value::Array(items) => items.iter_mut().for_each(|item| rewrite(item, map)),
+        plist::Value::Array(items) => items
+            .iter_mut()
+            .for_each(|item| rewrite(identifier_valued, item, map)),
         plist::Value::Dictionary(dictionary) => dictionary
             .iter_mut()
-            .for_each(|(_, item)| rewrite(item, map)),
+            .for_each(|(key, item)| rewrite(identifier_key(key), item, map)),
         _ => (),
     }
 }
@@ -254,7 +290,7 @@ fn rewrite_info(
     let bytes = fs::read(&info).map_err(|_| "A bundle has no readable Info.plist.".to_string())?;
     let mut value = plist::Value::from_reader(std::io::Cursor::new(&bytes))
         .map_err(|_| "A bundle's Info.plist could not be read.".to_string())?;
-    rewrite(&mut value, map);
+    rewrite(false, &mut value, map);
     if let Some(dictionary) = value.as_dictionary_mut() {
         // The bundle's own identifier is set outright: a build whose Info.plist disagreed with the
         // plan would be signed for an identifier it does not claim, and iOS would refuse it.
@@ -348,7 +384,7 @@ pub fn sign(
     profiles: &[ProfileOutcome],
     identity: &Identity,
     cancel: &AtomicBool,
-    mut progress: impl FnMut(&'static str),
+    mut progress: impl FnMut(Progress),
 ) -> Result<Signed, String> {
     let mut log = Log::default();
     match run(
@@ -377,7 +413,7 @@ fn run(
     profiles: &[ProfileOutcome],
     identity: &Identity,
     cancel: &AtomicBool,
-    progress: &mut impl FnMut(&'static str),
+    progress: &mut impl FnMut(Progress),
     log: &mut Log,
 ) -> Result<Signed, String> {
     log.stage("Checking the plan");
@@ -393,9 +429,8 @@ fn run(
         .map_err(|_| "A working directory could not be created.".to_string())?;
     let root = work.path();
 
-    progress(STAGES[0]);
     log.stage(STAGES[0]);
-    let extracted = extract(ipa, root, cancel)?;
+    let extracted = extract(ipa, root, cancel, progress)?;
     log.note(format!(
         "{extracted} file(s), {} MB",
         fs::metadata(ipa)
@@ -403,7 +438,11 @@ fn run(
             .unwrap_or(0)
     ));
 
-    progress(STAGES[1]);
+    progress(Progress {
+        stage: STAGES[1],
+        done: 0,
+        total: plan.bundles.len(),
+    });
     log.stage(STAGES[1]);
     let removed = prune(root, plan)?;
     for path in &removed {
@@ -424,9 +463,18 @@ fn run(
         plan.new_main_identifier
     ));
 
-    progress(STAGES[2]);
     log.stage(STAGES[2]);
-    for bundle in plan.bundles.iter().filter(|bundle| bundle.consumes_app_id) {
+    let carrying: Vec<_> = plan
+        .bundles
+        .iter()
+        .filter(|bundle| bundle.consumes_app_id)
+        .collect();
+    for (index, bundle) in carrying.iter().enumerate() {
+        progress(Progress {
+            stage: STAGES[2],
+            done: index,
+            total: carrying.len(),
+        });
         let profile = profiles
             .iter()
             .find(|profile| profile.identifier == bundle.new_identifier)
@@ -442,13 +490,17 @@ fn run(
         ));
     }
 
-    progress(STAGES[3]);
     log.stage(STAGES[3]);
     // Inside out: a container's signature seals its nested bundles, so they must be final first.
     let mut order: Vec<_> = plan.bundles.iter().collect();
     order.sort_by_key(|bundle| std::cmp::Reverse(bundle.path.split('/').count()));
-    for bundle in &order {
+    for (index, bundle) in order.iter().enumerate() {
         cancelled(cancel)?;
+        progress(Progress {
+            stage: STAGES[3],
+            done: index,
+            total: order.len(),
+        });
         let profile = profiles
             .iter()
             .find(|profile| profile.identifier == bundle.new_identifier);
@@ -473,14 +525,13 @@ fn run(
         ));
     }
 
-    progress(STAGES[4]);
     log.stage(STAGES[4]);
     let name = ipa
         .file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
         .unwrap_or_else(|| "app".into());
     let output = out_dir.join(format!("{name}-{}.ipa", plan.team_id));
-    repackage(root, &output, cancel)?;
+    repackage(root, &output, cancel, progress)?;
     log.note(format!(
         "{} MB written",
         fs::metadata(&output)
@@ -520,15 +571,28 @@ fn signing_failure(error: &apple_codesign::AppleCodesignError) -> &'static str {
 
 /// Write the signed tree back into an IPA. Permissions are carried over from the files on disk,
 /// so executables stay executable.
-fn repackage(root: &Path, output: &Path, cancel: &AtomicBool) -> Result<(), String> {
+fn repackage(
+    root: &Path,
+    output: &Path,
+    cancel: &AtomicBool,
+    progress: &mut impl FnMut(Progress),
+) -> Result<(), String> {
     let file =
         fs::File::create(output).map_err(|_| "The signed IPA could not be created.".to_string())?;
     let mut writer = zip::ZipWriter::new(file);
     let mut files = Vec::new();
     collect_files(root, &mut files)?;
     files.sort();
-    for path in files {
+    let total = files.len();
+    for (index, path) in files.into_iter().enumerate() {
         cancelled(cancel)?;
+        if index.is_multiple_of(64) {
+            progress(Progress {
+                stage: STAGES[4],
+                done: index,
+                total,
+            });
+        }
         let name = path
             .strip_prefix(root)
             .map_err(|_| "A file left the working directory.")?
@@ -655,6 +719,15 @@ mod tests {
             );
             // A different identifier that merely starts with the old one is not this bundle.
             d.insert("Unrelated".into(), "com.company.apple".into());
+            // A framework whose identifier is also its executable's filename: the file on disk
+            // keeps its name, so this value must not move with the identifier.
+            d.insert("CFBundleExecutable".into(), "com.company.app".into());
+            d.insert("CFBundleName".into(), "com.company.app".into());
+            // Apple's own extension point, which is not a bundle in this build.
+            d.insert(
+                "NSExtensionPointIdentifier".into(),
+                "com.company.app".into(),
+            );
             d.insert(
                 "NSExtension".into(),
                 plist::Value::Dictionary({
@@ -665,7 +738,7 @@ mod tests {
             );
             d
         });
-        rewrite(&mut value, &map);
+        rewrite(false, &mut value, &map);
         let dictionary = value.as_dictionary().expect("dictionary");
         assert_eq!(
             dictionary
@@ -677,6 +750,17 @@ mod tests {
             dictionary.get("Unrelated").and_then(|v| v.as_string()),
             Some("com.company.apple")
         );
+        for untouched in [
+            "CFBundleExecutable",
+            "CFBundleName",
+            "NSExtensionPointIdentifier",
+        ] {
+            assert_eq!(
+                dictionary.get(untouched).and_then(|v| v.as_string()),
+                Some("com.company.app"),
+                "{untouched} does not hold a bundle identifier and must not be rewritten"
+            );
+        }
         assert_eq!(
             dictionary
                 .get("NSExtension")
@@ -758,7 +842,8 @@ mod tests {
         writer.finish().expect("finish");
         let dest = root.path().join("out");
         std::fs::create_dir_all(&dest).expect("destination");
-        let error = extract(&archive, &dest, &AtomicBool::new(false)).expect_err("refused");
+        let error =
+            extract(&archive, &dest, &AtomicBool::new(false), &mut |_| {}).expect_err("refused");
         assert!(error.contains("unsafe paths"));
         assert!(!root.path().join("escape.txt").exists());
     }
@@ -777,7 +862,13 @@ mod tests {
                 .expect("permissions");
         }
         let output = root.path().join("signed.ipa");
-        repackage(&root.path().join("tree"), &output, &AtomicBool::new(false)).expect("repackage");
+        repackage(
+            &root.path().join("tree"),
+            &output,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .expect("repackage");
         let mut archive =
             zip::ZipArchive::new(std::fs::File::open(&output).expect("open")).expect("archive");
         let names: Vec<String> = (0..archive.len())
