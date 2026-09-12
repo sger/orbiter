@@ -78,3 +78,7 @@ cargo run --locked -p orbiter-core --bin orbiter-install-review -- /path/to/comp
 Replace `1` with the ephemeral transport ID from `orbiter-devices`. The CLI discards its snapshot on exit. Review output includes app/device display information; handle it as private company information.
 
 The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time during this preview.
+
+### Local signing identity preview (macOS)
+
+In **Destination & identity**, click **Check Keychain** to list valid iOS signing identities from the current macOS Keychain search list. This is a read-only inventory; it does not export private keys, sign an IPA, contact Apple, or establish profile compatibility. Certificate names are labels, not proof of team authorization. A matching profile for each app/extension and a reviewed signing plan are still required before re-signing can be enabled. Apple account sign-in remains unavailable. Windows identity discovery is not implemented.

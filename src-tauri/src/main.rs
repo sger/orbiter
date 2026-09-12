@@ -63,6 +63,11 @@ async fn discover_devices() -> orbiter_core::devices::Discovery {
     orbiter_core::devices::discover().await
 }
 
+#[tauri::command]
+async fn discover_signing_identities() -> Result<orbiter_core::signing::Inventory, String> {
+    orbiter_core::signing::discover().await
+}
+
 #[derive(Default, Clone)]
 struct Installations {
     gate: Arc<tokio::sync::Mutex<()>>,
@@ -244,6 +249,7 @@ fn main() {
             inspect_ipa,
             cancel_inspection,
             discover_devices,
+            discover_signing_identities,
             prepare_install,
             discard_install,
             execute_install,

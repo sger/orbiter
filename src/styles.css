@@ -921,3 +921,21 @@ details[open] > summary > svg {
   width: 100%;
   accent-color: #386e54;
 }
+
+.local-signing {
+  border-top: 1px solid var(--border, #e1e7df);
+  margin: 20px 0;
+  padding-top: 20px;
+}
+.signing-identities {
+  padding-left: 20px;
+}
+.signing-identities li {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.signing-identities span {
+  display: block;
+  font-size: 14px;
+  margin-top: 6px;
+}

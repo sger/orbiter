@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { Report, Bundle } from "./types";
 import "./styles.css";
+import { SigningIdentities } from "./SigningIdentities";
 import { Devices } from "./Devices";
 import { InstallSigned } from "./InstallSigned";
 const stages = [
@@ -286,6 +287,7 @@ function App() {
                 </h2>
               </div>
               <Devices onSelect={setDeviceId} paused={installBusy} />
+              <SigningIdentities paused={installBusy} />
               <div className="identity-grid">
                 <div>
                   <label htmlFor="account">Apple account</label>

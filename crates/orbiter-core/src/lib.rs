@@ -2,6 +2,7 @@ pub mod devices;
 pub mod installation;
 mod macho;
 mod profile;
+pub mod signing;
 
 use base64::Engine;
 use plist::{Dictionary, Value};

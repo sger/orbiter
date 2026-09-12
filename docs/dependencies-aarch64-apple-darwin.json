@@ -1572,6 +1572,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "signal-hook-registry",
+      "version": "1.4.8",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/vorner/signal-hook"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "simd-adler32",
       "version": "0.3.10",
       "license": "MIT",

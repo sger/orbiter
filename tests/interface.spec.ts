@@ -76,6 +76,10 @@ async function nativeMock(
         },
         unregisterCallback: (id: number) => callbacks.delete(id),
         invoke: async (cmd: string, args?: any) => {
+          if (cmd === "discover_signing_identities") {
+            if ((window as any).__identityError) throw "Keychain failed";
+            return (window as any).__identityResult;
+          }
           if (cmd === "installation_status")
             return (window as any).__jobResult ?? null;
           if (cmd === "prepare_install") return (window as any).__reviewResult;
@@ -350,4 +354,36 @@ test("a reopened window follows an active installation until its terminal outcom
   await expect(
     page.getByRole("button", { name: /Drop your IPA/ }),
   ).toBeEnabled();
+});
+
+test("local identity inventory clears stale certificates on failed refresh", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.evaluate(() => {
+    (window as any).__identityResult = {
+      identities: [
+        { fingerprint: "A".repeat(40), name: "Apple Development: Synthetic" },
+      ],
+      available: true,
+      message: "Profile matching has not been tested.",
+    };
+  });
+  await page.getByRole("button", { name: "Check Keychain" }).click();
+  await expect(
+    page.getByText("Apple Development: Synthetic", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign & Install" }),
+  ).toBeDisabled();
+  await page.evaluate(() => {
+    (window as any).__identityError = true;
+  });
+  await page.getByRole("button", { name: "Check Keychain" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not check local signing identities",
+  );
+  await expect(
+    page.getByText("Apple Development: Synthetic", { exact: true }),
+  ).toHaveCount(0);
 });

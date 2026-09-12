@@ -4,10 +4,10 @@ Validation date: 2026-09-12. Host: Apple Silicon macOS. Automated tests use smal
 
 | Check | macOS on this host | Windows |
 | --- | --- | --- |
-| Rust core tests | Passed: 34 tests | Not run |
+| Rust core tests | Passed: 37 tests | Not run |
 | Rust workspace Clippy, warnings denied | Passed | Not run |
 | React/TypeScript production build | Passed | Not run on Windows |
-| Browser UI tests in Chrome | Passed: 8 tests, synthetic IPC | Not run |
+| Browser UI tests in Chrome | Passed: 9 tests, synthetic IPC | Not run |
 | Native Tauri compilation and debug `.app` packaging | Passed | Not run |
 | Native process startup | Stayed running for 5 seconds without startup errors; then closed | Not run |
 | Native IPA inspection | User confirmed working in the macOS desktop with the company IPA; picker vs drop not separately recorded | Pending |
@@ -29,7 +29,7 @@ UI tests cover the browser-only unavailable state, synthetic inspection renderin
 
 The available local company IPA was inspected through the new CLI. It reports version 4.106.0 (762), minimum iOS 15.0, 24 bundles: main app, one Watch app, and 22 frameworks. There were no bundle parsing issues or encrypted executable flags. Main and Watch profiles both decode and expire on 2027-03-30 at 07:11:22 UTC. Each contains 101 device entries; only counts are retained in the report. Main executable entitlement keys cover push, associated domains, Apple Pay, app groups, and keychain access. These observations agree with the earlier static investigation.
 
-The icon uses the fallback because the supported standard-PNG path did not yield an icon. XML executable entitlements and decoded CMS payloads do not establish signature validity or certificate trust. No credentials, signing session, installation, or runtime tests were performed. The company IPA and its report are not committed.
+The icon uses the fallback because the supported standard-PNG path did not yield an icon. XML executable entitlements and decoded CMS payloads do not establish signature validity or certificate trust. During this initial static observation, no credentials, signing session, installation, or runtime tests were performed. Subsequent user installation acceptance is recorded below. The company IPA and its report are not committed.
 
 ## Completed versus remaining
 
@@ -37,7 +37,7 @@ The icon uses the fallback because the supported standard-PNG path did not yield
 | --- | --- | --- |
 | Phase 1 foundation and inspection | Implemented with documented parser/layout limits; automated local checks pass | Manual native picker/drop acceptance and Windows validation remain |
 | Phase 2 device transport | Discovery, review, transfer/install orchestration, cancellation boundary, and journal implemented; happy-path physical installation confirmed by user | The connected iPhone is reachable. Read-only review of the supplied IPA found the phone authorized and no existing app with the same bundle ID. User subsequently confirmed installation and app operation. Recovery and individual capability testing remain. Windows also needs a host and verified Apple services/driver setup |
-| Phase 3 authentication/signing | Public-source and data-flow review only | Select/review Anisette strategy, implement secure account flow, designated test account with 2FA, explicit team, certificates/profiles, reviewed registration/signing plan |
+| Phase 3 authentication/signing | Read-only macOS signing identity inventory implemented; authentication and re-signing pending | Select/review Anisette strategy, implement secure account flow, designated test account with 2FA, explicit team, certificates/profiles, reviewed registration/signing plan |
 | Phase 4 end-to-end | Not started | Working transport and signer, designated device/account, company test credentials and capability owners |
 | Phase 5 refresh/distribution | Not started | Validated install jobs; durable metadata/recovery design; update-signing keys, release certificates and notarization access |
 
@@ -70,3 +70,9 @@ To complete physical acceptance, use the desktop **Install existing signature** 
 ## User device acceptance — 2026-09-12
 
 The user installed the supplied IPA through Orbiter and confirmed the app works correctly. The phone is already included in its embedded provisioning profile. This validates the existing-signature installation happy path, not re-signing, device registration, or installation outside that profile. Individual capability tests, replacement/data retention, cancellation, disconnect recovery, and cleanup were not separately reported.
+
+## Local signing identity increment
+
+Added an explicit macOS Keychain inventory action using `/usr/bin/security find-identity -v -p codesigning`. A sandboxed host check returned zero; the same read-only check outside the sandbox found four valid identities (two development, two distribution). Names and certificate fingerprints are not recorded here. No private key was exported or used, and no signing or portal operation occurred. The native UI still needs user acceptance with this inventory action.
+
+Three new Rust tests cover identity filtering/deduplication, an empty inventory, and malformed rows. A browser test covers inventory display, disabled signing, and clearing stale certificates after a failed refresh. The adapter has a ten-second deadline and 64 KiB output bound, suppresses raw stderr, and uses a fixed executable and arguments. Windows returns an explicit unavailable result.
