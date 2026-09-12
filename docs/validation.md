@@ -86,7 +86,7 @@ The account state tests cover consent rejection, stale/invalid/duplicate prompts
 
 An explicit native test successfully generated local macOS authentication support on this host using AOSKit/AuthKit. It printed no material and used no account credentials. This does not establish successful Apple sign-in. The earlier synthetic credential-storage test belongs to the retired remote preview; the current adapter persists no support data in Orbiter credential entries.
 
-Live acceptance: click **Check local support**, then enter a designated account through the application and complete 2FA. Confirm the real team list, explicit selection, refresh, cancellation, failure handling, and sign-out. Direct Apple access is required. No remote provider/proxy fallback is allowed. Windows local support and live Apple account acceptance remain pending. See [local-authentication.md](local-authentication.md).
+Live acceptance: enter a designated account through the application and complete 2FA. Confirm the real team list, explicit selection, refresh, cancellation, failure handling, and sign-out. Direct Apple access is required. No remote provider/proxy fallback is allowed. Windows local support and live Apple account acceptance remain pending. See [local-authentication.md](local-authentication.md).
 
 
 ## User-reported sign-in setup failure

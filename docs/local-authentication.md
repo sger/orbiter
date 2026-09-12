@@ -20,8 +20,7 @@ If the retired remote preview was used, its `com.orbiter.desktop.authentication.
 
 ## Test
 
-1. Start `npm run tauri dev` and click **Check local support**. This needs no IPA, iPhone, email, or password.
-2. If it succeeds, review the local-authentication disclosure and enter a designated test account in the application only.
+1. Start `npm run tauri dev`, review the local-authentication disclosure, and enter a designated test account in the application only. Local support is resolved as part of signing in.
 3. Complete 2FA, confirm the returned teams, select one explicitly, refresh, and sign out.
 4. Local-provider failure must stop sign-in. Offline Apple access, blocked corporate direct connections, redirects, or unsupported URL-bag destinations must fail rather than use a proxy or remote fallback.
 
@@ -150,3 +149,14 @@ Nothing else is stored: no password, verification code, account token, pairing r
 Persistence exists because the alternative was worse. A key held only in memory meant every restart requested a new certificate, and a team allows only a few active ones, so a user hit the limit within two sessions — which is what happened in testing. With the key stored, a restart finds the certificate Apple already issued and writes nothing.
 
 The bridge uses the Security framework directly rather than the `security` command, so the key is never written to a temporary file and never appears in a command line or the process table. The key is held in Rust as zeroized memory on the way in and out. An unsigned local development build may prompt for Keychain access when its code identity changes between builds; that prompt is macOS asking on the user's behalf and is expected.
+
+
+## The separate support check is gone
+
+Sign-in already resolved local macOS authentication support before its first Apple request, and reports a support failure as the reason sign-in stopped, so the separate **Check local support** button asked for a step that proved nothing extra. It is removed along with its IPC command, which also narrows the interface Orbiter exposes. The credential-free native check remains available without the desktop app:
+
+```sh
+cargo test --locked -p orbiter-core --lib local_anisette::tests::native_local_authentication_support -- --ignored
+```
+
+The browser test that covered the button now asserts the same property where it actually matters: an unavailable local provider stops sign-in, says so, and offers no remote alternative.

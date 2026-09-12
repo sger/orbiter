@@ -87,8 +87,7 @@ In **Destination & identity**, click **Check Keychain** to list valid iOS signin
 ## Apple account sign-in preview — local macOS support
 
 1. Run `npm run tauri dev`. A connected iPhone or IPA is not required.
-2. Under **Apple account**, click **Check local support**. The check uses Apple frameworks installed on your Mac and returns status only.
-3. Read **Local authentication & Apple communication**, confirm direct Apple authentication, and enter your test account/password in the application only.
+2. Read **Local authentication & Apple communication**, confirm direct Apple authentication, and enter your test account/password in the application only. Local macOS authentication support is resolved as part of signing in; its failure stops sign-in and says so.
 4. Choose **Sign in to Apple**, complete trusted-device/SMS verification, and select the intended signing team explicitly.
 5. **Refresh teams** checks developer access again. **Sign out** clears the local session. Sessions expire on access after 30 minutes or when the process exits.
 

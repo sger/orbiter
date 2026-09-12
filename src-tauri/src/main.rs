@@ -229,10 +229,6 @@ fn installation_status(
     job::recover(&journal(&app)?)
 }
 #[tauri::command]
-async fn local_auth_support() -> orbiter_core::local_anisette::Status {
-    orbiter_core::local_anisette::check().await
-}
-#[tauri::command]
 fn account_status(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
@@ -326,7 +322,6 @@ fn main() {
         .manage(Inspection::default())
         .manage(Installations::default())
         .invoke_handler(tauri::generate_handler![
-            local_auth_support,
             account_status,
             account_sign_in,
             account_answer,

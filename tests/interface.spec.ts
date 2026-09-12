@@ -76,13 +76,6 @@ async function nativeMock(
         },
         unregisterCallback: (id: number) => callbacks.delete(id),
         invoke: async (cmd: string, args?: any) => {
-          if (cmd === "local_auth_support")
-            return (
-              (window as any).__supportResult ?? {
-                available: true,
-                message: "Local macOS authentication support is available.",
-              }
-            );
           if (cmd === "account_status")
             return (
               (window as any).__accountView ?? {
@@ -99,6 +92,10 @@ async function nativeMock(
               consent: args.consent,
               email: args.email,
             };
+            if ((window as any).__accountSignInResult)
+              return ((window as any).__accountView = (
+                window as any
+              ).__accountSignInResult);
             return ((window as any).__accountView = {
               stage: "two_factor",
               account: null,
@@ -550,6 +547,20 @@ test("account flow works without a manual support check, requires consent, and n
   ).toBeEnabled();
 });
 
+test("the account panel keeps its content off the panel border", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  const section = page.locator("section.accounts");
+  const panel = await section.boundingBox();
+  const heading = await section
+    .getByText("Apple account")
+    .first()
+    .boundingBox();
+  // Text flush against the border reads as a broken layout; keep the inset the other rows use.
+  expect(panel && heading && heading.x - panel.x).toBeGreaterThanOrEqual(16);
+});
+
 test("registering an iPhone needs a device, a team, and an explicit acknowledgement", async ({
   page,
 }) => {
@@ -648,9 +659,6 @@ test("cancelled verification clears secrets and failed team refresh clears selec
 }) => {
   await nativeMock(page, "success");
   async function signIn() {
-    await page
-      .getByRole("button", { name: "Check local support", exact: true })
-      .click();
     await page.getByLabel("Apple account email").fill("test@example.invalid");
     await page
       .getByLabel("Password", { exact: true })
@@ -683,26 +691,29 @@ test("unavailable local support prevents sign-in without a remote fallback", asy
   page,
 }) => {
   await nativeMock(page, "success");
+  // Local support now fails during sign-in itself, and the failure must be reported as such
+  // without offering any remote alternative.
   await page.evaluate(() => {
-    (window as any).__supportResult = {
-      available: false,
+    (window as any).__accountSignInResult = {
+      stage: "failed",
+      account: null,
+      teams: [],
+      selected_team: null,
+      challenge: null,
       message:
-        "Local authentication is unavailable. No remote fallback was used.",
+        "Sign-in setup failed before account verification. Local macOS authentication support failed.",
     };
   });
-  await page
-    .getByRole("button", { name: "Check local support", exact: true })
-    .click();
   await page.getByLabel("Apple account email").fill("test@example.invalid");
   await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
   await page
     .getByLabel("I agree to authenticate directly with Apple", { exact: false })
     .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
   await expect(
-    page.getByRole("button", { name: "Sign in to Apple" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByText("Local authentication is unavailable.", { exact: false }),
+    page.getByText("Local macOS authentication support failed.", {
+      exact: false,
+    }),
   ).toBeVisible();
   await expect(
     page.getByText("ani.stikstore.app", { exact: false }),

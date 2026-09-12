@@ -66,11 +66,6 @@ export function Accounts({
   ipaPath: string | null;
 }) {
   const [view, setView] = useState<AccountView>(initial);
-  const [support, setSupport] = useState<{
-    available: boolean;
-    message: string;
-  } | null>(null);
-  const [checkingSupport, setCheckingSupport] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -170,20 +165,6 @@ export function Accounts({
       if (mounted.current) setBusy(false);
     }
   }
-  async function checkSupport() {
-    setCheckingSupport(true);
-    setSupport(null);
-    try {
-      setSupport(await invoke("local_auth_support"));
-    } catch {
-      setSupport({
-        available: false,
-        message: "Local authentication support could not be checked.",
-      });
-    } finally {
-      setCheckingSupport(false);
-    }
-  }
   const active = view.stage === "signing_in" || view.stage === "two_factor";
   const signedIn = view.stage === "signed_in";
   const disabled = !desktop || !ready || busy || paused;
@@ -195,17 +176,13 @@ export function Accounts({
         ? "An account action is in progress."
         : paused
           ? "Wait for the current operation to finish before signing in."
-          : checkingSupport
-            ? "Checking local authentication support…"
-            : support?.available === false
-              ? "Local support is unavailable. Use Check local support to retry."
-              : !consent
-                ? "Check the agreement above to enable Apple authentication."
-                : !email.trim()
-                  ? "Enter your Apple account email to sign in."
-                  : !password
-                    ? "Enter your Apple account password to sign in. Passwords are cleared after each attempt, so signing in again needs it retyped."
-                    : null;
+          : !consent
+            ? "Check the agreement above to enable Apple authentication."
+            : !email.trim()
+              ? "Enter your Apple account email to sign in."
+              : !password
+                ? "Enter your Apple account password to sign in. Passwords are cleared after each attempt, so signing in again needs it retyped."
+                : null;
   return (
     <section className="accounts" aria-label="Apple account authentication">
       <strong>Apple account</strong>
@@ -224,25 +201,11 @@ export function Accounts({
           }}
         >
           <p className="hint">
-            Sign in to list your developer teams. Re-signing and provisioning
-            are still being built. Local authentication support is checked when
-            you sign in; the separate check below is optional.
+            Sign in to list your developer teams, register this iPhone, and
+            prepare identifiers and profiles. Signing itself is still being
+            built. Local macOS authentication support is checked as part of
+            signing in.
           </p>
-          <button
-            type="button"
-            className="secondary"
-            disabled={disabled || checkingSupport}
-            onClick={() => void checkSupport()}
-          >
-            {checkingSupport
-              ? "Checking local support…"
-              : "Check local support"}
-          </button>
-          {support && (
-            <p className="hint" role="status">
-              {support.message}
-            </p>
-          )}
           <details className="auth-disclosure">
             <summary>Local authentication & Apple communication</summary>
             <p>
