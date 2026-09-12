@@ -436,6 +436,58 @@ impl Accounts {
         inner.view.selected_team = Some(id);
         Ok(inner.view.clone())
     }
+    /// Register a connected iPhone on the selected team. The first Orbiter operation that writes
+    /// to Apple: it requires an explicit acknowledgement and returns no device identifier.
+    pub async fn register_device(
+        &self,
+        device_id: u32,
+        acknowledged: bool,
+    ) -> Result<crate::provisioning::Outcome, String> {
+        let _gate = self
+            .1
+            .try_lock()
+            .map_err(|_| "Another account operation is already running.")?;
+        let (generation, mut developer, team, free) = {
+            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            inner.expire();
+            let signed_in = inner.session.is_some();
+            let selected = inner.view.selected_team.clone();
+            if let Some(refusal) =
+                crate::provisioning::refusal(acknowledged, selected.is_some(), signed_in)
+            {
+                return Err(refusal.into());
+            }
+            let team =
+                selected.ok_or("Select the signing team that should register this iPhone.")?;
+            let free = inner
+                .view
+                .teams
+                .iter()
+                .find(|candidate| candidate.id == team)
+                .and_then(|candidate| candidate.free)
+                // An unestablished membership is treated as the stricter free allowance.
+                .unwrap_or(true);
+            let session = inner
+                .session
+                .as_ref()
+                .ok_or("Sign in before registering an iPhone.")?;
+            (
+                inner.generation.clone(),
+                session.developer.clone(),
+                team,
+                free,
+            )
+        };
+        // The identifier is read here and handed straight to Apple; it never reaches the view.
+        let (udid, name) = crate::installation::verified_identity(device_id).await?;
+        let outcome =
+            crate::provisioning::register(&mut developer, &team, &udid, &name, free).await;
+        let inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        if inner.generation != generation {
+            return Err("The account session changed during registration. Check the account at developer.apple.com before retrying.".into());
+        }
+        outcome
+    }
     pub async fn refresh_teams(&self) -> Result<View, String> {
         let _gate = self
             .1
@@ -693,6 +745,39 @@ mod tests {
         // Hostile or oversized labels are dropped rather than displayed.
         let hostile = classify(&team("Individual", vec!["bad\nname"]));
         assert_eq!(hostile, (Some(true), None));
+    }
+    #[tokio::test]
+    async fn device_registration_refuses_while_no_live_session_exists() {
+        // Device transport ID 1 is never contacted: every refusal happens before the identifier
+        // is read. Ordering of the individual refusals is covered in provisioning::tests.
+        let manager = Accounts::default();
+        assert!(
+            manager
+                .register_device(1, true)
+                .await
+                .is_err_and(|m| m.contains("Sign in"))
+        );
+        {
+            let mut inner = manager.0.lock().unwrap();
+            inner.view.stage = Stage::SignedIn;
+            inner.view.teams = vec![Team {
+                id: "T8B3X5UL5W".into(),
+                name: "Personal".into(),
+                kind: Some("Individual".into()),
+                free: Some(true),
+                membership: None,
+            }];
+            inner.view.selected_team = Some("T8B3X5UL5W".into());
+            inner.expires_at = Some(Instant::now() + SESSION_LIFETIME);
+        }
+        // A view that says signed in is not a session: the session itself is what authorises a
+        // portal write, so a stale or forged view cannot reach Apple.
+        assert!(
+            manager
+                .register_device(1, true)
+                .await
+                .is_err_and(|m| m.contains("Sign in"))
+        );
     }
     #[test]
     fn local_expiry_clears_account_and_team_selection() {

@@ -55,6 +55,12 @@ struct Phone {
 fn connection_error(_: IdeviceError) -> String {
     "Cannot communicate with the selected iPhone. Unlock it, check trust and the USB cable, and review again.".into()
 }
+/// Verified USB iPhone identity for an in-crate caller: its UDID and display name. The UDID is
+/// deliberately not part of any type that crosses the IPC boundary.
+pub(crate) async fn verified_identity(id: u32) -> Result<(String, String), String> {
+    let phone = phone(id).await?;
+    Ok((phone.raw.udid, phone.name))
+}
 async fn phone(id: u32) -> Result<Phone, String> {
     timeout(Duration::from_secs(10), async {
         let mut mux = address().connect(0).await.map_err(connection_error)?;

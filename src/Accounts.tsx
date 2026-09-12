@@ -29,7 +29,18 @@ const initial: AccountView = {
   challenge: null,
   message: "",
 };
-export function Accounts({ paused }: { paused: boolean }) {
+type Registration = {
+  registration: "already_registered" | "registered";
+  team_devices: number;
+  message: string;
+};
+export function Accounts({
+  paused,
+  deviceId,
+}: {
+  paused: boolean;
+  deviceId: number | null;
+}) {
   const [view, setView] = useState<AccountView>(initial);
   const [support, setSupport] = useState<{
     available: boolean;
@@ -44,6 +55,10 @@ export function Accounts({ paused }: { paused: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [registerAck, setRegisterAck] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const [registration, setRegistration] = useState<Registration | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const mounted = useRef(false);
   const desktop = isTauri();
@@ -83,6 +98,12 @@ export function Accounts({ paused }: { paused: boolean }) {
   useEffect(() => {
     setCode("");
   }, [view.challenge?.id]);
+  useEffect(() => {
+    // A result describes one device on one team; it must not outlive either choice.
+    setRegistration(null);
+    setRegisterError(null);
+    setRegisterAck(false);
+  }, [deviceId, view.selected_team]);
   async function command(name: string, args?: Record<string, unknown>) {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -391,6 +412,69 @@ export function Accounts({ paused }: { paused: boolean }) {
           >
             Refresh teams
           </button>
+          {view.selected_team && (
+            <div className="register-device">
+              <strong>Register this iPhone</strong>
+              <p className="hint">
+                Re-signing for a device requires it registered on the signing
+                team. This writes to your Apple account; nothing else is
+                changed, and the device identifier is sent only to Apple.
+              </p>
+              <label className="auth-consent">
+                <input
+                  type="checkbox"
+                  checked={registerAck}
+                  disabled={disabled || registering || !deviceId}
+                  onChange={(e) => setRegisterAck(e.target.checked)}
+                />
+                I understand a free personal team allows three devices, and a
+                paid team consumes one of its 100 slots for the membership year,
+                which removing the device later does not return.
+              </label>
+              <button
+                className="secondary"
+                disabled={disabled || registering || !deviceId || !registerAck}
+                onClick={() => {
+                  setRegistering(true);
+                  setRegisterError(null);
+                  setRegistration(null);
+                  invoke<Registration>("account_register_device", {
+                    deviceId,
+                    acknowledged: registerAck,
+                  })
+                    .then((result) => {
+                      if (mounted.current) setRegistration(result);
+                    })
+                    .catch(() => {
+                      if (mounted.current)
+                        setRegisterError(
+                          "Registration did not complete. Check the account at developer.apple.com before trying again.",
+                        );
+                    })
+                    .finally(() => {
+                      if (mounted.current) setRegistering(false);
+                    });
+                }}
+              >
+                {registering ? "Registering…" : "Register iPhone on team"}
+              </button>
+              <p className="hint" role="status">
+                {registerError ??
+                  registration?.message ??
+                  (!deviceId
+                    ? "Select a connected iPhone above first."
+                    : !registerAck
+                      ? "Acknowledge the device allowance to enable registration."
+                      : "Ready to register.")}
+              </p>
+              {registration && (
+                <p className="hint">
+                  Devices on this team after the check:{" "}
+                  {registration.team_devices}.
+                </p>
+              )}
+            </div>
+          )}
         </>
       )}
       {!signedIn && (

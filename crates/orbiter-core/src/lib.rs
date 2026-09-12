@@ -5,6 +5,7 @@ pub mod local_anisette;
 mod macho;
 pub mod plan;
 mod profile;
+pub mod provisioning;
 pub mod signing;
 
 use base64::Engine;

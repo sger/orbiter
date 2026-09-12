@@ -269,6 +269,14 @@ fn account_select_team(
     state.select_team(id)
 }
 #[tauri::command]
+async fn account_register_device(
+    device_id: u32,
+    acknowledged: bool,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::provisioning::Outcome, String> {
+    state.register_device(device_id, acknowledged).await
+}
+#[tauri::command]
 async fn account_refresh_teams(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
@@ -302,6 +310,7 @@ fn main() {
             account_sign_out,
             account_select_team,
             account_refresh_teams,
+            account_register_device,
             inspect_ipa,
             cancel_inspection,
             discover_devices,

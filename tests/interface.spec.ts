@@ -156,6 +156,17 @@ async function nativeMock(
               challenge: null,
               message: "Signed out locally.",
             });
+          if (cmd === "account_register_device") {
+            (window as any).__registerRequested = {
+              deviceId: args.deviceId,
+              acknowledged: args.acknowledged,
+            };
+            return {
+              registration: "registered",
+              team_devices: 1,
+              message: "This iPhone is now registered on the selected team.",
+            };
+          }
           if (cmd === "account_refresh_teams")
             return ((window as any).__accountView = {
               stage: "signed_out",
@@ -524,6 +535,65 @@ test("account flow works without a manual support check, requires consent, and n
   await expect(
     page.getByRole("button", { name: "Sign in to Apple" }),
   ).toBeEnabled();
+});
+
+test("registering an iPhone needs a device, a team, and an explicit acknowledgement", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  // No team chosen yet: registration is not even offered.
+  await expect(
+    page.getByRole("button", { name: "Register iPhone on team" }),
+  ).toHaveCount(0);
+  await page.getByLabel("Signing team").selectOption("TEAM2");
+  const register = page.getByRole("button", {
+    name: "Register iPhone on team",
+  });
+  await expect(register).toBeDisabled();
+  await page
+    .getByLabel("I understand a free personal team", { exact: false })
+    .check();
+  await expect(register).toBeEnabled();
+  await register.click();
+  await expect(
+    page.getByText("now registered on the selected team", { exact: false }),
+  ).toBeVisible();
+  // The acknowledgement actually reached the backend with the selected device.
+  expect(
+    await page.evaluate(() => (window as any).__registerRequested),
+  ).toEqual({ deviceId: 1, acknowledged: true });
+  // Changing the team invalidates the result rather than carrying it across.
+  await page.getByLabel("Signing team").selectOption("TEAM1");
+  await expect(
+    page.getByText("now registered on the selected team", { exact: false }),
+  ).toHaveCount(0);
 });
 
 test("cancelled verification clears secrets and failed team refresh clears selection", async ({
