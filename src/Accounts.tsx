@@ -72,11 +72,13 @@ export function Accounts({
   deviceId,
   ipaPath,
   onPrepared,
+  onAccount,
 }: {
   paused: boolean;
   deviceId: number | null;
   ipaPath: string | null;
   onPrepared: (preparation: Preparation | null) => void;
+  onAccount: (account: string | null) => void;
 }) {
   const [view, setView] = useState<AccountView>(initial);
   const [email, setEmail] = useState("");
@@ -141,6 +143,10 @@ export function Accounts({
     };
   }, [desktop]);
   const generation = useRef(0);
+  // The signed-in account is global state: the header shows it and offers signing out there.
+  useEffect(() => {
+    onAccount(view.stage === "signed_in" ? view.account : null);
+  }, [view.stage, view.account, onAccount]);
   useEffect(() => {
     setCode("");
   }, [view.challenge?.id]);
@@ -382,20 +388,6 @@ export function Accounts({
       )}
       {signedIn && (
         <>
-          <div className="account-header">
-            <p className="account-name">{view.account}</p>
-            <button
-              className="text-button"
-              disabled={busy}
-              onClick={() => {
-                setPassword("");
-                setCode("");
-                void command("account_sign_out");
-              }}
-            >
-              Sign out
-            </button>
-          </div>
           <strong className="step">1 · Signing team</strong>
           <label htmlFor="team">Signing team</label>
           <select

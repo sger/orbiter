@@ -91,6 +91,8 @@ main {
 }
 header {
   height: 84px;
+  /* The removed intro block used to provide the gap under the rule. */
+  margin-bottom: 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -126,38 +128,6 @@ header {
   display: inline-block;
   border-radius: 50%;
   background: #578570;
-}
-.intro {
-  padding: 31px 0 27px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.eyebrow {
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 1.7px;
-  color: #748978;
-}
-h1 {
-  font-size: 30px;
-  font-weight: 550;
-  letter-spacing: -1.1px;
-  margin: 9px 0;
-}
-.intro p {
-  font-size: 15px;
-  color: #7b8980;
-  margin: 0;
-}
-.phase {
-  font-size: 12px;
-  letter-spacing: 1px;
-  color: #8b978c;
-  border: 1px solid #dbe3d9;
-  padding: 7px 9px;
-  border-radius: 5px;
-  white-space: nowrap;
 }
 .workspace {
   display: grid;
@@ -759,17 +729,8 @@ details[open] > summary > svg {
   main {
     padding: 0 24px;
   }
-  .phase {
-    display: none;
-  }
-  h1 {
-    font-size: 27px;
-  }
   .workspace {
     gap: 14px;
-  }
-  .wordmark span {
-    font-size: 11px;
   }
   .identity-grid {
     grid-template-columns: 1fr;
@@ -788,15 +749,6 @@ details[open] > summary > svg {
   }
   .workspace {
     grid-template-columns: 1fr;
-  }
-  .wordmark span {
-    display: none;
-  }
-  .intro {
-    padding: 24px 0;
-  }
-  h1 {
-    font-size: 25px;
   }
   .empty-assessment {
     min-height: 300px;
@@ -1037,4 +989,19 @@ details[open] > summary > svg {
 .original-findings summary {
   cursor: pointer;
   padding: 10px 0;
+}
+
+.header-account {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.header-account-name {
+  font-size: 13px;
+  color: #708071;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

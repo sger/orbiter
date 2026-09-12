@@ -649,6 +649,28 @@ test("provisioning replaces unverified findings with what the team established",
   );
 });
 
+test("the signed-in account and sign out live in the header", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await expect(page.getByText("Local workspace")).toBeVisible();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  const header = page.locator("header");
+  await expect(header.getByText("test@example.invalid")).toBeVisible();
+  await expect(page.getByText("Local workspace")).toHaveCount(0);
+  await header.getByRole("button", { name: "Sign out" }).click();
+  // Signing out from the header returns the whole interface to the signed-out state.
+  await expect(page.getByText("Local workspace")).toBeVisible();
+  await expect(page.getByLabel("Apple account email")).toBeVisible();
+});
+
 test("the account panel keeps its content off the panel border", async ({
   page,
 }) => {

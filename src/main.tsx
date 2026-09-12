@@ -128,6 +128,7 @@ function App() {
     [cancelled, setCancelled] = useState(false);
   const [ipaPath, setIpaPath] = useState<string | null>(null);
   const [preparation, setPreparation] = useState<Preparation | null>(null);
+  const [account, setAccount] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<number | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const installActive = useRef(false);
@@ -232,24 +233,25 @@ function App() {
       </aside>
       <main>
         <header>
-          <div className="wordmark">
-            orbiter<span>DEVELOPER WORKSPACE</span>
-          </div>
-          <span className="local">
-            <i /> Local workspace
-          </span>
+          <div className="wordmark">orbiter</div>
+          {account ? (
+            <div className="header-account">
+              <span className="header-account-name" title={account}>
+                {account}
+              </span>
+              <button
+                className="text-button"
+                onClick={() => void invoke("account_sign_out").catch(() => {})}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <span className="local">
+              <i /> Local workspace
+            </span>
+          )}
         </header>
-        <div className="intro">
-          <div>
-            <div className="eyebrow">YOUR BUILD. YOUR DEVICE.</div>
-            <h1>A shorter path to your iPhone.</h1>
-            <p>
-              Inspect your company build and understand what it needs to
-              install.
-            </p>
-          </div>
-          <span className="phase">PREVIEW · ACCOUNT SIGN-IN</span>
-        </div>
         {!desktop && (
           <div className="notice">
             <Info size={17} />
@@ -369,6 +371,7 @@ function App() {
                 deviceId={deviceId}
                 ipaPath={ipaPath}
                 onPrepared={setPreparation}
+                onAccount={setAccount}
               />
               <p className="hint">
                 A different account on the same company team shares that team's
