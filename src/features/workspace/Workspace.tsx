@@ -69,6 +69,9 @@ export function Workspace({
     [invalidate],
   );
   const [preparation, setPreparation] = useState<Preparation | null>(null);
+  // On by default: the case this exists for — a tester who still has the company build — is the
+  // normal one, and two identical icons is a support question waiting to be asked.
+  const [marker, setMarker] = useState("test");
   const [deviceId, setDeviceId] = useState<number | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const installActive = useRef(false);
@@ -104,10 +107,11 @@ export function Workspace({
   const steps = stages(pipeline);
   // The identifier the plan would produce, which is what a record is matched against. Before a
   // plan exists there is nothing to match, and the banner says so rather than guessing.
-  const { renewal, refresh: refreshRenewal, forget: forgetRenewal } = useRenewal(
-    team.teamId,
-    preparation?.plan.new_main_identifier ?? null,
-  );
+  const {
+    renewal,
+    refresh: refreshRenewal,
+    forget: forgetRenewal,
+  } = useRenewal(team.teamId, preparation?.plan.new_main_identifier ?? null);
   // An install that has just finished is the moment a record appears — or, when it failed, the
   // moment it is worth confirming that nothing new is remembered.
   const installationBusy = useCallback(
@@ -307,7 +311,7 @@ export function Workspace({
       <RenewalBanner
         renewal={renewal}
         canResign={!signing && blocked === "" && desktop}
-        onResign={() => void sign(ipaPath!, team.watch)}
+        onResign={() => void sign(ipaPath!, team.watch, marker)}
         onForget={forgetRenewal}
       />
       <SigningPanel
@@ -319,7 +323,9 @@ export function Workspace({
         app={app}
         blocked={blocked}
         desktop={desktop}
-        onSign={() => void sign(ipaPath!, team.watch)}
+        marker={marker}
+        onMarker={setMarker}
+        onSign={() => void sign(ipaPath!, team.watch, marker)}
       />
       <InstallSigned
         path={signed ? signed.path : ipaPath}

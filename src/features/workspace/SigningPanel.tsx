@@ -1,6 +1,11 @@
 import { ArrowRight, Clock3 } from "lucide-react";
 import type { Bundle, Preparation, Signed, SigningProgress } from "../../types";
 import { date } from "./format";
+import { Checkbox } from "../../components/ui/Checkbox";
+
+/// The most Rust will keep of a marker. Stated here only so the field stops accepting characters
+/// it would silently drop; the rule itself lives in `signer::marker`.
+const MARKER_LIMIT = 12;
 
 export function SigningPanel({
   signing,
@@ -11,6 +16,8 @@ export function SigningPanel({
   app,
   blocked,
   desktop,
+  marker,
+  onMarker,
   onSign,
 }: {
   signing: boolean;
@@ -21,6 +28,9 @@ export function SigningPanel({
   app: Bundle | undefined;
   blocked: string;
   desktop: boolean;
+  /// Empty means the signed app keeps the company build's name.
+  marker: string;
+  onMarker: (value: string) => void;
   onSign: () => void;
 }) {
   return (
@@ -69,6 +79,31 @@ export function SigningPanel({
             <pre>{(signed.log ?? []).join("\n")}</pre>
           </details>
         )}
+        {/* Both builds are called the same thing and carry the same icon, so a tester who still has
+      the company one installed cannot tell which is which. A prefix, because the Home Screen
+      truncates the end of a name. Only the signed build's display name changes; the company
+      IPA is never written to. */}
+        <div className="marker">
+          <Checkbox
+            checked={marker !== ""}
+            disabled={signing}
+            onChange={(event) => onMarker(event.target.checked ? "test" : "")}
+          >
+            Mark the signed app's name
+          </Checkbox>
+          <input
+            aria-label="Name marker"
+            value={marker}
+            disabled={signing || marker === ""}
+            maxLength={MARKER_LIMIT}
+            onChange={(event) => onMarker(event.target.value)}
+          />
+          <span>
+            {marker === ""
+              ? `Both apps will be called ${app?.name ?? "the same thing"}.`
+              : `Shows as "${marker.trim()} ${app?.name ?? "App"}".`}
+          </span>
+        </div>
       </div>
       <button
         className="primary"

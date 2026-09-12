@@ -405,6 +405,7 @@ async fn account_withdraw_certificates(
 async fn account_sign_ipa(
     path: String,
     watch: String,
+    marker: String,
     progress: tauri::ipc::Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
     state: State<'_, orbiter_core::accounts::Accounts>,
@@ -420,6 +421,8 @@ async fn account_sign_ipa(
             std::path::PathBuf::from(path),
             out_dir,
             orbiter_core::plan::WatchChoice::parse(&watch),
+            // The interface offers a default and a field; the rule about what is usable is here.
+            orbiter_core::signer::marker(&marker),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             move |step| {
                 // A dropped channel means the window went away; the run finishes regardless.

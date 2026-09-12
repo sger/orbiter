@@ -149,6 +149,8 @@ A free personal team has no certificates page at developer.apple.com. When its o
 
 The rewritten identifier is itself a consequence, stated alongside the capability losses. Nothing in the build is wrong and no entitlement is involved: the identifier is the credential that identity providers and backends check, and it had to change for another team to sign at all. The plan names the SDKs it can see in the build whose services pin it — currently the Facebook SDK and Google Sign-In, by framework identifier — and says plainly that a company's own backend commonly pins it too. Because the suffix derives from the team, every tester's build has a different identifier, so each one has to be registered separately with whatever checks it.
 
+The signed build's main app can carry a short marker in front of its display name, on by default, so a tester who still has the company build installed can tell two identical icons apart. A prefix, because the Home Screen truncates the end of a name. `signer::marker` decides what is usable — trimmed, control characters dropped, bounded — so the rule holds wherever the value comes from rather than only where it is typed. Only `CFBundleDisplayName`, and only on the main app: `CFBundleName` is filename-adjacent, and rewriting one of those is what produced a build iOS refused to install; nested bundles have no icon a person sees. A bundle with no name is left without one rather than being given the marker as its name, and re-signing the same build every week does not stack markers.
+
 ## Device log capture
 
 `diagnostics.rs` streams the iPhone's system log over the same local usbmuxd transport discovery and installation use, and it exists to answer one question: why did a screen in the re-signed build fail?

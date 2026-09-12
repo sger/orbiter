@@ -106,6 +106,14 @@ export const sections: HelpSection[] = [
           collecting a new icon every week.
         </p>
         <p>
+          Because the signed build replaces nothing on the company side, a
+          tester may end up with both apps and two identical icons. The signing
+          step marks the signed one's name — <em>test Stoiximan</em> — as a
+          prefix, since the Home Screen cuts off the end of a name. It is a
+          checkbox, so it can be turned off; only the signed build's display
+          name changes, and the company IPA is never written to.
+        </p>
+        <p>
           Orbiter remembers when a build it installed runs out and says so on
           the IPAs page, counting down in whole days and then announcing it once
           the app has stopped launching. It keeps only what that line needs: the

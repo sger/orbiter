@@ -660,6 +660,8 @@ impl Accounts {
         path: std::path::PathBuf,
         out_dir: std::path::PathBuf,
         watch: crate::plan::WatchChoice,
+        // Already cleaned by `signer::marker`; `None` leaves every display name alone.
+        marker: Option<String>,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         progress: impl FnMut(crate::signer::Progress) + Send + 'static,
     ) -> Result<crate::signer::Signed, String> {
@@ -715,7 +717,14 @@ impl Accounts {
                 .map(|bundle| bundle.name.clone())
                 .unwrap_or_else(|| plan.new_main_identifier.clone());
             crate::signer::sign(
-                &path, &out_dir, &plan, &profiles, &identity, &cancel, progress,
+                &path,
+                &out_dir,
+                &plan,
+                &profiles,
+                &identity,
+                marker.as_deref(),
+                &cancel,
+                progress,
             )
             .map(|signed| (signed, app_name))
         })

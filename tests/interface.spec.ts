@@ -199,6 +199,7 @@ async function nativeMock(
             (window as any).__signRequested = {
               path: args.path,
               watch: args.watch,
+              marker: args.marker,
             };
             if ((window as any).__signFailure)
               throw (window as any).__signFailure;
@@ -1616,16 +1617,14 @@ test("a remembered build states its seven days without offering a blocked action
   await expect(banner).toContainText("stops launching in 5 days");
   await expect(banner).not.toHaveClass(/renewal-urgent/);
   // Re-signing is blocked this early, so the banner must not invite it.
-  await expect(
-    page.getByRole("button", { name: "Re-sign now" }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Re-sign now" })).toHaveCount(
+    0,
+  );
 
   // Forgetting is complete and immediate.
   await page.getByRole("button", { name: "Forget" }).click();
   await expect
-    .poll(async () =>
-      page.evaluate(() => (window as any).__renewalForgotten),
-    )
+    .poll(async () => page.evaluate(() => (window as any).__renewalForgotten))
     .toBe(true);
   await expect(page.locator(".renewal")).toHaveCount(0);
 });
@@ -1726,5 +1725,108 @@ test("an expired build is announced and re-signs from the banner", async ({
   // second signing path that could drift from the first.
   await expect
     .poll(async () => page.evaluate(() => (window as any).__signRequested))
-    .toEqual({ path: "/synthetic/Test.ipa", watch: "undecided" });
+    .toEqual({
+      path: "/synthetic/Test.ipa",
+      watch: "undecided",
+      marker: "test",
+    });
+});
+
+/// Sign in, pick the free team, and get as far as a build that could be re-signed.
+async function readyToSign(page: import("@playwright/test").Page) {
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
+  await page
+    .getByLabel("I understand this uses one of the team's", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Get development certificate" })
+    .click();
+  await page
+    .getByLabel("I understand ten identifiers per seven days", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Prepare identifiers & profiles" })
+    .click();
+  await expect(page.getByRole("button", { name: "Re-sign IPA" })).toBeEnabled();
+}
+
+test("the signed app is marked by default and says how it will read", async ({
+  page,
+}) => {
+  await readyToSign(page);
+  const field = page.getByLabel("Name marker");
+  const box = page.getByRole("checkbox", {
+    name: "Mark the signed app's name",
+  });
+  // On by default: a tester who still has the company build is the ordinary case, and two
+  // identical icons is the problem this exists for.
+  await expect(box).toBeChecked();
+  await expect(field).toHaveValue("test");
+  await expect(
+    page.getByText('Shows as "test Synthetic Test App".'),
+  ).toBeVisible();
+
+  await field.fill("internal");
+  await expect(
+    page.getByText('Shows as "internal Synthetic Test App".'),
+  ).toBeVisible();
+  await page
+    .locator(".action-bar")
+    .screenshot({ path: "test-results/marker.png" });
+  await page.getByRole("button", { name: "Re-sign IPA" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as any).__signRequested?.marker),
+    )
+    .toBe("internal");
+});
+
+test("turning the marker off leaves both apps named the same, and says so", async ({
+  page,
+}) => {
+  await readyToSign(page);
+  await page
+    .getByRole("checkbox", { name: "Mark the signed app's name" })
+    .uncheck();
+  const field = page.getByLabel("Name marker");
+  await expect(field).toHaveValue("");
+  await expect(field).toBeDisabled();
+  // The consequence of switching it off is stated, rather than the line simply going blank.
+  await expect(
+    page.getByText("Both apps will be called Synthetic Test App."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Re-sign IPA" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as any).__signRequested?.marker),
+    )
+    .toBe("");
 });

@@ -1368,3 +1368,35 @@
     color: #b65b47;
   }
 }
+
+@layer components {
+  /* Both builds carry the same name and the same icon. This is the one line that separates them
+     on a tester's Home Screen, so it sits with the control that produces the build. */
+  .marker {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 11px;
+  }
+  .marker .checkbox-field {
+    margin: 0;
+  }
+  .marker input[type="text"],
+  .marker > input:not([type]) {
+    width: 88px;
+    padding: 6px 9px;
+    border: 1px solid var(--color-line);
+    border-radius: 6px;
+    background: var(--color-surface-soft);
+    font-size: 13px;
+    color: var(--color-ink);
+  }
+  .marker > input:disabled {
+    color: var(--color-ink-faint);
+  }
+  .marker > span {
+    font-size: 12px;
+    color: var(--color-ink-faint);
+  }
+}

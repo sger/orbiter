@@ -19,6 +19,7 @@ Validation date: 2026-09-12. Host: Apple Silicon macOS. Automated tests use smal
 | Existing-signature installation transport | User confirmed native installation succeeded on the already provisioned USB iPhone | Not tested |
 | Provisioning and nested signing | Device registration, certificate, App IDs and profiles run live against a free personal team; the signer rewrites identifiers, embeds each profile and signs every bundle inside-out | Run once end to end on a physical iPhone |
 | Cryptographic verification of the produced signature | Not implemented: Orbiter makes no claim about signature validity. iOS accepting the build is the only evidence | Not implemented |
+| Display-name marker | Unit tests cover cleaning and refusal, that only the main app's `CFBundleDisplayName` changes, that nested bundles and `CFBundleName`/`CFBundleExecutable` are untouched, and that weekly re-signing does not stack markers | Not confirmed on a Home Screen |
 | Seven-day expiry tracking | Unit tests cover day rounding, the expiry boundary, a damaged or oversized file, staleness against another team or build, and that the stored record contains no team identifier, path, or address | Not observed across a real seven-day boundary |
 | Re-signing on a schedule | Not implemented, and not intended: every Apple call stays behind a click | Not implemented |
 | Launch, login, data retention, capability behavior | User confirmed app works correctly; individual capabilities and data retention not separately recorded | Not tested on a physical device |

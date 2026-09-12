@@ -11,13 +11,18 @@ export function useSigning() {
     setSigned(null);
     setSignError(null);
   }, []);
-  async function sign(path: string, watch: WatchChoice) {
+  async function sign(path: string, watch: WatchChoice, marker: string) {
     setSigning(true);
     invalidate();
     setSignStep(null);
     try {
       setSigned(
-        await signIpa(path, watch, channel<SigningProgress>(setSignStep)),
+        await signIpa(
+          path,
+          watch,
+          marker,
+          channel<SigningProgress>(setSignStep),
+        ),
       );
     } catch (error) {
       setSignError(

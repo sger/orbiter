@@ -283,10 +283,60 @@ fn rewrite(identifier_valued: bool, value: &mut plist::Value, map: &BTreeMap<Str
     }
 }
 
+/// The most a display-name marker may be, in characters. Long enough for "internal", short enough
+/// that the Home Screen still shows some of the app's own name beside it.
+pub const MARKER_LIMIT: usize = 12;
+
+/// Clean a marker typed by a person, or decide there isn't one.
+///
+/// Rust decides this rather than the interface, so a marker that arrives from anywhere — a future
+/// command-line run, a test — is held to the same rule as one typed into the window. Control
+/// characters and interior whitespace are dropped: this ends up in a name iOS renders under an
+/// icon, and a newline there is not a label, it is a defect.
+pub fn marker(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MARKER_LIMIT)
+        .collect();
+    let cleaned = cleaned.trim().to_string();
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
+/// Prefix the main app's display name so a tester can tell two identical icons apart.
+///
+/// A prefix, not a suffix: the Home Screen truncates the end of a name, so a suffix is the part
+/// that disappears. Only `CFBundleDisplayName` is written, and only on the main app — never
+/// `CFBundleName`, which is filename-adjacent and is exactly the kind of value whose rewriting
+/// produced a build iOS refused, and never a nested bundle, which a person does not see.
+fn mark(dictionary: &mut plist::Dictionary, marker: &str) {
+    let Some(current) = dictionary
+        .get("CFBundleDisplayName")
+        .or_else(|| dictionary.get("CFBundleName"))
+        .and_then(plist::Value::as_string)
+        .map(str::to_owned)
+    else {
+        // No name to mark. Inventing one would put a word on the Home Screen where the app's own
+        // name should be.
+        return;
+    };
+    // Re-signing the same build weekly must not stack markers into "test test test Stoiximan".
+    let base = current
+        .strip_prefix(marker)
+        .and_then(|rest| rest.strip_prefix(' '))
+        .unwrap_or(&current);
+    dictionary.insert(
+        "CFBundleDisplayName".into(),
+        plist::Value::String(format!("{marker} {base}")),
+    );
+}
+
 fn rewrite_info(
     path: &Path,
     identifier: &str,
     map: &BTreeMap<String, String>,
+    marker: Option<&str>,
 ) -> Result<(), String> {
     let info = path.join("Info.plist");
     let bytes = fs::read(&info).map_err(|_| "A bundle has no readable Info.plist.".to_string())?;
@@ -300,6 +350,9 @@ fn rewrite_info(
             "CFBundleIdentifier".into(),
             plist::Value::String(identifier.to_string()),
         );
+        if let Some(marker) = marker {
+            mark(dictionary, marker);
+        }
     }
     let mut out = Vec::new();
     plist::to_writer_binary(&mut std::io::Cursor::new(&mut out), &value)
@@ -379,12 +432,18 @@ fn entitlements(profile: &ProfileOutcome) -> Result<plist::Dictionary, String> {
 }
 
 /// Sign the IPA. Returns the new file; the original is never opened for writing.
+// Each argument is a separate thing a caller decides; bundling them into a struct would hide which
+// of them the caller actually chose. `run` carries the same allow for the same reason.
+#[allow(clippy::too_many_arguments)]
 pub fn sign(
     ipa: &Path,
     out_dir: &Path,
     plan: &Plan,
     profiles: &[ProfileOutcome],
     identity: &Identity,
+    // A short word put in front of the main app's display name, so a tester with the company
+    // build already installed can tell the two icons apart. `None` leaves every name alone.
+    marker: Option<&str>,
     cancel: &AtomicBool,
     mut progress: impl FnMut(Progress),
 ) -> Result<Signed, String> {
@@ -395,6 +454,7 @@ pub fn sign(
         plan,
         profiles,
         identity,
+        marker,
         cancel,
         &mut progress,
         &mut log,
@@ -414,6 +474,7 @@ fn run(
     plan: &Plan,
     profiles: &[ProfileOutcome],
     identity: &Identity,
+    marker: Option<&str>,
     cancel: &AtomicBool,
     progress: &mut impl FnMut(Progress),
     log: &mut Log,
@@ -457,13 +518,21 @@ fn run(
         .collect();
     for bundle in &plan.bundles {
         cancelled(cancel)?;
-        rewrite_info(&root.join(&bundle.path), &bundle.new_identifier, &map)?;
+        // Only the main app is marked: it is the one with an icon on the Home Screen, and it is
+        // the only place the two builds are told apart.
+        let mark = (bundle.identifier == plan.main_identifier)
+            .then_some(marker)
+            .flatten();
+        rewrite_info(&root.join(&bundle.path), &bundle.new_identifier, &map, mark)?;
     }
     log.note(format!(
         "{} bundle(s) rewritten, main identifier now {}",
         plan.bundles.len(),
         plan.new_main_identifier
     ));
+    if let Some(marker) = marker {
+        log.note(format!("main app display name marked \"{marker}\""));
+    }
 
     log.stage(STAGES[2]);
     let carrying: Vec<_> = plan
@@ -774,11 +843,37 @@ mod tests {
     }
 
     fn write_bundle(root: &Path, path: &str, identifier: &str) {
+        write_named_bundle(root, path, identifier, None);
+    }
+
+    pub(super) fn write_named_bundle(
+        root: &Path,
+        path: &str,
+        identifier: &str,
+        name: Option<&str>,
+    ) {
         let dir = root.join(path);
         std::fs::create_dir_all(&dir).expect("bundle directory");
         let mut info = plist::Dictionary::new();
         info.insert("CFBundleIdentifier".into(), identifier.into());
+        if let Some(name) = name {
+            info.insert("CFBundleDisplayName".into(), name.into());
+            info.insert("CFBundleName".into(), name.into());
+            info.insert("CFBundleExecutable".into(), name.into());
+        }
         plist::to_file_binary(dir.join("Info.plist"), &info).expect("Info.plist");
+    }
+
+    pub(super) fn info(root: &Path, path: &str) -> plist::Dictionary {
+        plist::Value::from_file(root.join(path).join("Info.plist"))
+            .expect("Info.plist")
+            .into_dictionary()
+            .expect("dictionary")
+    }
+    pub(super) fn text(d: &plist::Dictionary, key: &str) -> Option<String> {
+        d.get(key)
+            .and_then(plist::Value::as_string)
+            .map(str::to_owned)
     }
 
     #[test]
@@ -819,6 +914,7 @@ mod tests {
             &root.path().join("Payload/App.app"),
             "com.company.app.abcd1234",
             &BTreeMap::new(),
+            None,
         )
         .expect("rewrite");
         let value = plist::Value::from_file(root.path().join("Payload/App.app/Info.plist"))
@@ -893,5 +989,150 @@ mod log_tests {
         let message = log.failed("The signature could not be produced.".into());
         assert!(message.contains("signing bundles"));
         assert!(message.contains("The signature could not be produced."));
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::tests::{info, text, write_named_bundle};
+    use super::*;
+
+    #[test]
+    fn a_marker_is_cleaned_or_refused() {
+        assert_eq!(marker("test").as_deref(), Some("test"));
+        assert_eq!(marker("  test  ").as_deref(), Some("test"));
+        // Nothing usable is not a marker, and must not become an empty prefix and a stray space.
+        assert_eq!(marker(""), None);
+        assert_eq!(marker("   "), None);
+        assert_eq!(marker("\n\t"), None);
+        // A name rendered under an icon has no business containing control characters.
+        assert_eq!(marker("te\nst").as_deref(), Some("test"));
+        // Bounded, so a pasted paragraph cannot become the app's name.
+        assert_eq!(
+            marker(&"x".repeat(200)).unwrap().chars().count(),
+            MARKER_LIMIT
+        );
+    }
+
+    #[test]
+    fn only_the_main_app_is_marked_and_only_its_display_name() {
+        let root = tempfile::tempdir().expect("working directory");
+        write_named_bundle(
+            root.path(),
+            "Payload/App.app",
+            "com.company.app",
+            Some("Stoiximan"),
+        );
+        write_named_bundle(
+            root.path(),
+            "Payload/App.app/Frameworks/Data.framework",
+            "VirtualStadiumDataSDK",
+            Some("VirtualStadiumDataSDK"),
+        );
+        rewrite_info(
+            &root.path().join("Payload/App.app"),
+            "com.company.app.abcd1234",
+            &BTreeMap::new(),
+            Some("test"),
+        )
+        .expect("rewrite main");
+        rewrite_info(
+            &root
+                .path()
+                .join("Payload/App.app/Frameworks/Data.framework"),
+            "VirtualStadiumDataSDK.abcd1234",
+            &BTreeMap::new(),
+            None,
+        )
+        .expect("rewrite framework");
+
+        let main = info(root.path(), "Payload/App.app");
+        assert_eq!(
+            text(&main, "CFBundleDisplayName").as_deref(),
+            Some("test Stoiximan")
+        );
+        // CFBundleName is filename-adjacent, and rewriting one of those is what produced a build
+        // iOS refused to install. The marker never touches it, and never touches the executable.
+        assert_eq!(text(&main, "CFBundleName").as_deref(), Some("Stoiximan"));
+        assert_eq!(
+            text(&main, "CFBundleExecutable").as_deref(),
+            Some("Stoiximan")
+        );
+
+        let framework = info(root.path(), "Payload/App.app/Frameworks/Data.framework");
+        for key in ["CFBundleDisplayName", "CFBundleName", "CFBundleExecutable"] {
+            assert_eq!(
+                text(&framework, key).as_deref(),
+                Some("VirtualStadiumDataSDK"),
+                "a nested bundle has no icon on the Home Screen and must keep every name it had"
+            );
+        }
+    }
+
+    #[test]
+    fn re_signing_every_week_does_not_stack_markers() {
+        let root = tempfile::tempdir().expect("working directory");
+        write_named_bundle(
+            root.path(),
+            "Payload/App.app",
+            "com.company.app",
+            Some("Stoiximan"),
+        );
+        for _ in 0..3 {
+            rewrite_info(
+                &root.path().join("Payload/App.app"),
+                "com.company.app.abcd1234",
+                &BTreeMap::new(),
+                Some("test"),
+            )
+            .expect("rewrite");
+        }
+        assert_eq!(
+            text(&info(root.path(), "Payload/App.app"), "CFBundleDisplayName").as_deref(),
+            Some("test Stoiximan")
+        );
+    }
+
+    #[test]
+    fn a_nameless_bundle_is_left_nameless() {
+        let root = tempfile::tempdir().expect("working directory");
+        write_named_bundle(root.path(), "Payload/App.app", "com.company.app", None);
+        rewrite_info(
+            &root.path().join("Payload/App.app"),
+            "com.company.app.abcd1234",
+            &BTreeMap::new(),
+            Some("test"),
+        )
+        .expect("rewrite");
+        // Marking a name that does not exist would put the marker on the Home Screen where the
+        // app's own name belongs.
+        assert_eq!(
+            text(&info(root.path(), "Payload/App.app"), "CFBundleDisplayName"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_bundle_with_only_a_short_name_is_marked_without_losing_it() {
+        let root = tempfile::tempdir().expect("working directory");
+        let dir = root.path().join("Payload/App.app");
+        std::fs::create_dir_all(&dir).expect("bundle directory");
+        let mut plist_info = plist::Dictionary::new();
+        plist_info.insert("CFBundleIdentifier".into(), "com.company.app".into());
+        plist_info.insert("CFBundleName".into(), "Stoiximan".into());
+        plist::to_file_binary(dir.join("Info.plist"), &plist_info).expect("Info.plist");
+        rewrite_info(
+            &dir,
+            "com.company.app.abcd1234",
+            &BTreeMap::new(),
+            Some("test"),
+        )
+        .expect("rewrite");
+        let main = info(root.path(), "Payload/App.app");
+        assert_eq!(
+            text(&main, "CFBundleDisplayName").as_deref(),
+            Some("test Stoiximan")
+        );
+        assert_eq!(text(&main, "CFBundleName").as_deref(), Some("Stoiximan"));
     }
 }

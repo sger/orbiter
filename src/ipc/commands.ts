@@ -81,8 +81,11 @@ export const prepareProvisioning = (
 export const signIpa = (
   path: string,
   watch: WatchChoice,
+  /// Prefix for the signed app's display name; "" leaves every name alone. Rust decides what is
+  /// usable, so whatever is typed here is sent as typed.
+  marker: string,
   progress: Channel<SigningProgress>,
-) => invoke<Signed>("account_sign_ipa", { path, watch, progress });
+) => invoke<Signed>("account_sign_ipa", { path, watch, marker, progress });
 
 // The seven-day clock. Reads a local file and a clock; never Apple, never the phone.
 export const renewalStatus = (
