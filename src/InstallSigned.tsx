@@ -1,0 +1,299 @@
+import { useEffect, useRef, useState } from "react";
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import { ArrowRight, LoaderCircle } from "lucide-react";
+type Review = {
+  token: string;
+  app_name: string;
+  bundle_id: string;
+  version: string | null;
+  device_name: string;
+  size_bytes: number;
+  sha256: string;
+  existing_app: { version: string | null; build: string | null } | null;
+  blockers: string[];
+  notes: string[];
+};
+type Job = {
+  id: string;
+  stage:
+    | "preparing"
+    | "transferring"
+    | "installing"
+    | "installed"
+    | "failed"
+    | "cancelled"
+    | "unknown";
+  message: string;
+  transferred_bytes: number;
+  total_bytes: number;
+  device_percent: number | null;
+  cleanup_pending: boolean;
+};
+export function InstallSigned({
+  path,
+  deviceId,
+  onBusy,
+}: {
+  path: string | null;
+  deviceId: number | null;
+  onBusy: (busy: boolean) => void;
+}) {
+  const [review, setReview] = useState<Review | null>(null),
+    [job, setJob] = useState<Job | null>(null),
+    [working, setWorking] = useState(false),
+    [preparing, setPreparing] = useState(false),
+    [accepted, setAccepted] = useState(false),
+    [error, setError] = useState("");
+  const operation = useRef(false);
+  const generation = useRef(0);
+  const current = useRef<Review | null>(null);
+  function discard() {
+    const old = current.current;
+    current.current = null;
+    if (old)
+      void invoke("discard_install", { token: old.token }).catch(() => {});
+  }
+  useEffect(() => {
+    generation.current++;
+    discard();
+    setReview(null);
+    setAccepted(false);
+    setError("");
+    return () => {
+      generation.current++;
+      discard();
+    };
+  }, [path, deviceId]);
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function readStatus() {
+      if (disposed) return;
+      if (operation.current) {
+        timer = setTimeout(readStatus, 1000);
+        return;
+      }
+      try {
+        const status = await invoke<Job | null>("installation_status");
+        if (disposed) return;
+        if (operation.current) {
+          timer = setTimeout(readStatus, 1000);
+          return;
+        }
+        setJob(status ?? null);
+        const active =
+          !!status &&
+          ["preparing", "transferring", "installing"].includes(status.stage);
+        setWorking(active);
+        onBusy(active);
+        if (active) timer = setTimeout(readStatus, 1000);
+      } catch {
+        if (!disposed)
+          setError(
+            "Could not read the previous installation status. Check the phone before retrying.",
+          );
+      }
+    }
+    void readStatus();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [onBusy]);
+  async function prepare() {
+    if (!path || deviceId === null) return;
+    const version = ++generation.current;
+    discard();
+    setReview(null);
+    setAccepted(false);
+    setError("");
+    operation.current = true;
+    setPreparing(true);
+    onBusy(true);
+    try {
+      const next = await invoke<Review>("prepare_install", { path, deviceId });
+      if (generation.current !== version) {
+        void invoke("discard_install", { token: next.token });
+        return;
+      }
+      current.current = next;
+      setReview(next);
+    } catch (e) {
+      if (generation.current === version) setError(String(e));
+    } finally {
+      operation.current = false;
+      setPreparing(false);
+      onBusy(false);
+    }
+  }
+  async function install() {
+    if (!review || !accepted || review.blockers.length) return;
+    operation.current = true;
+    setWorking(true);
+    onBusy(true);
+    setError("");
+    setJob(null);
+    const progress = new Channel<Job>();
+    progress.onmessage = setJob;
+    try {
+      setJob(
+        await invoke<Job>("execute_install", {
+          token: review.token,
+          acknowledged: accepted,
+          progress,
+        }),
+      );
+    } catch (e) {
+      setError(String(e));
+      try {
+        setJob(await invoke<Job | null>("installation_status"));
+      } catch {
+        /* Keep the actionable execution error. */
+      }
+    } finally {
+      operation.current = false;
+      setWorking(false);
+      onBusy(false);
+      setReview(null);
+      current.current = null;
+      setAccepted(false);
+    }
+  }
+  async function cancel() {
+    try {
+      const accepted = await invoke<boolean>("cancel_install");
+      if (!accepted)
+        setError(
+          "iOS installation has already started or the job finished. Check the reported outcome.",
+        );
+    } catch {
+      setError(
+        "Could not request cancellation. Keep the phone connected and wait for the result.",
+      );
+    }
+  }
+  return (
+    <section className="card signed-install">
+      <div className="section-heading">
+        <h2>Install existing signature</h2>
+        <span className="subtle">TRANSPORT PREVIEW</span>
+      </div>
+      <div className="install-body">
+        <p>
+          Install the selected IPA unchanged on the selected USB iPhone. No
+          Apple account is needed. The build must already be provisioned for
+          this device.
+        </p>
+        <button
+          className="review-button"
+          disabled={
+            !isTauri() || !path || deviceId === null || preparing || working
+          }
+          onClick={prepare}
+        >
+          {preparing ? (
+            <>
+              <LoaderCircle size={16} className="spin" />
+              Checking IPA and iPhone…
+            </>
+          ) : (
+            <>
+              Review installation <ArrowRight size={16} />
+            </>
+          )}
+        </button>
+        {review && (
+          <div className="install-review">
+            <h3>
+              {review.app_name} {review.version} → {review.device_name}
+            </h3>
+            <code>{review.bundle_id}</code>
+            <p>
+              {(review.size_bytes / 1024 / 1024).toFixed(1)} MB · Review expires
+              in 10 minutes
+            </p>
+            <p>
+              {review.existing_app
+                ? `An app with this bundle ID is already installed (${review.existing_app.version ?? "unknown version"}). This installation may replace it.`
+                : "No app with this bundle ID was found at review time."}
+            </p>
+            <details>
+              <summary>Reviewed IPA fingerprint</summary>
+              <code>{review.sha256}</code>
+            </details>
+            {review.notes.map((note, i) => (
+              <p key={i}>{note}</p>
+            ))}
+            {review.blockers.length > 0 ? (
+              <div className="install-blockers" role="alert">
+                <strong>Installation blocked</strong>
+                <ul>
+                  {review.blockers.map((b, i) => (
+                    <li key={i}>{b}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <>
+                <label className="install-consent">
+                  <input
+                    type="checkbox"
+                    checked={accepted}
+                    onChange={(e) => setAccepted(e.target.checked)}
+                    disabled={working}
+                  />
+                  I authorize installation on this iPhone, including replacement
+                  of the same app if present. I understand data retention is not
+                  guaranteed.
+                </label>
+                <button
+                  className="review-button"
+                  disabled={!accepted || working}
+                  onClick={install}
+                >
+                  Install unchanged IPA <ArrowRight size={16} />
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {error && (
+          <p className="install-error" role="alert">
+            {error}
+          </p>
+        )}
+        {job && (
+          <div className="install-job" role="status" aria-live="polite">
+            <strong>
+              {job.stage === "installed"
+                ? "iOS reported installation complete"
+                : job.stage === "unknown"
+                  ? "Installation outcome unknown"
+                  : `Installation: ${job.stage}`}
+            </strong>
+            <p>{job.message}</p>
+            {job.stage === "transferring" && (
+              <>
+                <progress max={job.total_bytes} value={job.transferred_bytes} />
+                <p>
+                  {(job.transferred_bytes / 1024 / 1024).toFixed(1)} /{" "}
+                  {(job.total_bytes / 1024 / 1024).toFixed(1)} MB transferred
+                </p>
+              </>
+            )}
+            {job.stage === "installing" && job.device_percent !== null && (
+              <p>iOS-reported progress: {job.device_percent}%</p>
+            )}
+            {working &&
+              (job.stage === "preparing" || job.stage === "transferring") && (
+                <button className="text-button" onClick={cancel}>
+                  Cancel transfer
+                </button>
+              )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

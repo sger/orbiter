@@ -23,6 +23,7 @@ import {
 import type { Report, Bundle } from "./types";
 import "./styles.css";
 import { Devices } from "./Devices";
+import { InstallSigned } from "./InstallSigned";
 const stages = [
   "Checking archive",
   "Reading bundles and signatures",
@@ -49,13 +50,22 @@ function App() {
     [error, setError] = useState(""),
     [drag, setDrag] = useState(false),
     [cancelled, setCancelled] = useState(false);
+  const [ipaPath, setIpaPath] = useState<string | null>(null);
+  const [deviceId, setDeviceId] = useState<number | null>(null);
+  const [installBusy, setInstallBusy] = useState(false);
+  const installActive = useRef(false);
+  const installationBusy = useCallback((value: boolean) => {
+    installActive.current = value;
+    setInstallBusy(value);
+  }, []);
   const active = useRef(false);
   const desktop = isTauri();
   const inspect = useCallback(async (path: string) => {
-    if (active.current) return;
+    if (active.current || installActive.current) return;
     active.current = true;
     setBusy(true);
     setReport(null);
+    setIpaPath(null);
     setError("");
     setCancelled(false);
     setStage(stages[0]);
@@ -64,6 +74,7 @@ function App() {
     try {
       setReport(await invoke<Report>("inspect_ipa", { path, progress }));
       setStage("Inspection complete");
+      setIpaPath(path);
     } catch (e) {
       setError(String(e));
       setStage("Inspection stopped");
@@ -148,7 +159,7 @@ function App() {
             orbiter<span>DEVELOPER WORKSPACE</span>
           </div>
           <span className="local">
-            <i /> Local inspection
+            <i /> Local workspace
           </span>
         </header>
         <div className="intro">
@@ -160,7 +171,7 @@ function App() {
               install.
             </p>
           </div>
-          <span className="phase">PREVIEW · DEVICE DISCOVERY</span>
+          <span className="phase">PREVIEW · INSTALL TRANSPORT</span>
         </div>
         {!desktop && (
           <div className="notice">
@@ -183,7 +194,7 @@ function App() {
               {!app ? (
                 <button
                   className={`drop ${drag ? "drag" : ""}`}
-                  disabled={busy || !desktop}
+                  disabled={busy || installBusy || !desktop}
                   onClick={choose}
                 >
                   <div className="upload-icon">
@@ -230,7 +241,7 @@ function App() {
                   <button
                     className="text-button"
                     onClick={choose}
-                    disabled={busy}
+                    disabled={busy || installBusy}
                   >
                     Change
                   </button>
@@ -264,8 +275,8 @@ function App() {
                 </div>
               )}
               <div className="source-footer">
-                <ShieldCheck size={14} /> Read-only inspection. Nothing is
-                uploaded.
+                <ShieldCheck size={14} /> Inspection stays local. Original IPA
+                unchanged.
               </div>
             </section>
             <section className="card destination">
@@ -274,7 +285,7 @@ function App() {
                   <span>02</span> Destination & identity
                 </h2>
               </div>
-              <Devices />
+              <Devices onSelect={setDeviceId} paused={installBusy} />
               <div className="identity-grid">
                 <div>
                   <label htmlFor="account">Apple account</label>
@@ -445,13 +456,18 @@ function App() {
             <p>
               {app?.profile?.expires_at
                 ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
-                : "Signing and installation will be enabled after device and account integration."}
+                : "Re-signing requires account and provisioning integration. Use the existing-signature flow below for an authorized build."}
             </p>
           </div>
           <button className="primary" disabled>
             Sign & Install <ArrowRight size={17} />
           </button>
         </section>
+        <InstallSigned
+          path={ipaPath}
+          deviceId={deviceId}
+          onBusy={installationBusy}
+        />
         {report && (
           <details className="card inventory">
             <summary>
@@ -475,7 +491,7 @@ function App() {
             Orbiter <span className="footer-dot">/</span> Company build
             workspace
           </span>
-          <span>Inspection only · macOS & Windows targets</span>
+          <span>Inspection & install transport · macOS & Windows targets</span>
         </footer>
       </main>
     </div>

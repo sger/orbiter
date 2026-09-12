@@ -1,4 +1,5 @@
 pub mod devices;
+pub mod installation;
 mod macho;
 mod profile;
 

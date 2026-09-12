@@ -27,7 +27,13 @@ const labels = {
   pairing_unverified: "Pairing unverified",
   unavailable: "Unavailable",
 };
-export function Devices() {
+export function Devices({
+  onSelect,
+  paused = false,
+}: {
+  onSelect?: (id: number | null) => void;
+  paused?: boolean;
+}) {
   const [result, setResult] = useState<Discovery | null>(null);
   const [selected, setSelected] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,7 +41,7 @@ export function Devices() {
   const mounted = useRef(false);
   const desktop = isTauri();
   const refresh = useCallback(async () => {
-    if (active.current || !desktop) return;
+    if (active.current || !desktop || paused) return;
     active.current = true;
     setBusy(true);
     try {
@@ -63,7 +69,7 @@ export function Devices() {
       active.current = false;
       if (mounted.current) setBusy(false);
     }
-  }, [desktop]);
+  }, [desktop, paused]);
   useEffect(() => {
     mounted.current = true;
     void refresh();
@@ -74,6 +80,13 @@ export function Devices() {
     };
   }, [refresh]);
   const device = result?.devices.find((d) => String(d.id) === selected);
+  useEffect(() => {
+    onSelect?.(
+      device?.state === "paired" && device.connection === "USB"
+        ? device.id
+        : null,
+    );
+  }, [device?.id, device?.state, device?.connection, onSelect]);
   return (
     <div className="devices">
       <div className="device-label">
@@ -81,7 +94,7 @@ export function Devices() {
         <button
           type="button"
           className="text-button"
-          disabled={!desktop || busy}
+          disabled={!desktop || busy || paused}
           onClick={() => void refresh()}
           aria-label="Refresh devices"
         >
@@ -93,7 +106,7 @@ export function Devices() {
         <Smartphone size={17} />
         <select
           id="device"
-          disabled={!desktop || !result?.devices.length || busy}
+          disabled={!desktop || !result?.devices.length || busy || paused}
           value={selected}
           onChange={(e) => setSelected(e.target.value)}
         >

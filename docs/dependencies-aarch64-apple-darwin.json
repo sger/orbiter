@@ -39,6 +39,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "async-compression",
+      "version": "0.4.39",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Nullus157/async-compression"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "async_zip",
+      "version": "0.0.18",
+      "license": "MIT",
+      "repository": "https://github.com/Majored/rs-async-zip"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "autocfg",
       "version": "1.5.1",
       "license": "Apache-2.0 OR MIT",
@@ -225,6 +239,20 @@
       "version": "0.2.3",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/formats/tree/master/cms"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "compression-codecs",
+      "version": "0.4.36",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Nullus157/async-compression"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "compression-core",
+      "version": "0.4.31",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Nullus157/async-compression"
     },
     {
       "ecosystem": "cargo",
@@ -645,6 +673,13 @@
       "version": "0.3.34",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rust-lang/futures-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "futures-lite",
+      "version": "2.6.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/smol-rs/futures-lite"
     },
     {
       "ecosystem": "cargo",
@@ -1096,6 +1131,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "parking",
+      "version": "2.2.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/smol-rs/parking"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "parking_lot",
       "version": "0.12.5",
       "license": "MIT OR Apache-2.0",
@@ -1156,6 +1198,20 @@
       "version": "0.13.1",
       "license": "MIT",
       "repository": "https://github.com/rust-phf/rust-phf"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pin-project",
+      "version": "1.1.13",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/taiki-e/pin-project"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pin-project-internal",
+      "version": "1.1.13",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/taiki-e/pin-project"
     },
     {
       "ecosystem": "cargo",
@@ -1814,6 +1870,13 @@
       "version": "0.26.5",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rustls/tokio-rustls"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "tokio-util",
+      "version": "0.7.19",
+      "license": "MIT",
+      "repository": "https://github.com/tokio-rs/tokio"
     },
     {
       "ecosystem": "cargo",

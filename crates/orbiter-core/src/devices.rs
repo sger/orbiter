@@ -35,7 +35,7 @@ pub struct Discovery {
     pub service_available: bool,
     pub message: Option<&'static str>,
 }
-fn address() -> UsbmuxdAddr {
+pub(crate) fn address() -> UsbmuxdAddr {
     // Deliberately ignore USBMUXD_SOCKET_ADDRESS: never send pairing data to a remote daemon.
     #[cfg(unix)]
     {

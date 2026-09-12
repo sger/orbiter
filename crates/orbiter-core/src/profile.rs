@@ -16,7 +16,7 @@ pub struct Profile {
     pub entitlements: BTreeMap<String, serde_json::Value>,
     pub trust: &'static str,
 }
-pub fn inspect(bytes: &[u8]) -> Result<Profile> {
+pub(crate) fn dictionary(bytes: &[u8]) -> Result<plist::Dictionary> {
     // Parse the CMS envelope, not an XML substring. This does not verify CMS signatures.
     let content = ContentInfo::from_der(bytes).map_err(|_| Error::Profile)?;
     if content.content_type.to_string() != "1.2.840.113549.1.7.2" {
@@ -32,10 +32,16 @@ pub fn inspect(bytes: &[u8]) -> Result<Profile> {
         .ok_or(Error::Profile)?
         .decode_as()
         .map_err(|_| Error::Profile)?;
-    from_plist(octets.as_bytes())
+    parse_plist(octets.as_bytes())
 }
+pub fn inspect(bytes: &[u8]) -> Result<Profile> {
+    from_dictionary(dictionary(bytes)?)
+}
+#[cfg(test)]
 fn from_plist(bytes: &[u8]) -> Result<Profile> {
-    let d = parse_plist(bytes)?;
+    from_dictionary(parse_plist(bytes)?)
+}
+fn from_dictionary(d: plist::Dictionary) -> Result<Profile> {
     let ent = entitlements(d.get("Entitlements"));
     let devices = d
         .get("ProvisionedDevices")

@@ -75,7 +75,15 @@ async function nativeMock(
           return callbackId;
         },
         unregisterCallback: (id: number) => callbacks.delete(id),
-        invoke: async (cmd: string) => {
+        invoke: async (cmd: string, args?: any) => {
+          if (cmd === "installation_status")
+            return (window as any).__jobResult ?? null;
+          if (cmd === "prepare_install") return (window as any).__reviewResult;
+          if (cmd === "discard_install") return;
+          if (cmd === "execute_install") {
+            (window as any).__executed = args;
+            return (window as any).__jobResult;
+          }
           if (cmd === "discover_devices")
             return (
               (window as any).__deviceResult ?? {
@@ -207,4 +215,139 @@ test("device refresh removes disconnected selection and surfaces service errors"
   await expect(
     page.getByRole("button", { name: "Sign & Install" }),
   ).toBeDisabled();
+});
+
+async function readyForReview(
+  page: import("@playwright/test").Page,
+  blockers: string[] = [],
+) {
+  await nativeMock(page, "success");
+  await page.evaluate((blockers) => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+    (window as any).__reviewResult = {
+      token: "synthetic-review",
+      app_name: "Synthetic Test App",
+      bundle_id: "test.synthetic",
+      version: "1.0",
+      device_name: "Synthetic iPhone",
+      size_bytes: 1048576,
+      sha256: "synthetic-fingerprint",
+      existing_app: { version: "0.9", build: "1" },
+      blockers,
+      notes: ["iOS validates the existing signature."],
+    };
+  }, blockers);
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.getByRole("button", { name: "Review installation" }).click();
+}
+test("installation needs explicit acknowledgement and preserves unknown outcomes", async ({
+  page,
+}) => {
+  await readyForReview(page);
+  await expect(
+    page.getByText("This installation may replace it.", { exact: false }),
+  ).toBeVisible();
+  const install = page.getByRole("button", { name: "Install unchanged IPA" });
+  await expect(install).toBeDisabled();
+  expect(await page.evaluate(() => (window as any).__executed)).toBeUndefined();
+  await page
+    .getByRole("checkbox", { name: /I authorize installation/ })
+    .check();
+  await page.evaluate(() => {
+    (window as any).__jobResult = {
+      id: "synthetic-review",
+      stage: "unknown",
+      message:
+        "Connection lost after the install command. Check the phone before retrying.",
+      transferred_bytes: 1048576,
+      total_bytes: 1048576,
+      device_percent: null,
+      cleanup_pending: true,
+    };
+  });
+  await install.click();
+  await expect(
+    page.getByText("Installation outcome unknown", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("iOS reported installation complete", { exact: true }),
+  ).toHaveCount(0);
+  expect(
+    (await page.evaluate(() => (window as any).__executed)).acknowledged,
+  ).toBe(true);
+  await page.screenshot({
+    path: "test-results/install-outcome.png",
+    fullPage: true,
+  });
+});
+test("profile blockers prevent the installation action", async ({ page }) => {
+  await readyForReview(page, [
+    "The embedded profile does not authorize this iPhone.",
+  ]);
+  await expect(page.getByRole("alert")).toContainText(
+    "does not authorize this iPhone",
+  );
+  await expect(
+    page.getByRole("button", { name: "Install unchanged IPA" }),
+  ).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__executed)).toBeUndefined();
+});
+
+test("a reopened window follows an active installation until its terminal outcome", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as any).__jobResult = {
+      id: "active-job",
+      stage: "transferring",
+      message: "Synthetic active transfer.",
+      transferred_bytes: 10,
+      total_bytes: 100,
+      device_percent: null,
+      cleanup_pending: true,
+    };
+  });
+  await nativeMock(page, "success");
+  await expect(page.getByText("Synthetic active transfer.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Cancel transfer" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Drop your IPA/ }),
+  ).toBeDisabled();
+  await page.evaluate(() => {
+    (window as any).__jobResult = {
+      id: "active-job",
+      stage: "unknown",
+      message: "Synthetic connection loss after dispatch.",
+      transferred_bytes: 100,
+      total_bytes: 100,
+      device_percent: 100,
+      cleanup_pending: true,
+    };
+  });
+  await expect(
+    page.getByText("Installation outcome unknown", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Cancel transfer" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Drop your IPA/ }),
+  ).toBeEnabled();
 });

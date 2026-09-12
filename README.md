@@ -1,6 +1,6 @@
 # Orbiter
 
-A company IPA inspection workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript. **Phase 1 inspection and the discovery portion of Phase 2 are implemented.** Signing, authentication, installation, and automatic refresh remain unavailable. The desktop polls the local Apple device service every five seconds and verifies existing pairing sessions without creating or resetting pairing records.
+A company IPA inspection workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript. **Phase 1 inspection and a Phase 2 installation-transport preview are implemented.** Re-signing, Apple-account authentication, and automatic refresh remain unavailable. Installation of an unchanged, already-signed IPA is available only after review and explicit acknowledgement. Physical installation validation is still pending. The desktop polls the local Apple device service every five seconds and verifies existing pairing sessions without creating or resetting pairing records.
 
 ## Run
 
@@ -58,3 +58,23 @@ cargo run --locked -p orbiter-core --bin orbiter-devices
 ```
 
 This CLI returns device display metadata and ephemeral transport IDs, not UDIDs or pairing secrets. If trust is missing, establish it in Finder or Apple's Windows device app and approve it on the phone. Orbiter does not initiate pairing. Discovery uses only `/var/run/usbmuxd` on macOS or loopback port 27015 on Windows, ignores remote-daemon environment overrides, and performs no account/portal requests.
+
+## Install an already-signed IPA (transport preview)
+
+1. Select the company IPA and a paired USB iPhone.
+2. In **Install existing signature**, choose **Review installation**. This makes a private local snapshot, checks iPhone platform/OS support, executable inspection, profile expiry and the phone's profile membership, and queries only the selected bundle ID on the phone. It does not upload or install the IPA.
+3. Review the app/device, existing-app warning, blockers, notes, and snapshot fingerprint. Reviews expire after ten minutes and are invalidated when the selected IPA/device changes.
+4. If there are no blockers, acknowledge the replacement/data-retention consequences and choose **Install unchanged IPA**. This uploads the snapshot over AFC, then asks iOS to install it. No signing identity is changed and no Watch bundle or entitlement is stripped.
+5. Keep the phone connected. **Cancel transfer** works before dispatching installation; after dispatch, iOS owns the operation and cancellation is unavailable. A lost connection after dispatch is an **unknown outcome**, never automatic success or an automatic retry.
+
+An already-installed app with the same bundle ID may be replaced. iOS still validates signatures/provisioning; the static review is not cryptographic verification or a guarantee of installability. Watch-device authorization and runtime features require separate tests. Orbiter neither uninstalls apps nor changes Apple portal state.
+
+Read-only review from the CLI (there is deliberately no installation CLI command):
+
+```sh
+cargo run --locked -p orbiter-core --bin orbiter-install-review -- /path/to/company.ipa 1
+```
+
+Replace `1` with the ephemeral transport ID from `orbiter-devices`. The CLI discards its snapshot on exit. Review output includes app/device display information; handle it as private company information.
+
+The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time during this preview.
