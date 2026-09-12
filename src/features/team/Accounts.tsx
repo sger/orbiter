@@ -10,6 +10,8 @@ import {
   withdrawCertificates,
 } from "../../ipc/commands";
 import { invoke } from "@tauri-apps/api/core";
+import { Users, Watch } from "lucide-react";
+import { Select } from "../../app/Select";
 import { Stage } from "../../app/Stage";
 import type { StageState } from "../../state/pipeline";
 import type {
@@ -241,16 +243,18 @@ export function Accounts({
             });
           }}
         >
+          {/* One line. What this means in full is in Help, one click away, rather than four
+              paragraphs a person must read past every time to reach the password field. */}
           <p className="hint">
-            Four steps prepare this team to re-sign the build: sign in, register
-            the iPhone, get a development certificate, and register the
-            identifiers.
-          </p>
-          <p className="hint">
-            Orbiter authenticates directly with Apple over HTTPS using macOS's
-            own authentication support; no proxy or remote server is involved.
-            Passwords and codes are never saved, and the session stays in memory
-            and expires after 30 minutes.
+            Sign in with the Apple ID this build should be re-signed for.
+            Orbiter talks to Apple directly; passwords are never saved.{" "}
+            <button
+              type="button"
+              className="text-button underline"
+              onClick={() => onHelp("account")}
+            >
+              What is stored
+            </button>
           </p>
           <label className="auth-consent">
             <input
@@ -290,24 +294,32 @@ export function Accounts({
               />
             </div>
           </div>
-          <button
-            type="submit"
-            className="secondary"
-            disabled={signInBlocker !== null}
-            aria-describedby="sign-in-help"
-          >
-            Sign in to Apple
-          </button>
-          <p id="sign-in-help" className="hint" role="status">
-            {signInBlocker ?? "Ready to sign in with Apple."}
-          </p>
+          {/* The action and the reason it is unavailable belong on one line: a button with its
+              explanation stranded below it reads as two unrelated things. */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <button
+              type="submit"
+              className="secondary !mt-0"
+              disabled={signInBlocker !== null}
+              aria-describedby="sign-in-help"
+            >
+              Sign in to Apple
+            </button>
+            <p id="sign-in-help" className="hint min-w-0 flex-1" role="status">
+              {signInBlocker ?? "Ready to sign in with Apple."}
+            </p>
+          </div>
         </form>
       )}
-      <p className="hint" role="status" aria-live="polite">
-        {desktop
-          ? view.message
-          : "Apple sign-in is available in the desktop app."}
-      </p>
+      {/* Only while it says something the stages do not. Once signed in they carry the state, and
+          a third line repeating it is noise between the form and the first step. */}
+      {(!signedIn || view.stage === "failed") && (
+        <p className="hint" role="status" aria-live="polite">
+          {desktop
+            ? view.message
+            : "Apple sign-in is available in the desktop app."}
+        </p>
+      )}
       {view.challenge && (
         <div className="two-factor">
           <p>
@@ -396,6 +408,7 @@ export function Accounts({
       {signedIn && (
         <>
           <Stage
+            id="team"
             index={1}
             title="Signing team"
             state={stageState(!!view.selected_team, true)}
@@ -463,6 +476,7 @@ export function Accounts({
           {view.selected_team && (
             <div className="register-device">
               <Stage
+                id="registration"
                 index={2}
                 title="Register this iPhone"
                 state={stageState(!!registration, true)}
@@ -532,6 +546,7 @@ export function Accounts({
                 )}
               </Stage>
               <Stage
+                id="certificate"
                 index={3}
                 title="Development certificate"
                 state={stageState(!!certificate, true)}
@@ -680,6 +695,7 @@ export function Accounts({
                 </button>
               </Stage>
               <Stage
+                id="identifiers"
                 index={4}
                 title="App identifiers and profiles"
                 state={stageState(
@@ -702,11 +718,12 @@ export function Accounts({
                 {hasWatchApp && (
                   <>
                     <label htmlFor="watch-choice">Watch app</label>
-                    <select
+                    <Select
                       id="watch-choice"
+                      icon={<Watch size={16} className="flex-none" />}
                       value={watch}
                       disabled={disabled || provBusy}
-                      onChange={(e) => setWatch(e.target.value as WatchChoice)}
+                      onChange={(value) => setWatch(value as WatchChoice)}
                     >
                       <option value="undecided">
                         Choose what happens to it
@@ -719,7 +736,7 @@ export function Accounts({
                         Sign it too — unverified on this team, and it spends
                         another identifier
                       </option>
-                    </select>
+                    </Select>
                     <p className="hint">
                       This build includes a Watch app. It is never dropped
                       silently, so choose before identifiers are registered.

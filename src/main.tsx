@@ -48,6 +48,7 @@ import { Devices } from "./features/device/Devices";
 import { InstallSigned } from "./features/install/InstallSigned";
 import { DeviceLog } from "./features/diagnose/DeviceLog";
 import { HelpPanel } from "./features/help/HelpPanel";
+import { Rail, helpItem } from "./app/Rail";
 const inspectionStages = [
   "Checking archive",
   "Reading bundles and signatures",
@@ -293,50 +294,20 @@ function App() {
     ).length ?? 0;
   return (
     <div className="shell">
-      <aside className="fixed inset-y-0 left-0 flex w-[52px] flex-col items-center bg-rail px-0 py-[27px] text-rail-ink md:w-[68px]">
-        <a
-          className="flex text-rail-bright no-underline"
-          href="#"
-          aria-label="Orbiter home"
-        >
-          <Orbit size={29} />
-        </a>
-        {/* Where you are in the pipeline, without scrolling the column to find out. */}
-        <ol
-          className="mt-[34px] flex list-none flex-col items-center gap-2.5 p-0"
-          aria-label="Progress"
-        >
-          {steps.map((entry) => (
-            <li
-              key={entry.id}
-              title={entry.title}
-              className={`h-[9px] w-[9px] rounded-full border ${
-                entry.state === "done"
-                  ? "border-go bg-go"
-                  : entry.state === "current"
-                    ? "border-rail-bright bg-rail-bright shadow-[0_0_0_3px_rgba(240,245,222,0.18)]"
-                    : "border-rail-line"
-              }`}
-            >
-              <span className="sr-only">
-                {entry.title}: {entry.state}
-              </span>
-            </li>
-          ))}
-        </ol>
-        <button
-          className="mt-auto grid place-items-center border-0 bg-transparent p-1.5 text-rail-dim hover:text-rail-bright aria-expanded:text-rail-bright"
-          title="Help"
-          aria-label="Help"
-          aria-expanded={help}
-          onClick={() => {
+      <Rail
+        stages={steps}
+        items={[
+          helpItem(help, () => {
             setHelpSection(null);
             setHelp((open) => !open);
-          }}
-        >
-          <CircleHelp size={19} />
-        </button>
-      </aside>
+          }),
+        ]}
+        onSelectStage={(id) =>
+          document
+            .querySelector(`[data-stage="${id}"]`)
+            ?.scrollIntoView({ block: "center", behavior: "smooth" })
+        }
+      />
       <main>
         <header>
           <div className="wordmark">orbiter</div>
@@ -540,10 +511,6 @@ function App() {
                   <Orbit size={58} strokeWidth={1} />
                   <div />
                 </div>
-                <h3>
-                  A little inspection.
-                  <br />A lot fewer surprises.
-                </h3>
                 <p>
                   Add an IPA to review its provisioning,
                   <br />
@@ -725,11 +692,7 @@ function App() {
           </details>
         )}
         <footer>
-          <span>
-            Orbiter <span className="footer-dot">/</span> Company build
-            workspace
-          </span>
-          <span>Inspection & install transport · macOS & Windows targets</span>
+          <span>Orbiter</span>
         </footer>
       </main>
       <HelpPanel

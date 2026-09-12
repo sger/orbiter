@@ -9,6 +9,7 @@ import type { StageState } from "../state/pipeline";
 /// at once, which made the one thing a person had to do next indistinguishable from the six they
 /// had already done or could not reach yet.
 export function Stage({
+  id,
   index,
   title,
   state,
@@ -18,6 +19,8 @@ export function Stage({
   onHelp,
   children,
 }: {
+  /// Matches the pipeline's stage id, so the rail can scroll to it.
+  id?: string;
   index: number;
   title: string;
   state: StageState;
@@ -38,9 +41,12 @@ export function Stage({
   const open = state === "current" || reopened;
   return (
     <section
-      className="border-t border-line-soft py-3.5 first-of-type:border-t-0"
+      data-stage={id}
+      className="scroll-mt-6 border-t border-line-soft py-3.5 first-of-type:border-t-0"
       aria-current={open || undefined}
     >
+      {/* One row that cannot be pushed apart: the mark and the actions hold their size, and the
+          summary is the only part allowed to give way when a build's result is long. */}
       <div className="flex items-center gap-2.5">
         <span
           className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-[11px] font-semibold ${
@@ -55,18 +61,23 @@ export function Stage({
           {state === "done" ? <Check size={13} /> : index}
         </span>
         <strong
-          className={`text-sm ${state === "waiting" ? "text-ink-faint" : "text-ink-strong"}`}
+          className={`flex-none text-sm whitespace-nowrap ${
+            state === "waiting" ? "text-ink-faint" : "text-ink-strong"
+          }`}
         >
           {title}
         </strong>
         {summary && state === "done" && !reopened && (
-          <span className="stage-summary overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-ink-soft">
+          <span
+            className="stage-summary min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-ink-soft"
+            title={summary}
+          >
             {summary}
           </span>
         )}
         {state === "done" && (
           <button
-            className="ml-auto border-0 bg-transparent px-1 py-0.5 text-[13px] text-[#5d7c63] hover:text-ink-strong hover:underline"
+            className="ml-auto flex-none border-0 bg-transparent px-1 py-0.5 text-[13px] text-[#5d7c63] hover:text-ink-strong hover:underline"
             // Names what it changes: several stages offer one, and so does the build panel.
             aria-label={`${reopened ? "Hide" : "Change"} ${title}`}
             onClick={() => setReopened((value) => !value)}
@@ -76,7 +87,7 @@ export function Stage({
         )}
         {help && onHelp && (
           <button
-            className="ml-1.5 grid place-items-center border-0 bg-transparent p-0.5 text-[#a9b5a6] last:ml-auto hover:text-ink-strong"
+            className="ml-1.5 grid flex-none place-items-center border-0 bg-transparent p-0.5 text-[#a9b5a6] last:ml-auto hover:text-ink-strong"
             // Deliberately does not repeat the stage title: a control whose accessible name
             // contains another control's name makes both ambiguous to anything matching by name.
             aria-label={`Help, step ${index}`}

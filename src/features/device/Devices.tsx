@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { discoverDevices, isTauri } from "../../ipc/commands";
 import type { Device, Discovery } from "../../types";
-import { ChevronDown, RefreshCw, Smartphone } from "lucide-react";
+import { RefreshCw, Smartphone } from "lucide-react";
+import { Select } from "../../app/Select";
 const labels = {
   paired: "Pairing verified",
   locked: "Locked",
@@ -84,34 +85,31 @@ export function Devices({
           {busy ? "Checking…" : "Refresh"}
         </button>
       </div>
-      <div className="select-wrap">
-        <Smartphone size={17} />
-        <select
-          id="device"
-          disabled={!desktop || !result?.devices.length || busy || paused}
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-        >
-          <option value="">
-            {!desktop
-              ? "Available in desktop app"
-              : !result
-                ? "Checking connected devices…"
-                : result.devices.length
-                  ? "Select an iPhone"
-                  : result.service_available
-                    ? "No iPhone detected"
-                    : "Device service unavailable"}
+      <Select
+        id="device"
+        icon={<Smartphone size={17} className="flex-none" />}
+        disabled={!desktop || !result?.devices.length || busy || paused}
+        value={selected}
+        onChange={setSelected}
+      >
+        <option value="">
+          {!desktop
+            ? "Available in desktop app"
+            : !result
+              ? "Checking connected devices…"
+              : result.devices.length
+                ? "Select an iPhone"
+                : result.service_available
+                  ? "No iPhone detected"
+                  : "Device service unavailable"}
+        </option>
+        {result?.devices.map((d) => (
+          <option value={String(d.id)} key={d.id}>
+            {d.name ?? d.product_type ?? "Apple device (identity unverified)"} ·{" "}
+            {d.connection} · {labels[d.state]}
           </option>
-          {result?.devices.map((d) => (
-            <option value={String(d.id)} key={d.id}>
-              {d.name ?? d.product_type ?? "Apple device (identity unverified)"}{" "}
-              · {d.connection} · {labels[d.state]}
-            </option>
-          ))}
-        </select>
-        <ChevronDown size={14} />
-      </div>
+        ))}
+      </Select>
       <div className="device-status" role="status" aria-live="polite">
         {device ? (
           <>
