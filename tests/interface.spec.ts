@@ -181,12 +181,12 @@ async function nativeMock(
             (window as any).__provisioningRequested = {
               path: args.path,
               acknowledged: args.acknowledged,
+              watch: args.watch,
             };
             return {
               plan: {
                 new_main_identifier: "com.example.app.abc123",
                 blockers: [],
-                decisions: [],
                 consequences: [
                   "A Personal Team profile expires after seven days, so the app must be re-signed and reinstalled every week.",
                 ],
@@ -265,6 +265,20 @@ async function nativeMock(
               return await new Promise((_resolve, reject) => {
                 pendingReject = reject;
               });
+            if ((window as any).__withWatchApp)
+              return {
+                ...report,
+                bundles: [
+                  ...report.bundles,
+                  {
+                    ...report.bundles[0],
+                    path: "Payload/Test.app/Watch/Watch.app",
+                    kind: "Watch app",
+                    name: "Synthetic Watch App",
+                    identifier: "test.synthetic.watch",
+                  },
+                ],
+              };
             return report;
           }
           if (cmd === "cancel_inspection") {
@@ -634,11 +648,10 @@ test("provisioning replaces unverified findings with what the team established",
       .locator(".findings code", { hasText: "com.example.app.abc123" })
       .first(),
   ).toBeVisible();
-  // The contradicted finding is kept, but behind the record of the original build.
-  await expect(page.getByText("Signing identity required")).toBeHidden();
-  await expect(
-    page.getByText("Findings from the original build", { exact: false }),
-  ).toBeVisible();
+  // The contradicted finding is replaced outright, not left beside the answer.
+  await expect(page.getByText("Signing identity required")).toHaveCount(0);
+  // The seven-day expiry is a fact about the prepared build, not something left to configure.
+  await expect(page.getByText("Every seven days")).toBeVisible();
   // The action bar shows the profile that will govern the build, not the company one.
   await expect(page.getByText("Prepared profile expiration")).toBeVisible();
 
@@ -844,4 +857,45 @@ test("unavailable local support prevents sign-in without a remote fallback", asy
   await expect(
     page.getByText("ani.stikstore.app", { exact: false }),
   ).toHaveCount(0);
+});
+
+test("a Watch app must be decided before any identifier is registered", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as any).__withWatchApp = true;
+  });
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page
+    .getByLabel("I understand ten identifiers per seven days", { exact: false })
+    .check();
+
+  // Acknowledged, but the Watch app is still undecided, so nothing may be registered.
+  const prepare = page.getByRole("button", {
+    name: "Prepare identifiers & profiles",
+  });
+  await expect(prepare).toBeDisabled();
+  await expect(
+    page.getByText("Choose what happens to the Watch app."),
+  ).toBeVisible();
+
+  await page.getByLabel("Watch app").selectOption("remove");
+  await expect(prepare).toBeEnabled();
+  await prepare.click();
+  // The choice reaches the backend, which decides what it means for the plan.
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as any).__provisioningRequested?.watch),
+    )
+    .toBe("remove");
 });

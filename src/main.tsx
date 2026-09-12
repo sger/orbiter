@@ -43,6 +43,8 @@ function preparedFindings(preparation: Preparation) {
   const findings: {
     status: keyof typeof labels;
     title: string;
+    /// Overrides the status word when the status label would misdescribe a settled fact.
+    label?: string;
     detail: string;
     bundle: string | null;
   }[] = [];
@@ -70,13 +72,16 @@ function preparedFindings(preparation: Preparation) {
   });
   // One finding per capability the team could not carry, stated as decided rather than unknown.
   const removed = new Map<string, { detail: string; bundle: string }>();
+  const removedConsequences = new Set<string>();
   for (const bundle of plan.bundles)
     for (const capability of bundle.capabilities)
-      if (capability.action === "remove" && capability.consequence)
+      if (capability.action === "remove" && capability.consequence) {
         removed.set(capability.key, {
           detail: capability.consequence,
           bundle: bundle.new_identifier,
         });
+        removedConsequences.add(capability.consequence);
+      }
   for (const [key, entry] of removed)
     findings.push({
       status: "unsupported",
@@ -84,21 +89,23 @@ function preparedFindings(preparation: Preparation) {
       detail: entry.detail,
       bundle: entry.bundle,
     });
-  for (const decision of plan.decisions)
-    findings.push({
-      status: "requires_configuration",
-      title: "Decision required",
-      detail: decision,
-      bundle: null,
-    });
-  const weekly = plan.consequences.find((c) => c.includes("seven days"));
-  if (weekly)
-    findings.push({
-      status: "requires_configuration",
-      title: "Weekly re-signing",
-      detail: weekly,
-      bundle: null,
-    });
+  // Consequences the whole plan carries — the seven-day expiry, and what was decided about a
+  // Watch app. These are established facts about the prepared build, not open configuration.
+  for (const consequence of plan.consequences)
+    if (!removedConsequences.has(consequence))
+      findings.push({
+        status: "requires_configuration",
+        title: consequence.includes("seven days")
+          ? "Weekly re-signing"
+          : "Watch app",
+        label: consequence.includes("seven days")
+          ? "Every seven days"
+          : consequence.includes("removed")
+            ? "Removed by your choice"
+            : "Kept, unverified",
+        detail: consequence,
+        bundle: null,
+      });
   return findings;
 }
 function capabilityTitle(key: string) {
@@ -370,6 +377,9 @@ function App() {
                 paused={installBusy}
                 deviceId={deviceId}
                 ipaPath={ipaPath}
+                hasWatchApp={
+                  report?.bundles.some((b) => b.kind === "Watch app") ?? false
+                }
                 onPrepared={setPreparation}
                 onAccount={setAccount}
               />
@@ -428,7 +438,10 @@ function App() {
                       <div>
                         <div className="finding-heading">
                           <h4>{f.title}</h4>
-                          <span>{labels[f.status]}</span>
+                          <span>
+                            {(f as { label?: string }).label ??
+                              labels[f.status]}
+                          </span>
                         </div>
                         <p>{f.detail}</p>
                         {f.bundle && <code>{f.bundle}</code>}
@@ -436,30 +449,6 @@ function App() {
                     </article>
                   ))}
                 </div>
-                {preparation && (
-                  <details className="original-findings">
-                    <summary>
-                      Findings from the original build, before this team
-                    </summary>
-                    <div className="findings">
-                      {report.findings.map((f, i) => (
-                        <article className={`finding ${f.status}`} key={i}>
-                          <div className="finding-icon">
-                            <Info size={15} />
-                          </div>
-                          <div>
-                            <div className="finding-heading">
-                              <h4>{f.title}</h4>
-                              <span>{labels[f.status]}</span>
-                            </div>
-                            <p>{f.detail}</p>
-                            {f.bundle && <code>{f.bundle}</code>}
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </details>
-                )}
               </>
             ) : (
               <div className="empty-assessment">

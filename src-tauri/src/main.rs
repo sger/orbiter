@@ -283,10 +283,15 @@ async fn account_request_certificate(
 async fn account_prepare_provisioning(
     path: String,
     acknowledged: bool,
+    watch: String,
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::Preparation, String> {
     state
-        .prepare_provisioning(std::path::PathBuf::from(path), acknowledged)
+        .prepare_provisioning(
+            std::path::PathBuf::from(path),
+            acknowledged,
+            orbiter_core::plan::WatchChoice::parse(&watch),
+        )
         .await
 }
 #[tauri::command]

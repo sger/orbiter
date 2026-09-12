@@ -25,10 +25,37 @@ pub enum TeamKind {
     Paid,
 }
 
+/// What to do with a Watch app inside the IPA. Apple's provisioning for watchOS under a free
+/// personal team is unverified here, and a Watch bundle consumes App IDs from a small weekly
+/// budget, so the choice is made by a person before anything is registered — never silently.
+#[derive(Clone, Copy, Serialize, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WatchChoice {
+    /// No choice made yet. Blocks the plan while the IPA contains a Watch app.
+    #[default]
+    Undecided,
+    /// Drop the Watch app and everything nested inside it from the re-signed build.
+    Remove,
+    /// Keep the Watch app and attempt to provision and sign it with the rest.
+    Sign,
+}
+
+impl WatchChoice {
+    /// Parse the interface's value. An unrecognised value is not a decision.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "remove" => Self::Remove,
+            "sign" => Self::Sign,
+            _ => Self::Undecided,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Target {
     pub team_id: String,
     pub kind: TeamKind,
+    pub watch: WatchChoice,
 }
 
 #[derive(Clone, Copy, Serialize, PartialEq, Eq, Debug)]
@@ -76,8 +103,6 @@ pub struct Plan {
     pub bundles: Vec<BundlePlan>,
     /// Conditions that stop re-signing until they are resolved.
     pub blockers: Vec<String>,
-    /// Choices a person must make explicitly; the plan never decides these silently.
-    pub decisions: Vec<String>,
     /// Runtime consequences of the plan as a whole, for acknowledgement.
     pub consequences: Vec<String>,
     pub app_ids_required: usize,
@@ -236,7 +261,6 @@ pub fn build(report: &Report, target: &Target) -> Plan {
     };
 
     let mut blockers = Vec::new();
-    let mut decisions = Vec::new();
     let mut consequences = Vec::new();
     if main_identifier.is_empty() {
         blockers.push(
@@ -248,17 +272,43 @@ pub fn build(report: &Report, target: &Target) -> Plan {
         blockers.push("Select a signing team before a plan can be produced.".into());
     }
 
+    let watch_roots: Vec<&str> = report
+        .bundles
+        .iter()
+        .filter(|bundle| bundle.kind == "Watch app")
+        .map(|bundle| bundle.path.as_str())
+        .collect();
+    // A Watch app carries its own extensions and frameworks; removing it removes all of them.
+    let inside_watch = |path: &str| {
+        watch_roots
+            .iter()
+            .any(|root| path == *root || path.starts_with(&format!("{root}/")))
+    };
+    if !watch_roots.is_empty() {
+        match target.watch {
+            WatchChoice::Undecided => blockers.push(
+                "This IPA contains a Watch app. Choose whether to remove it or attempt to sign it before any identifier is registered."
+                    .into(),
+            ),
+            WatchChoice::Remove => consequences.push(
+                "The Watch app is removed from the re-signed build, so its watchOS features are unavailable on a paired Watch."
+                    .into(),
+            ),
+            WatchChoice::Sign => consequences.push(
+                "The Watch app is signed with the rest of the build. Watch provisioning under this team is unverified, so it may fail to install or to run on a paired Watch."
+                    .into(),
+            ),
+        }
+    }
+
     let mut bundles = Vec::new();
     for bundle in &report.bundles {
+        if target.watch == WatchChoice::Remove && inside_watch(&bundle.path) {
+            continue;
+        }
         if bundle.slices.iter().any(|slice| slice.encrypted) {
             blockers.push(format!(
                 "{} has an encrypted executable, which cannot be re-signed.",
-                bundle.name
-            ));
-        }
-        if bundle.kind == "Watch app" {
-            decisions.push(format!(
-                "{} is a Watch app. Watch provisioning under this team is unverified, so choose explicitly whether to remove it or attempt to sign it.",
                 bundle.name
             ));
         }
@@ -314,7 +364,6 @@ pub fn build(report: &Report, target: &Target) -> Plan {
         new_main_identifier,
         bundles,
         blockers,
-        decisions,
         consequences,
         app_ids_required,
     }
@@ -372,6 +421,7 @@ mod tests {
         Target {
             team_id: "ABCDE12345".into(),
             kind: TeamKind::Personal,
+            watch: WatchChoice::Sign,
         }
     }
 
@@ -424,6 +474,7 @@ mod tests {
             &Target {
                 team_id: "ZZZZZ99999".into(),
                 kind: TeamKind::Personal,
+                watch: WatchChoice::Sign,
             },
         );
         assert_ne!(first.new_main_identifier, other.new_main_identifier);
@@ -502,6 +553,7 @@ mod tests {
             &Target {
                 team_id: "PAID123456".into(),
                 kind: TeamKind::Paid,
+                watch: WatchChoice::Sign,
             },
         );
         assert_eq!(paid.bundles[0].capabilities[0].action, Action::Keep);
@@ -530,8 +582,63 @@ mod tests {
             &personal(),
         );
         assert!(plan.blockers.iter().any(|b| b.contains("encrypted")));
-        // A Watch app is never removed silently.
-        assert!(plan.decisions.iter().any(|d| d.contains("Watch")));
+        // Signing a Watch app is a choice, and its uncertainty is stated rather than hidden.
+        assert!(plan.consequences.iter().any(|c| c.contains("unverified")));
+    }
+
+    #[test]
+    fn a_watch_app_blocks_the_plan_until_a_person_chooses_what_happens_to_it() {
+        let bundles = || {
+            vec![
+                bundle("Payload/App.app", "Main app", "com.company.app", vec![]),
+                bundle(
+                    "Payload/App.app/Watch/Watch.app",
+                    "Watch app",
+                    "com.company.app.watch",
+                    vec![],
+                ),
+                bundle(
+                    "Payload/App.app/Watch/Watch.app/PlugIns/W.appex",
+                    "Extension",
+                    "com.company.app.watch.ext",
+                    vec![],
+                ),
+            ]
+        };
+        let undecided = build(
+            &report(bundles()),
+            &Target {
+                team_id: "ABCDE12345".into(),
+                kind: TeamKind::Personal,
+                watch: WatchChoice::Undecided,
+            },
+        );
+        // Nothing is registered while the choice is open: App IDs are spent from a weekly budget.
+        assert!(undecided.blockers.iter().any(|b| b.contains("Watch app")));
+
+        let removed = build(
+            &report(bundles()),
+            &Target {
+                team_id: "ABCDE12345".into(),
+                kind: TeamKind::Personal,
+                watch: WatchChoice::Remove,
+            },
+        );
+        // The Watch app and everything nested inside it go together.
+        assert!(removed.blockers.is_empty());
+        assert_eq!(removed.app_ids_required, 1);
+        assert!(!removed.bundles.iter().any(|b| b.path.contains("Watch")));
+        assert!(removed.consequences.iter().any(|c| c.contains("watchOS")));
+
+        let signed = build(
+            &report(bundles()),
+            &Target {
+                team_id: "ABCDE12345".into(),
+                kind: TeamKind::Personal,
+                watch: WatchChoice::Sign,
+            },
+        );
+        assert_eq!(signed.app_ids_required, 3);
     }
 
     #[test]
@@ -561,6 +668,7 @@ mod tests {
             &Target {
                 team_id: String::new(),
                 kind: TeamKind::Personal,
+                watch: WatchChoice::Sign,
             },
         );
         assert_eq!(plan.blockers.len(), 2);

@@ -44,7 +44,6 @@ export type Preparation = {
   plan: {
     new_main_identifier: string;
     blockers: string[];
-    decisions: string[];
     consequences: string[];
     app_ids_required: number;
     bundles: {
@@ -71,12 +70,15 @@ export function Accounts({
   paused,
   deviceId,
   ipaPath,
+  hasWatchApp,
   onPrepared,
   onAccount,
 }: {
   paused: boolean;
   deviceId: number | null;
   ipaPath: string | null;
+  /// Whether the selected IPA contains a Watch app, so the choice is only asked when it applies.
+  hasWatchApp: boolean;
   onPrepared: (preparation: Preparation | null) => void;
   onAccount: (account: string | null) => void;
 }) {
@@ -98,6 +100,11 @@ export function Accounts({
   const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [certError, setCertError] = useState<string | null>(null);
   const [provAck, setProvAck] = useState(false);
+  // Apple's watchOS provisioning under a personal team is unverified and a Watch bundle spends
+  // App IDs from a small weekly budget, so nothing is registered until this is chosen.
+  const [watch, setWatch] = useState<"undecided" | "remove" | "sign">(
+    "undecided",
+  );
   const [provBusy, setProvBusy] = useState(false);
   const [preparation, setPreparation] = useState<Preparation | null>(null);
   const [provError, setProvError] = useState<string | null>(null);
@@ -608,6 +615,34 @@ export function Accounts({
                 downloads their profiles. Apple, not Orbiter, decides which
                 capabilities the identifiers may carry.
               </p>
+              {hasWatchApp && (
+                <>
+                  <label htmlFor="watch-choice">Watch app</label>
+                  <select
+                    id="watch-choice"
+                    value={watch}
+                    disabled={disabled || provBusy}
+                    onChange={(e) =>
+                      setWatch(
+                        e.target.value as "undecided" | "remove" | "sign",
+                      )
+                    }
+                  >
+                    <option value="undecided">Choose what happens to it</option>
+                    <option value="remove">
+                      Remove it — the iPhone app installs without the Watch app
+                    </option>
+                    <option value="sign">
+                      Sign it too — unverified on this team, and it spends
+                      another identifier
+                    </option>
+                  </select>
+                  <p className="hint">
+                    This build includes a Watch app. It is never dropped
+                    silently, so choose before identifiers are registered.
+                  </p>
+                </>
+              )}
               <label className="auth-consent">
                 <input
                   type="checkbox"
@@ -621,7 +656,13 @@ export function Accounts({
               </label>
               <button
                 className="secondary"
-                disabled={disabled || provBusy || !ipaPath || !provAck}
+                disabled={
+                  disabled ||
+                  provBusy ||
+                  !ipaPath ||
+                  !provAck ||
+                  (hasWatchApp && watch === "undecided")
+                }
                 onClick={() => {
                   setProvBusy(true);
                   setProvError(null);
@@ -629,6 +670,7 @@ export function Accounts({
                   invoke<Preparation>("account_prepare_provisioning", {
                     path: ipaPath,
                     acknowledged: provAck,
+                    watch,
                   })
                     .then((result) => {
                       if (!mounted.current) return;
@@ -657,9 +699,11 @@ export function Accounts({
                     ? "Select an IPA first."
                     : !provAck
                       ? "Acknowledge the identifier limit to enable provisioning."
-                      : preparation
-                        ? `Plan identifier: ${preparation.plan.new_main_identifier}`
-                        : "Ready to provision.")}
+                      : hasWatchApp && watch === "undecided"
+                        ? "Choose what happens to the Watch app."
+                        : preparation
+                          ? `Plan identifier: ${preparation.plan.new_main_identifier}`
+                          : "Ready to provision.")}
               </p>
               {preparation && preparation.plan.blockers.length > 0 && (
                 <ul className="hint">

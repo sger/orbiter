@@ -520,6 +520,7 @@ impl Accounts {
         &self,
         path: std::path::PathBuf,
         acknowledged: bool,
+        watch: crate::plan::WatchChoice,
     ) -> Result<Preparation, String> {
         let _gate = self
             .1
@@ -569,6 +570,7 @@ impl Accounts {
                 } else {
                     crate::plan::TeamKind::Paid
                 },
+                watch,
             },
         );
         if !plan.blockers.is_empty() {

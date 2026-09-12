@@ -3,7 +3,9 @@ use std::{path::PathBuf, sync::atomic::AtomicBool};
 fn main() {
     let mut args = std::env::args().skip(1);
     let (Some(path), Some(team)) = (args.next(), args.next()) else {
-        eprintln!("Usage: orbiter-sign-plan <ipa> <team-id> [--personal|--paid]");
+        eprintln!(
+            "Usage: orbiter-sign-plan <ipa> <team-id> [--personal|--paid] [--watch-remove|--watch-sign]"
+        );
         std::process::exit(2)
     };
     let kind = match args.next().as_deref() {
@@ -11,6 +13,15 @@ fn main() {
         Some("--paid") => orbiter_core::plan::TeamKind::Paid,
         Some(_) => {
             eprintln!("Expected --personal or --paid.");
+            std::process::exit(2)
+        }
+    };
+    let watch = match args.next().as_deref() {
+        None => orbiter_core::plan::WatchChoice::Undecided,
+        Some("--watch-remove") => orbiter_core::plan::WatchChoice::Remove,
+        Some("--watch-sign") => orbiter_core::plan::WatchChoice::Sign,
+        Some(_) => {
+            eprintln!("Expected --watch-remove or --watch-sign.");
             std::process::exit(2)
         }
     };
@@ -31,6 +42,7 @@ fn main() {
         &orbiter_core::plan::Target {
             team_id: team,
             kind,
+            watch,
         },
     );
     println!(
