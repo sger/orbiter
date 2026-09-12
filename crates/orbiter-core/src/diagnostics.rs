@@ -1,0 +1,204 @@
+//! Device log capture, for answering "why did that screen fail?" with evidence.
+//!
+//! The iPhone's system log is the whole device's log: every app, every system service, and
+//! whatever personal detail those happen to print. Orbiter does not want that and does not take
+//! it. A capture is explicit, runs only while it is asked to, keeps only lines that mention the
+//! app being diagnosed, holds them in memory, and writes nothing to disk.
+use idevice::{IdeviceError, IdeviceService, provider::UsbmuxdProvider, usbmuxd::UsbmuxdAddr};
+use serde::Serialize;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+/// A capture stops on its own. Someone who starts one and walks away has not left the iPhone's
+/// log streaming into this process indefinitely.
+const MAX_DURATION: Duration = Duration::from_secs(5 * 60);
+/// Enough to cover reproducing one failure, bounded so memory cannot grow without limit.
+const MAX_LINES: usize = 500;
+/// A single log line is a sentence or two. Anything longer is truncated rather than kept whole.
+const MAX_LINE: usize = 600;
+
+#[derive(Clone, Serialize)]
+pub struct LogLine {
+    pub text: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct Summary {
+    pub matched: usize,
+    /// Lines the iPhone emitted that were read and discarded because they were about other apps.
+    pub discarded: usize,
+    pub message: String,
+}
+
+/// Reasons a capture is refused before the iPhone is contacted.
+pub fn refusal(subjects: &[String]) -> Option<&'static str> {
+    if subjects.is_empty() || subjects.iter().all(|subject| subject.trim().is_empty()) {
+        return Some(
+            "Sign a build first. A capture keeps only lines about the app being diagnosed, so it needs to know which app that is.",
+        );
+    }
+    None
+}
+
+/// Whether a log line is about one of the subjects. Case-insensitive substring: the system log
+/// names a process in several forms, and this is a filter for keeping less, not a parser.
+fn about(line: &str, subjects: &[String]) -> bool {
+    let line = line.to_ascii_lowercase();
+    subjects
+        .iter()
+        .any(|subject| !subject.is_empty() && line.contains(&subject.to_ascii_lowercase()))
+}
+
+/// Trim a kept line to something a person reads, without the trailing newline the relay sends.
+fn tidy(line: &str) -> String {
+    let line = line.trim_end_matches(['\n', '\r', '\0']);
+    if line.chars().count() > MAX_LINE {
+        let cut: String = line.chars().take(MAX_LINE).collect();
+        format!("{cut}…")
+    } else {
+        line.to_string()
+    }
+}
+
+fn address() -> UsbmuxdAddr {
+    // The same narrow, local-only transport discovery and installation use.
+    #[cfg(unix)]
+    {
+        UsbmuxdAddr::UnixSocket("/var/run/usbmuxd".into())
+    }
+    #[cfg(not(unix))]
+    {
+        UsbmuxdAddr::TcpSocket(std::net::SocketAddr::from(([127, 0, 0, 1], 27015)))
+    }
+}
+
+fn connection_error(_: IdeviceError) -> String {
+    "Cannot read the iPhone's log. Unlock it, check trust and the USB cable, and try again.".into()
+}
+
+async fn provider(device_id: u32) -> Result<UsbmuxdProvider, String> {
+    let mut mux = address().connect(0).await.map_err(connection_error)?;
+    let raw = mux
+        .get_devices()
+        .await
+        .map_err(connection_error)?
+        .into_iter()
+        .find(|device| device.device_id == device_id)
+        .ok_or("Selected iPhone disconnected. Select it again.")?;
+    if raw.connection_type != idevice::usbmuxd::Connection::Usb {
+        return Err("Log capture supports USB only. Connect the iPhone by cable.".into());
+    }
+    Ok(raw.to_provider(address(), "Orbiter"))
+}
+
+/// Stream the iPhone's log, keeping only what is about `subjects`, until cancelled or bounded out.
+pub async fn capture(
+    device_id: u32,
+    subjects: Vec<String>,
+    cancel: Arc<AtomicBool>,
+    mut sink: impl FnMut(LogLine),
+) -> Result<Summary, String> {
+    if let Some(refusal) = refusal(&subjects) {
+        return Err(refusal.into());
+    }
+    let provider = provider(device_id).await?;
+    let mut client = tokio::time::timeout(
+        Duration::from_secs(15),
+        idevice::services::syslog_relay::SyslogRelayClient::connect(&provider),
+    )
+    .await
+    .map_err(|_| "Opening the iPhone's log service timed out.".to_string())?
+    .map_err(connection_error)?;
+
+    let started = Instant::now();
+    let mut matched = 0usize;
+    let mut discarded = 0usize;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(Summary {
+                matched,
+                discarded,
+                message: "Capture stopped. Nothing was written to disk.".into(),
+            });
+        }
+        if started.elapsed() >= MAX_DURATION {
+            return Ok(Summary {
+                matched,
+                discarded,
+                message: "Capture stopped after five minutes. Start it again to keep going.".into(),
+            });
+        }
+        if matched >= MAX_LINES {
+            return Ok(Summary {
+                matched,
+                discarded,
+                message: format!(
+                    "Capture stopped after {MAX_LINES} matching lines. Start it again to keep going."
+                ),
+            });
+        }
+        // A quiet iPhone must not block cancellation, so reading is bounded too.
+        let line = match tokio::time::timeout(Duration::from_secs(2), client.next()).await {
+            Err(_) => continue,
+            Ok(Ok(line)) => line,
+            Ok(Err(_)) => {
+                return Ok(Summary {
+                    matched,
+                    discarded,
+                    message: "The iPhone closed its log connection. Reconnect and try again."
+                        .into(),
+                });
+            }
+        };
+        if about(&line, &subjects) {
+            matched += 1;
+            sink(LogLine { text: tidy(&line) });
+        } else {
+            // Counted, never kept: this is the rest of the device's log passing through.
+            discarded += 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_capture_needs_to_know_which_app_it_is_about() {
+        assert!(refusal(&[]).is_some());
+        assert!(refusal(&["   ".to_string()]).is_some());
+        assert!(refusal(&["com.example.app".to_string()]).is_none());
+    }
+
+    #[test]
+    fn only_lines_about_the_app_are_kept_and_the_rest_of_the_device_is_not() {
+        let subjects = vec!["com.example.app.ab12".to_string(), "Example".to_string()];
+        assert!(about(
+            "Sep 12 21:40 iPhone com.example.app.ab12[431]: refused",
+            &subjects
+        ));
+        // The system log names processes in several cases; the filter must not miss those.
+        assert!(about("... COM.EXAMPLE.APP.AB12 ...", &subjects));
+        // Someone else's messages, someone else's business.
+        assert!(!about(
+            "Sep 12 21:40 iPhone Messages[88]: delivered to a friend",
+            &subjects
+        ));
+        assert!(!about("Sep 12 21:40 iPhone locationd[77]: fix", &subjects));
+    }
+
+    #[test]
+    fn a_kept_line_is_trimmed_rather_than_stored_whole() {
+        assert_eq!(tidy("ready\n\u{0}"), "ready");
+        let long = "x".repeat(MAX_LINE + 50);
+        let kept = tidy(&long);
+        assert!(kept.ends_with('…'));
+        assert_eq!(kept.chars().count(), MAX_LINE + 1);
+    }
+}

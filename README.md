@@ -94,3 +94,7 @@ In **Destination & identity**, click **Check Keychain** to list valid iOS signin
 No remote Anisette provider or proxy fallback is available. Local support failure stops sign-in. Passwords/codes are never persisted; account sessions remain in memory. macOS manages its own authentication support data. Windows local authentication is not yet implemented. Direct Apple HTTPS access is required, including on corporate networks.
 
 Local generation passed on this Mac; live Apple sign-in still needs a designated test-account acceptance run. No provisioning/certificate/device mutation or re-signing is performed by account sign-in. **Sign & Install** remains unavailable. See [local authentication and data handling](docs/local-authentication.md), including cleanup of any obsolete state from the retired remote preview.
+
+## Device log capture (macOS)
+
+After signing, **Device log → Capture while you reproduce it** streams the connected iPhone's system log and keeps only the lines mentioning the signed build's identifier or app name; every other line the device emits is counted and discarded. Nothing is written to disk, and the capture stops on request, after five minutes, or after 500 matching lines. Use it to see what iOS actually reports when a screen in the re-signed app fails — a denied entitlement, or a service refusing the rewritten bundle identifier — instead of inferring it.

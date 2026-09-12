@@ -1052,3 +1052,39 @@ details[open] > summary > svg {
 .install-next p {
   margin: 0;
 }
+
+.device-log {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e6ebe4;
+}
+.device-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+/* Log lines are read as lines: keep the breaks, and keep the block from growing the page. */
+.device-log-lines {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid #e2e7df;
+  border-radius: 6px;
+  background: #fafbf9;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diagnostics {
+  margin: 6px 0 22px;
+  padding: 4px 22px 18px;
+}
+.diagnostics .device-log {
+  border-top: 0;
+  padding-top: 14px;
+}

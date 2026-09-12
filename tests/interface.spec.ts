@@ -181,6 +181,22 @@ async function nativeMock(
               message: "A development certificate was issued.",
             };
           }
+          if (cmd === "start_device_log") {
+            (window as any).__logRequested = {
+              deviceId: args.deviceId,
+              subjects: args.subjects,
+            };
+            // The mock receives the Channel itself, so deliver straight to its handler.
+            args.progress?.onmessage?.({
+              text: "Stoiximan[431]: social feed request refused",
+            });
+            return {
+              matched: 1,
+              discarded: 812,
+              message: "Capture stopped. Nothing was written to disk.",
+            };
+          }
+          if (cmd === "stop_device_log") return;
           if (cmd === "account_sign_ipa") {
             (window as any).__signRequested = {
               path: args.path,
@@ -188,14 +204,11 @@ async function nativeMock(
             };
             if ((window as any).__signFailure)
               throw (window as any).__signFailure;
-            // Real runs report counted progress before they return. A Channel reaches the
-            // backend as a callback id, so drive it the way Tauri would.
-            const channel = callbacks.get(
-              Number(String(args.progress).replace(/\D/g, "")),
-            );
-            channel?.({
-              message: { stage: "Signing bundles", done: 3, total: 24 },
-              id: 1,
+            // Real runs report counted progress before they return.
+            args.progress?.onmessage?.({
+              stage: "Signing bundles",
+              done: 3,
+              total: 24,
             });
             return {
               path: "/synthetic/signed/Test-TEAM2.ipa",
@@ -1149,4 +1162,72 @@ test("a signed build says how to trust it before it will launch", async ({
   await expect(page.getByText("Trust the developer on the iPhone")).toHaveCount(
     0,
   );
+});
+
+test("the device log is offered only for a signed build and keeps only its lines", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+
+  // Nothing to diagnose before there is a build Orbiter signed.
+  await expect(page.getByText("Device log")).toHaveCount(0);
+
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page
+    .getByLabel("I understand this uses one of the team's", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Get signing certificate" }).click();
+  await page
+    .getByLabel("I understand ten identifiers per seven days", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Prepare identifiers & profiles" })
+    .click();
+  await page.getByRole("button", { name: "Sign IPA" }).click();
+  await expect(page.getByText("Signed build expires")).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "Capture while you reproduce it" })
+    .click();
+  await expect(
+    page.getByText("social feed request refused", { exact: false }),
+  ).toBeVisible();
+  // The rest of the device's log is counted and discarded, not shown.
+  await expect(
+    page.getByText("812 about the rest of the device were discarded", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  // The capture is scoped to the signed identifier, not to the device at large.
+  expect(
+    await page.evaluate(() => (window as any).__logRequested?.subjects),
+  ).toContain("com.example.app.abc123");
 });

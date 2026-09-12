@@ -228,6 +228,49 @@ fn installation_status(
     }
     job::recover(&journal(&app)?)
 }
+#[derive(Default, Clone)]
+struct LogCapture {
+    gate: Arc<tokio::sync::Mutex<()>>,
+    cancel: Arc<AtomicBool>,
+}
+/// Stream the iPhone's log for one app. Only lines about `subjects` are kept, and the capture
+/// stops on request, after five minutes, or after its line budget.
+#[tauri::command]
+async fn start_device_log(
+    device_id: u32,
+    subjects: Vec<String>,
+    progress: Channel<orbiter_core::diagnostics::LogLine>,
+    state: State<'_, LogCapture>,
+) -> Result<orbiter_core::diagnostics::Summary, String> {
+    let _gate = state
+        .gate
+        .clone()
+        .try_lock_owned()
+        .map_err(|_| "A log capture is already running.")?;
+    state.cancel.store(false, Ordering::SeqCst);
+    tracing::info!(operation = "device-log", stage = "started");
+    let result = orbiter_core::diagnostics::capture(
+        device_id,
+        subjects,
+        state.cancel.clone(),
+        move |line| {
+            let _ = progress.send(line);
+        },
+    )
+    .await;
+    // Line contents are the device's, not Orbiter's to record: only the counts are logged.
+    tracing::info!(
+        operation = "device-log",
+        stage = "finished",
+        success = result.is_ok(),
+        matched = result.as_ref().map(|s| s.matched).unwrap_or(0)
+    );
+    result
+}
+#[tauri::command]
+fn stop_device_log(state: State<'_, LogCapture>) {
+    state.cancel.store(true, Ordering::SeqCst);
+}
 #[tauri::command]
 fn account_status(
     state: State<'_, orbiter_core::accounts::Accounts>,
@@ -387,6 +430,7 @@ fn main() {
         .manage(orbiter_core::accounts::Accounts::default())
         .manage(Inspection::default())
         .manage(Installations::default())
+        .manage(LogCapture::default())
         .invoke_handler(tauri::generate_handler![
             account_status,
             account_sign_in,
@@ -408,7 +452,9 @@ fn main() {
             discard_install,
             execute_install,
             cancel_install,
-            installation_status
+            installation_status,
+            start_device_log,
+            stop_device_log
         ])
         .run(tauri::generate_context!())
         .expect("Unable to start Orbiter");

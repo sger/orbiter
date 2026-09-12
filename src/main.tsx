@@ -26,6 +26,7 @@ import "./styles.css";
 import { SigningIdentities } from "./SigningIdentities";
 import { Devices } from "./Devices";
 import { InstallSigned } from "./InstallSigned";
+import { DeviceLog } from "./DeviceLog";
 const stages = [
   "Checking archive",
   "Reading bundles and signatures",
@@ -643,6 +644,15 @@ function App() {
           deviceId={deviceId}
           onBusy={installationBusy}
         />
+        {signed && (
+          <section className="card diagnostics">
+            <DeviceLog
+              deviceId={deviceId}
+              subjects={[signed.identifier, app?.name ?? ""].filter(Boolean)}
+              disabled={installBusy}
+            />
+          </section>
+        )}
         {report && (
           <details className="card inventory">
             <summary>

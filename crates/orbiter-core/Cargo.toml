@@ -12,7 +12,7 @@ cms = "=0.2.3"
 der = { version = "=0.7.10", features = ["alloc"] }
 base64 = "=0.23.1"
 thiserror = "=2.0.20"
-idevice = { version = "=0.1.65", default-features = false, features = ["usbmuxd", "ring", "afc", "installation_proxy"] }
+idevice = { version = "=0.1.65", default-features = false, features = ["usbmuxd", "ring", "afc", "installation_proxy", "syslog_relay"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "time", "macros", "process", "io-util"] }
 sha2 = "=0.10.9"
 uuid = { version = "=1.26.1", features = ["v4"] }
