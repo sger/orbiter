@@ -4,15 +4,15 @@ Validation date: 2026-09-12. Host: Apple Silicon macOS. Automated tests use smal
 
 | Check | macOS on this host | Windows |
 | --- | --- | --- |
-| Rust core tests | Passed: 21 tests | Not run |
+| Rust core tests | Passed: 24 tests | Not run |
 | Rust workspace Clippy, warnings denied | Passed | Not run |
 | React/TypeScript production build | Passed | Not run on Windows |
-| Browser UI tests in Chrome | Passed: 4 tests, synthetic IPC | Not run |
+| Browser UI tests in Chrome | Passed: 5 tests, synthetic IPC | Not run |
 | Native Tauri compilation and debug `.app` packaging | Passed | Not run |
 | Native process startup | Stayed running for 5 seconds without startup errors; then closed | Not run |
-| Native file picker / drag-drop interactive acceptance | Pending manual check | Pending |
+| Native IPA inspection | User confirmed working in the macOS desktop with the company IPA; picker vs drop not separately recorded | Pending |
 | Representative company IPA via Rust CLI | Passed, static inspection only | Not run |
-| Device discovery, trust, pairing, disconnection | Not implemented / not tested | Not implemented / not tested |
+| Device discovery and existing pairing | Verified through the Rust adapter on a connected USB iPhone; real unplug/locked/untrusted recovery still needs hardware checks | Implemented with loopback transport; not tested |
 | Authentication, 2FA, team choice, session expiry | Not implemented / not tested | Not implemented / not tested |
 | Provisioning, nested signing, verification, installation | Not implemented / not tested | Not implemented / not tested |
 | Launch, login, data retention, capability behavior | Not tested on a physical device | Not tested on a physical device |
@@ -35,19 +35,25 @@ The icon uses the fallback because the supported standard-PNG path did not yield
 | Milestone | Status | Next prerequisite |
 | --- | --- | --- |
 | Phase 1 foundation and inspection | Implemented with documented parser/layout limits; automated local checks pass | Manual native picker/drop acceptance and Windows validation remain |
-| Phase 2 device transport | Dependency evaluation complete; implementation not started | An `idevice` adapter can be built locally; transport validation needs a physical iPhone, trust/pairing consent, and an appropriately signed test IPA. Windows also needs a host and verified Apple services/driver setup |
+| Phase 2 device transport | Read-only discovery and existing-session verification implemented; installation pending | The connected iPhone is reachable. Installation transport still needs implementation and an appropriately signed test IPA authorized for the selected device. Windows also needs a host and verified Apple services/driver setup |
 | Phase 3 authentication/signing | Public-source and data-flow review only | Select/review Anisette strategy, implement secure account flow, designated test account with 2FA, explicit team, certificates/profiles, reviewed registration/signing plan |
 | Phase 4 end-to-end | Not started | Working transport and signer, designated device/account, company test credentials and capability owners |
 | Phase 5 refresh/distribution | Not started | Validated install jobs; durable metadata/recovery design; update-signing keys, release certificates and notarization access |
 
-Phases 2–5 are future implementation, not completed code hidden behind disabled buttons. Their physical/account-dependent acceptance steps cannot be established by static inspection. No permission was needed to alter company account state because no such operations were performed.
+The remainder of Phase 2 and Phases 3–5 are future implementation, not completed code hidden behind disabled buttons. Their physical/account-dependent acceptance steps cannot be established by static inspection. No permission was needed to alter company account state because no such operations were performed.
 
 ## Manual desktop acceptance
 
 1. Launch the local app and choose a small synthetic IPA, then the representative company IPA. Confirm app metadata, profile expiration, Watch/framework inventory, and report details match CLI output.
 2. Drop one IPA; try multiple files, an unreadable path, and an invalid archive. Confirm actionable errors, no stale results, and a usable retry flow.
 3. Cancel a large inspection. Wait for acknowledgement; inspect again. Close during inspection and reopen; confirm no partial output or restored success.
-4. Confirm accounts, signing teams, devices, signing, and refresh are unavailable; no network access, credentials, or device mutations occur.
+4. Confirm accounts, signing teams, signing, and renewal remain unavailable. Device discovery should show real data without account access, internet requests, or pairing mutations.
 5. Repeat on Windows, including non-ASCII paths. Test native window resizing and keyboard navigation. Record OS/toolchain versions and separate browser results from native behavior.
 
 For later device acceptance, test locked/untrusted/disconnected states, service/driver absence, transfer interruption, cancellation before/after installation commits, app launch, same-identity upgrades/data retention, then push, domains, merchants, groups, keychain, and Watch separately. Never label the app compatible solely because installation completed.
+
+## Device discovery verification
+
+The new Rust adapter connected through the local macOS Apple device service to an iPhone (`iPhone14,5`) over USB, read the reported iOS version (26.6.1), and successfully verified an existing pairing/TLS session. Device name, UDID, pairing records, and transport IDs are not recorded here. No account access, new pairing, IPA transfer, or installation occurred. Apple's `devicectl` initially timed out; Orbiter's direct `idevice` path succeeded independently.
+
+Additional unit tests cover locked/invalid-host recovery, error redaction, and local-only daemon selection. A browser test covers real-shaped synthetic discovery, selected-device disappearance, and service failure while retaining disabled signing. Real unplug/replug, locked/untrusted behavior, and native selector acceptance still need user/hardware checks. Five-second refresh is a polling interval, not a guaranteed detection deadline.

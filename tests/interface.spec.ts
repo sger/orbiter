@@ -76,6 +76,14 @@ async function nativeMock(
         },
         unregisterCallback: (id: number) => callbacks.delete(id),
         invoke: async (cmd: string) => {
+          if (cmd === "discover_devices")
+            return (
+              (window as any).__deviceResult ?? {
+                devices: [],
+                service_available: true,
+                message: null,
+              }
+            );
           if (cmd === "plugin:event|listen") return 1;
           if (cmd === "plugin:dialog|open") return "/synthetic/Test.ipa";
           if (cmd === "inspect_ipa") {
@@ -150,4 +158,53 @@ test("cancel waits for worker acknowledgement and permits another inspection", a
   await expect(
     page.getByRole("button", { name: /Drop your IPA/ }),
   ).toBeEnabled();
+});
+
+test("device refresh removes disconnected selection and surfaces service errors", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await expect(page.getByText("Synthetic pairing verified.")).toBeVisible();
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByLabel("Physical iPhone")).toHaveValue("");
+  await expect(page.getByLabel("Physical iPhone")).toBeDisabled();
+  await expect(page.getByText("Synthetic pairing verified.")).toHaveCount(0);
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [],
+      service_available: false,
+      message: "Synthetic service unavailable.",
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByText("Synthetic service unavailable.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign & Install" }),
+  ).toBeDisabled();
 });

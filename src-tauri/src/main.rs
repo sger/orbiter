@@ -53,12 +53,31 @@ async fn inspect_ipa(
 fn cancel_inspection(state: State<'_, Inspection>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
+#[tauri::command]
+async fn discover_devices() -> orbiter_core::devices::Discovery {
+    orbiter_core::devices::discover().await
+}
 fn main() {
-    tracing_subscriber::fmt().json().with_target(false).init();
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_target(false)
+                .with_filter(
+                    tracing_subscriber::filter::Targets::new()
+                        .with_target("orbiter", tracing::Level::INFO),
+                ),
+        )
+        .init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Inspection::default())
-        .invoke_handler(tauri::generate_handler![inspect_ipa, cancel_inspection])
+        .invoke_handler(tauri::generate_handler![
+            inspect_ipa,
+            cancel_inspection,
+            discover_devices
+        ])
         .run(tauri::generate_context!())
         .expect("Unable to start Orbiter");
 }

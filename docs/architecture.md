@@ -10,7 +10,7 @@ CLI ─────────────────────────�
                                                └─ conservative findings
 ```
 
-`crates/orbiter-core` owns inspection and report types and has no Tauri dependency. `src-tauri` owns window setup, two IPC commands, one active inspection, cancellation, and redacted structured logging. `src` renders only returned data and explicit unavailable states. IPC permissions grant only opening a file dialog and registering/removing drag/drop listeners; no shell, arbitrary filesystem frontend access, remote content, or updater permissions. Custom commands expose inspection and cancellation, not file writes.
+`crates/orbiter-core` owns inspection and report types and has no Tauri dependency. `src-tauri` owns window setup, three IPC commands, one active inspection, cancellation, and redacted structured logging. `src` renders only returned data and explicit unavailable states. IPC permissions grant only opening a file dialog and registering/removing drag/drop listeners; no shell, arbitrary filesystem frontend access, remote content, or updater permissions. Custom commands expose inspection, cancellation, and read-only device discovery, not file writes.
 
 Blocking archive reads run on Tokio's blocking pool. A single atomic busy guard rejects overlapping jobs; a drop guard releases it on success, failure, or worker unwind. Cancellation checks occur between stages, bundles, ZIP entries, and 64 KiB read chunks. CMS/Mach-O/plist parsing is synchronous and cancellation waits for that bounded parse to finish. A late cancellation may lose to completed inspection. No invented byte percentage or immediate-cancellation claim is made. Closing the application abandons inspection; restarting and selecting the original file starts cleanly. There are no persistent installation jobs or resumable partial outputs.
 
@@ -44,3 +44,11 @@ Future signing-plan validation must use explicit target profiles/certificates, i
 ## Subsequent boundaries
 
 Add device transport through evaluated `idevice` APIs before authentication. Add an authentication/team service with native credential storage and no plaintext fallback once Anisette data handling is settled. Certificate/provisioning operations, bundle transformation/signing, and installation jobs belong in the Rust core as their behavior becomes concrete. SQLite can persist refresh/job metadata once resumable jobs exist. Signing outputs must use separate paths and preserve the original IPA; never automatically revoke certificates.
+
+## Device discovery (Phase 2, first increment)
+
+`devices.rs` uses exact-pinned idevice 0.1.65 with `usbmuxd` and `ring` only. Pairing mutation and installation features are not enabled. It lists transports through the local daemon, reads selected Lockdown metadata keys, obtains an existing pairing record into memory, and verifies a TLS session. Known non-iPhones are excluded; devices with unavailable metadata remain visible as unverified. Only an ephemeral mux ID, display metadata, connection category, and redacted status leave the core. No UDID, IP address, HostID, or key is exposed in reports/logs.
+
+Discovery has a three-second daemon deadline and three seconds per device, capped at sixteen transports (maximum roughly 51 seconds). The UI skips overlapping polls, refreshes every five seconds when idle, and clears selections that disappear. Stale sessions are not reused. A timeout/disconnection produces an unavailable state. Missing/unreadable pairing records are reported as unverified, rather than claiming that trust was rejected. A successful TLS session establishes pairing; lock state and Developer Mode remain unverified unless the device explicitly returns a locked error. `PasswordProtected` is not used to infer lock state.
+
+The desktop tracing filter admits only Orbiter's structured events, excluding dependency logs that could contain pairing or protocol payloads. The standalone discovery CLI installs no tracing subscriber. Pairing records remain managed by the OS Apple service; Orbiter neither stores nor mutates them. Windows uses loopback only and requires its own hardware validation. Installation transport is still pending.

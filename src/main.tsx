@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { Report, Bundle } from "./types";
 import "./styles.css";
+import { Devices } from "./Devices";
 const stages = [
   "Checking archive",
   "Reading bundles and signatures",
@@ -159,7 +160,7 @@ function App() {
               install.
             </p>
           </div>
-          <span className="phase">PREVIEW · PHASE 01</span>
+          <span className="phase">PREVIEW · DEVICE DISCOVERY</span>
         </div>
         {!desktop && (
           <div className="notice">
@@ -273,14 +274,7 @@ function App() {
                   <span>02</span> Destination & identity
                 </h2>
               </div>
-              <label htmlFor="device">Physical iPhone</label>
-              <div className="select-wrap">
-                <Smartphone size={17} />
-                <select id="device" disabled>
-                  <option>Device discovery not implemented</option>
-                </select>
-                <ChevronDown size={14} />
-              </div>
+              <Devices />
               <div className="identity-grid">
                 <div>
                   <label htmlFor="account">Apple account</label>
