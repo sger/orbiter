@@ -56,15 +56,24 @@ fn classify(team: &isideload::dev::teams::DeveloperTeam) -> (Option<bool>, Optio
         .filter_map(|membership| membership.name.clone())
         .filter(|name| name.len() <= 120 && !name.chars().any(char::is_control))
         .collect();
-    let paid = named.iter().any(|name| {
-        let name = name.to_ascii_lowercase();
-        name.contains("developer program") || name.contains("enterprise")
-    });
     let label = named.first().cloned();
-    if paid {
+    let lowercase: Vec<String> = named.iter().map(|name| name.to_ascii_lowercase()).collect();
+    // Observed on a live free account: Apple names the Personal Team membership
+    // "Xcode Free Provisioning Program". It ends in "Program" like a paid one, so match the
+    // free wording first.
+    if lowercase
+        .iter()
+        .any(|name| name.contains("free provisioning"))
+    {
+        return (Some(true), label);
+    }
+    if lowercase
+        .iter()
+        .any(|name| name.contains("developer program") || name.contains("enterprise"))
+    {
         return (Some(false), label);
     }
-    // Apple reports no program membership for a free account's Personal Team.
+    // A Personal Team that reports no membership at all is still a free team.
     if named.is_empty() && team.r#type.as_deref() == Some("Individual") {
         return (Some(true), label);
     }
@@ -725,7 +734,16 @@ mod tests {
                 })
                 .collect(),
         };
-        // A free account's Personal Team carries no program membership.
+        // Observed live: a free account's Personal Team reports this membership, which ends in
+        // "Program" and must not be read as a paid one.
+        assert_eq!(
+            classify(&team("Individual", vec!["Xcode Free Provisioning Program"])),
+            (
+                Some(true),
+                Some("Xcode Free Provisioning Program".to_string())
+            )
+        );
+        // A Personal Team reporting no membership at all is free too.
         assert_eq!(classify(&team("Individual", vec![])).0, Some(true));
         // A paid membership names its program, whatever the team type says.
         assert_eq!(

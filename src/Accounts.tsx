@@ -401,7 +401,11 @@ export function Accounts({
                   ? "Free personal team: profiles expire after seven days, so the app must be re-signed weekly, and capabilities this team cannot create are removed from the build."
                   : team.free === false
                     ? "Paid membership: installs use this team's device allowance, which is shared with everyone signing on it."
-                    : "Apple's answer does not establish whether this is a free personal team or a paid membership, so expiry and capability limits are unknown."}
+                    : `Apple's answer does not establish whether this is a free personal team or a paid membership, so expiry and capability limits are unknown.${
+                        team.membership
+                          ? ` Apple reported the membership as "${team.membership}".`
+                          : " Apple reported no membership."
+                      }`}
               </p>
             );
           })()}

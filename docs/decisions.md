@@ -74,3 +74,8 @@ Consequences, each of which is a design constraint rather than a detail:
 - **macOS-only local authentication is a blocker for Windows testers.** Sign-in requires the local macOS authentication bridge. If testers run Windows, no part of this workflow is available to them until a Windows local provider exists, and no remote support server is permitted.
 
 The conventional answers to a full device allowance are TestFlight, whose external testers do not consume device slots, and the Apple Developer Enterprise Program for in-house distribution; the 100-device limit also resets at membership renewal. These were not selected. This requirement is recorded as the company's decision, and Orbiter does not claim to bypass Apple device limits: it uses each tester's own Personal Team allowance, with that team's restrictions and expiry.
+
+
+## Observed team membership names
+
+A live free Apple account reports its Personal Team as type `Individual` with the membership name **"Xcode Free Provisioning Program"**. The name ends in "Program" like a paid membership, so classification matches the free wording first and only then the paid programs, and a Personal Team that reports no membership at all is also treated as free. Anything else stays undetermined and is shown as such, including what Apple actually reported, rather than being guessed: the free-versus-paid answer decides seven-day expiry and which capabilities survive re-signing. This string was read from one account and may vary; the undetermined path is the safety net.
