@@ -50,6 +50,7 @@ export type Signed = {
   path: string;
   identifier: string;
   expires: string;
+  expires_unix: number;
   bundles_signed: number;
   removed: string[];
   message: string;
@@ -195,4 +196,29 @@ export type TeamStatus = {
   certificate: boolean;
   certificateSummary: string;
   watch: WatchChoice;
+};
+
+/// How far a remembered build has left of a free team's seven days.
+///
+/// Rust decides all of this, including the sentence: the same words appear in the window, in a
+/// screenshot of it, and in the log, rather than each surface phrasing the arithmetic its own way.
+export type Standing =
+  | { state: "valid"; days: number }
+  | { state: "expires_today" }
+  | { state: "expired"; days: number }
+  | { state: "long_expired" };
+
+/// Whether the remembered build is the one on screen. Anything but `same_app` means the countdown
+/// is about something else, so no countdown is shown.
+export type Bearing = "same_app" | "other_app" | "other_team" | "unknown";
+
+export type Renewal = {
+  identifier: string;
+  app_name: string;
+  watch: WatchChoice;
+  standing: Standing;
+  bearing: Bearing;
+  sentence: string;
+  /// The build on screen has run out. The one case that moves above the signing controls.
+  urgent: boolean;
 };

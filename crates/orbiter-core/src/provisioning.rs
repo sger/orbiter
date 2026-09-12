@@ -228,6 +228,9 @@ pub struct AppIdOutcome {
 pub struct ProfileOutcome {
     pub identifier: String,
     pub expires: String,
+    /// The same moment as `expires`, as seconds since the epoch, so nothing downstream has to
+    /// parse a date string back out of a human-readable one.
+    pub expires_unix: i64,
     pub uuid: String,
     /// Profile bytes for the signer. Not serialised into the interface.
     #[serde(skip)]
@@ -334,6 +337,7 @@ pub async fn fetch_profile(
     Ok(ProfileOutcome {
         identifier: app_id.identifier.clone(),
         expires: profile.date_expire.to_xml_format(),
+        expires_unix: crate::renewal::now_unix(std::time::SystemTime::from(profile.date_expire)),
         uuid: profile.uuid,
         encoded: profile.encoded_profile.as_ref().to_vec(),
     })

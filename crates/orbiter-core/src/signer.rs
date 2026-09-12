@@ -74,6 +74,8 @@ pub struct Signed {
     pub identifier: String,
     /// Earliest profile expiry: when the app stops launching and must be signed again.
     pub expires: String,
+    /// The same moment as seconds since the epoch, for the renewal record.
+    pub expires_unix: i64,
     pub bundles_signed: usize,
     /// Bundles the plan left out of the build, by their original identifier.
     pub removed: Vec<String>,
@@ -539,15 +541,14 @@ fn run(
             .unwrap_or(0)
     ));
 
-    let expires = profiles
-        .iter()
-        .map(|profile| profile.expires.clone())
-        .min()
-        .unwrap_or_default();
+    // The build stops launching when its first profile does, so both forms of the expiry come
+    // from that one profile rather than being chosen independently.
+    let earliest = profiles.iter().min_by_key(|profile| profile.expires_unix);
     Ok(Signed {
         path: output.to_string_lossy().to_string(),
         identifier: plan.new_main_identifier.clone(),
-        expires,
+        expires: earliest.map(|p| p.expires.clone()).unwrap_or_default(),
+        expires_unix: earliest.map(|p| p.expires_unix).unwrap_or_default(),
         bundles_signed: order.len(),
         removed,
         message: "A signed IPA was produced. The original IPA is unchanged.".into(),
@@ -673,6 +674,7 @@ mod tests {
         ProfileOutcome {
             identifier: identifier.into(),
             expires: "2026-09-19T00:00:00Z".into(),
+            expires_unix: 1_789_776_000,
             uuid: "uuid".into(),
             encoded: Vec::new(),
         }

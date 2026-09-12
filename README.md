@@ -4,7 +4,7 @@ A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2,
 
 It exists for one problem: a company team's 100-device allowance is full, so testers outside it cannot install the company build. Orbiter re-signs that build with a tester's own free Apple ID and installs it on their iPhone.
 
-The whole path works and has been run end to end on a physical device: Apple sign-in, device registration, a development certificate whose key stays in this Mac's Keychain, App ID and profile registration, re-signing, installation, and the app launching. **Automatic weekly re-signing is not implemented** — a free team's profile expires after seven days and the build must be re-signed by hand. Federated company accounts are not supported. Windows is unverified.
+The whole path works and has been run end to end on a physical device: Apple sign-in, device registration, a development certificate whose key stays in this Mac's Keychain, App ID and profile registration, re-signing, installation, and the app launching. **Re-signing on a schedule is not implemented, by design** — a free team's profile expires after seven days, and Orbiter tracks when an installed build runs out and says so, but re-signing is always a click. Nothing here contacts Apple on its own. Federated company accounts are not supported. Windows is unverified.
 
 ## Run
 
@@ -81,7 +81,7 @@ cargo run --locked -p orbiter-core --bin orbiter-install-review -- /path/to/comp
 
 Replace `1` with the ephemeral transport ID from `orbiter-devices`. The CLI discards its snapshot on exit. Review output includes app/device display information; handle it as private company information.
 
-The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time.
+The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory, and what an installed build's expiry line needs in `renewal.json` beside it — app name, identifier, expiry, and a tag derived from the team, never the team identifier, the IPA's location, the phone, or the Apple ID. Both files are bounded and refused when damaged rather than trusted. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time.
 
 ## Re-sign for a tester's Apple ID (macOS)
 

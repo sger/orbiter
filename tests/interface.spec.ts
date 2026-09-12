@@ -212,6 +212,7 @@ async function nativeMock(
               path: "/synthetic/signed/Test-TEAM2.ipa",
               identifier: "com.example.app.abc123",
               expires: "2026-09-19T00:00:00Z",
+              expires_unix: 1789763494,
               bundles_signed: 3,
               removed: ["Payload/Test.app/Watch/Watch.app"],
               message:
@@ -283,6 +284,20 @@ async function nativeMock(
               message:
                 "Developer session could not be refreshed. Sign in again; your team selection was cleared.",
             });
+          // The seven-day record. Tests set __renewal to the standing they want on screen; with
+          // nothing set, Orbiter remembers nothing and the banner must not appear.
+          if (cmd === "renewal_status") {
+            (window as any).__renewalQuery = {
+              teamId: args.teamId,
+              identifier: args.identifier,
+            };
+            return (window as any).__renewal ?? null;
+          }
+          if (cmd === "renewal_forget") {
+            (window as any).__renewalForgotten = true;
+            (window as any).__renewal = null;
+            return;
+          }
           if (cmd === "installation_status")
             return (window as any).__jobResult ?? null;
           if (cmd === "prepare_install") {
@@ -1565,4 +1580,151 @@ test("Help can be opened directly and unknown routes recover to IPAs", async ({
   await expect(
     page.getByRole("heading", { name: "IPAs", exact: true }),
   ).toBeVisible();
+});
+
+/// Put a remembered build on screen and make the interface re-read it. Dispatching focus is what
+/// happens for real when someone comes back to the window after a day away — which is exactly when
+/// a countdown has gone stale.
+async function remember(
+  page: import("@playwright/test").Page,
+  renewal: unknown,
+) {
+  await page.evaluate((value) => {
+    (window as any).__renewal = value;
+    window.dispatchEvent(new Event("focus"));
+  }, renewal);
+}
+
+test("a remembered build states its seven days without offering a blocked action", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  // Nothing installed yet: the interface must not invent a countdown.
+  await expect(page.locator(".renewal")).toHaveCount(0);
+
+  await remember(page, {
+    identifier: "com.example.app.abc123",
+    app_name: "Synthetic Test App",
+    watch: "sign",
+    standing: { state: "valid", days: 5 },
+    bearing: "same_app",
+    sentence:
+      "Synthetic Test App was installed from this team and stops launching in 5 days.",
+    urgent: false,
+  });
+  const banner = page.locator(".renewal");
+  await expect(banner).toContainText("stops launching in 5 days");
+  await expect(banner).not.toHaveClass(/renewal-urgent/);
+  // Re-signing is blocked this early, so the banner must not invite it.
+  await expect(
+    page.getByRole("button", { name: "Re-sign now" }),
+  ).toHaveCount(0);
+
+  // Forgetting is complete and immediate.
+  await page.getByRole("button", { name: "Forget" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as any).__renewalForgotten),
+    )
+    .toBe(true);
+  await expect(page.locator(".renewal")).toHaveCount(0);
+});
+
+test("a countdown is never shown for a build that is not the one on screen", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await remember(page, {
+    identifier: "com.other.app.def456",
+    app_name: "Another Build",
+    watch: "sign",
+    // Rust still reports how much is left; the sentence deliberately does not repeat it, and the
+    // interface must show the sentence rather than assembling its own from the parts.
+    standing: { state: "valid", days: 5 },
+    bearing: "other_team",
+    sentence:
+      "The last build Orbiter installed, Another Build, was signed for a different team.",
+    urgent: false,
+  });
+  const banner = page.locator(".renewal");
+  await expect(banner).toHaveAttribute("data-bearing", "other_team");
+  await expect(banner).toContainText("signed for a different team");
+  await expect(banner).not.toContainText("5 days");
+  await expect(banner).not.toHaveClass(/renewal-urgent/);
+});
+
+test("an expired build is announced and re-signs from the banner", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
+  await page
+    .getByLabel("I understand this uses one of the team's", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Get development certificate" })
+    .click();
+  await page
+    .getByLabel("I understand ten identifiers per seven days", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Prepare identifiers & profiles" })
+    .click();
+  await expect(page.getByRole("button", { name: "Re-sign IPA" })).toBeEnabled();
+
+  // Once a plan exists, the record is matched against the identifier that plan would produce —
+  // not the company build's own, which is never what was installed.
+  await expect
+    .poll(async () => page.evaluate(() => (window as any).__renewalQuery))
+    .toEqual({ teamId: "TEAM2", identifier: "com.example.app.abc123" });
+
+  await remember(page, {
+    identifier: "com.example.app.abc123",
+    app_name: "Synthetic Test App",
+    watch: "sign",
+    standing: { state: "expired", days: 2 },
+    bearing: "same_app",
+    sentence:
+      "Synthetic Test App stopped launching 2 days ago. Re-sign and install it again.",
+    urgent: true,
+  });
+  const banner = page.locator(".renewal");
+  await expect(banner).toHaveClass(/renewal-urgent/);
+  // Announced rather than interrupting: it arrives while a person is reading something else.
+  await expect(banner).toHaveAttribute("role", "status");
+
+  await page.getByRole("button", { name: "Re-sign now" }).click();
+  // The banner makes the same call the main control does, with the current Watch decision —
+  // "undecided" here, because this synthetic build has no Watch app to decide about. It is not a
+  // second signing path that could drift from the first.
+  await expect
+    .poll(async () => page.evaluate(() => (window as any).__signRequested))
+    .toEqual({ path: "/synthetic/Test.ipa", watch: "undecided" });
 });

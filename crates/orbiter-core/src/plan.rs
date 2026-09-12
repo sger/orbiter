@@ -49,6 +49,14 @@ impl WatchChoice {
             _ => Self::Undecided,
         }
     }
+    /// The inverse of `parse`, so a stored choice can be handed back to the interface unchanged.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Remove => "remove",
+            Self::Sign => "sign",
+            Self::Undecided => "undecided",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

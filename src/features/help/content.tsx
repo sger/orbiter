@@ -105,6 +105,15 @@ export const sections: HelpSection[] = [
           the team. The tester keeps one app that gets replaced, rather than
           collecting a new icon every week.
         </p>
+        <p>
+          Orbiter remembers when a build it installed runs out and says so on
+          the IPAs page, counting down in whole days and then announcing it once
+          the app has stopped launching. It keeps only what that line needs: the
+          app's name, its identifier, the expiry, and a tag standing in for the
+          team. Not the IPA's location on this Mac, not the phone, not the Apple
+          ID. <em>Forget</em> on that line deletes all of it; nothing on any
+          phone changes.
+        </p>
       </>
     ),
   },

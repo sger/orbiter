@@ -117,6 +117,18 @@ This step is where Apple answers the capability questions the plan can only prop
 
 Provisioning runs the plan first and writes nothing at all when the plan has blockers. It is driven from the selected IPA, so changing the IPA, the device, or the team clears the result rather than carrying it across.
 
+## The seven days
+
+`renewal.rs` is the memory of an expiry. A free team's profile lasts seven days and the installed app then refuses to launch, telling the tester nothing; Orbiter used to state this once, during signing, and never again.
+
+A record is written when an install reports success, not when signing finishes: the seven days only matter once a build is on a phone, and installing is a separate click that may never come. Signing therefore leaves a record waiting in the account session, and `execute_install` takes it by identifier and commits it. A failed or cancelled install leaves the waiting record alone.
+
+The file is `renewal.json` in the app-data directory, guarded like the install journal — bounded, and a damaged or oversized file answers "nothing is known" rather than failing. It holds the app's name, the rewritten identifier, the Watch choice that was made, the expiry, and the install time. It does not hold the IPA's path, the device UDID, the Apple ID, or the team identifier: a personal team is named after its owner, so teams are matched by a tag derived from the identifier rather than by the identifier, and the file is not a readable list of whose Apple accounts have been used on this Mac. Up to 32 records are kept so signing for several testers does not lose the earlier ones.
+
+`standing` is integer arithmetic against the clock on twenty-four-hour boundaries, rounded down — six and a half days left is six, because a person planning around the number must never be told they have longer than they do. `bearing` says whether the record is about the build on screen; anything else shows no countdown, because a reassuring "5 days left" about a different app is worse than silence. The sentence itself is built in Rust so the window, a screenshot of it, and the log agree on the wording.
+
+Nothing here contacts Apple, re-signs, or schedules anything. The banner offers the same signing call the main control makes, and only when that control would accept it.
+
 ## The signer
 
 `signer.rs` turns a reviewed plan, Apple's profiles, and this Mac's certificate into a new IPA. The IPA the person selected is opened read-only and never written; everything happens in a temporary directory inside the application's own storage, which is removed when the operation returns, and the result is a separate file named for the team it was signed for.

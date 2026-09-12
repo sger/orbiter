@@ -85,6 +85,32 @@ fn journal(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|_| "Cannot locate application storage.")?
         .join("last-install.json"))
 }
+fn renewal_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Cannot locate application storage.")?
+        .join("renewal.json"))
+}
+/// Where the seven days stand for the team and build on screen, if anything is known.
+#[tauri::command]
+fn renewal_status(
+    team_id: Option<String>,
+    identifier: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<Option<orbiter_core::renewal::Status>, String> {
+    Ok(orbiter_core::renewal::status(
+        &renewal_file(&app)?,
+        team_id.as_deref(),
+        identifier.as_deref(),
+        std::time::SystemTime::now(),
+    ))
+}
+/// Forget every remembered build. Nothing on any phone changes.
+#[tauri::command]
+fn renewal_forget(app: tauri::AppHandle) -> Result<(), String> {
+    orbiter_core::renewal::forget(&renewal_file(&app)?)
+}
 #[tauri::command]
 async fn prepare_install(
     path: String,
@@ -127,6 +153,7 @@ async fn execute_install(
     progress: Channel<JobStatus>,
     app: tauri::AppHandle,
     state: State<'_, Installations>,
+    accounts: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<JobStatus, String> {
     if !acknowledged {
         return Err("Review and acknowledge the installation consequences first.".into());
@@ -152,6 +179,10 @@ async fn execute_install(
         }
         saved.take().ok_or("Installation review is unavailable.")?
     };
+    // Captured before the plan moves into the worker: what was actually put on the phone, for
+    // the renewal record written only if the install reports success.
+    let identifier = plan.review.bundle_id.clone();
+    let app_name = plan.review.app_name.clone();
     let location = journal(&app)?;
     let owned = state.inner().clone();
     let _end = EndInstall(owned.clone());
@@ -184,7 +215,25 @@ async fn execute_install(
     })
     .await;
     match result {
-        Ok(status) => Ok(status),
+        Ok(status) => {
+            // The moment the seven days start mattering: the build is on a phone. A failed or
+            // cancelled install leaves the waiting record untouched, so a later attempt still has
+            // it, and a build that never installed is never counted down.
+            if status.stage == job::Stage::Installed
+                && let Some(mut record) = accounts.take_pending_renewal(&identifier)
+            {
+                record.app_name = app_name.clone();
+                record.installed_unix =
+                    orbiter_core::renewal::now_unix(std::time::SystemTime::now());
+                if let Err(error) = renewal_file(&app)
+                    .and_then(|path| orbiter_core::renewal::remember(&path, record))
+                {
+                    // Never fail a completed install over a note about when it expires.
+                    tracing::warn!(operation = "renewal", stage = "not-recorded", detail = %error);
+                }
+            }
+            Ok(status)
+        }
         Err(_) => {
             let recovered = job::recover(&journal(&app)?)?;
             *owned
@@ -439,6 +488,8 @@ fn main() {
             account_request_certificate,
             account_prepare_provisioning,
             account_sign_ipa,
+            renewal_status,
+            renewal_forget,
             account_withdraw_certificates,
             account_forget_signing_key,
             inspect_ipa,

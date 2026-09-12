@@ -13,6 +13,7 @@ import type {
   LogSummary,
   Preparation,
   Registration,
+  Renewal,
   Report,
   Review,
   Signed,
@@ -82,6 +83,13 @@ export const signIpa = (
   watch: WatchChoice,
   progress: Channel<SigningProgress>,
 ) => invoke<Signed>("account_sign_ipa", { path, watch, progress });
+
+// The seven-day clock. Reads a local file and a clock; never Apple, never the phone.
+export const renewalStatus = (
+  teamId: string | null,
+  identifier: string | null,
+) => invoke<Renewal | null>("renewal_status", { teamId, identifier });
+export const renewalForget = () => invoke("renewal_forget");
 
 // Installation over USB.
 export const prepareInstall = (path: string, deviceId: number) =>

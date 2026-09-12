@@ -9,6 +9,7 @@ mod macho;
 pub mod plan;
 mod profile;
 pub mod provisioning;
+pub mod renewal;
 pub mod signer;
 
 use base64::Engine;

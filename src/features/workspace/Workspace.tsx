@@ -28,6 +28,8 @@ import { Devices } from "../device/Devices";
 import { InstallSigned } from "../install/InstallSigned";
 import { DeviceLog } from "../diagnose/DeviceLog";
 import { HelpPanel } from "../help/HelpPanel";
+import { RenewalBanner } from "../renew/RenewalBanner";
+import { useRenewal } from "../renew/useRenewal";
 import { SigningProgress } from "./SigningProgress";
 const inspectionStages = [
   "Checking archive",
@@ -70,10 +72,6 @@ export function Workspace({
   const [deviceId, setDeviceId] = useState<number | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const installActive = useRef(false);
-  const installationBusy = useCallback((value: boolean) => {
-    installActive.current = value;
-    setInstallBusy(value);
-  }, []);
   const {
     report,
     busy,
@@ -104,6 +102,22 @@ export function Workspace({
   };
   const blocked = signBlocked(pipeline);
   const steps = stages(pipeline);
+  // The identifier the plan would produce, which is what a record is matched against. Before a
+  // plan exists there is nothing to match, and the banner says so rather than guessing.
+  const { renewal, refresh: refreshRenewal, forget: forgetRenewal } = useRenewal(
+    team.teamId,
+    preparation?.plan.new_main_identifier ?? null,
+  );
+  // An install that has just finished is the moment a record appears — or, when it failed, the
+  // moment it is worth confirming that nothing new is remembered.
+  const installationBusy = useCallback(
+    (value: boolean) => {
+      installActive.current = value;
+      setInstallBusy(value);
+      if (!value) refreshRenewal();
+    },
+    [refreshRenewal],
+  );
   const frameworks =
     report?.bundles.filter((b) => b.kind === "Framework").length ?? 0;
   const nested =
@@ -290,6 +304,12 @@ export function Workspace({
           </div>
         </div>
       )}
+      <RenewalBanner
+        renewal={renewal}
+        canResign={!signing && blocked === "" && desktop}
+        onResign={() => void sign(ipaPath!, team.watch)}
+        onForget={forgetRenewal}
+      />
       <SigningPanel
         signing={signing}
         signed={signed}
