@@ -94,6 +94,12 @@ export function Accounts({
   const inFlight = useRef(false);
   const mounted = useRef(false);
   const desktop = isTauri();
+  // Backend messages are curated and allowlisted, and they name the actual cause — an account
+  // limit, a refusal, what to check. Showing a generic sentence instead hides all of it.
+  function reason(error: unknown, fallback: string) {
+    const text = typeof error === "string" ? error.trim() : "";
+    return text ? text.slice(0, 600) : fallback;
+  }
   useEffect(() => {
     mounted.current = true;
     let polling = false;
@@ -151,10 +157,13 @@ export function Accounts({
     try {
       const next = await invoke<AccountView>(name, args);
       if (mounted.current) setView(next);
-    } catch {
+    } catch (failure) {
       if (mounted.current)
         setError(
-          "The account action did not complete. Check the current status and retry.",
+          reason(
+            failure,
+            "The account action did not complete. Check the current status and retry.",
+          ),
         );
     } finally {
       inFlight.current = false;
@@ -487,10 +496,13 @@ export function Accounts({
                     .then((result) => {
                       if (mounted.current) setRegistration(result);
                     })
-                    .catch(() => {
+                    .catch((error) => {
                       if (mounted.current)
                         setRegisterError(
-                          "Registration did not complete. Check the account at developer.apple.com before trying again.",
+                          reason(
+                            error,
+                            "Registration did not complete. Check the account at developer.apple.com before trying again.",
+                          ),
                         );
                     })
                     .finally(() => {
@@ -545,10 +557,13 @@ export function Accounts({
                     .then((result) => {
                       if (mounted.current) setCertificate(result);
                     })
-                    .catch(() => {
+                    .catch((error) => {
                       if (mounted.current)
                         setCertError(
-                          "The certificate request did not complete. Check developer.apple.com before requesting another.",
+                          reason(
+                            error,
+                            "The certificate request did not complete. Check developer.apple.com before requesting another.",
+                          ),
                         );
                     })
                     .finally(() => {
@@ -607,10 +622,13 @@ export function Accounts({
                     .then((result) => {
                       if (mounted.current) setPreparation(result);
                     })
-                    .catch(() => {
+                    .catch((error) => {
                       if (mounted.current)
                         setProvError(
-                          "Provisioning did not complete. Check developer.apple.com before retrying.",
+                          reason(
+                            error,
+                            "Provisioning did not complete. Check developer.apple.com before retrying.",
+                          ),
                         );
                     })
                     .finally(() => {

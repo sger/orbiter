@@ -99,3 +99,10 @@ Authentication follow-up: 50 Rust tests pass (two native checks remain opt-in). 
 Initial-login format correction: 51 Rust tests pass, including XML plist round-trip validation of boolean flags and local authentication metadata. Live account login remains unverified after this correction.
 
 Verified initial-login 503 compatibility regression: credential-free direct-Apple A/B probe returned 503 with the legacy Xcode client token and 404 with the upstream akd replacement, using identical synthetic request bodies. 52 Rust tests pass (two native checks opt-in). Full account login remains user verification, not an automated-test claim.
+
+
+## Live provisioning observation — 2026-09-12
+
+Against the personal free team, Orbiter registered the plan's rewritten identifiers for the company IPA and downloaded their profiles. Apple reported **no capabilities enabled** on either identifier — the main app and the Watch app — and both profiles expire seven days out. That is Apple's own answer to the question the plan could only propose: on this free personal team the build loses push notifications, universal links, Apple Pay, and app-group sharing, and keychain items saved under the company team are unreadable. The identifier budget dropped from ten to eight, two per re-signed IPA.
+
+This validates identifier rewriting, App ID registration, profile download, expiry, and the capability consequences shown to the user. It does not validate signing, installation of a re-signed build, or whether the app runs usefully without those capabilities.

@@ -171,6 +171,8 @@ async function nativeMock(
             (window as any).__certificateRequested = {
               acknowledged: args.acknowledged,
             };
+            if ((window as any).__certificateFailure)
+              throw (window as any).__certificateFailure;
             return {
               reused: false,
               expires: "2026-09-19T00:00:00Z",
@@ -615,6 +617,21 @@ test("registering an iPhone needs a device, a team, and an explicit acknowledgem
   expect(
     await page.evaluate(() => (window as any).__certificateRequested),
   ).toEqual({ acknowledged: true });
+
+  // A refusal from the backend reaches the person intact: it names the cause and what to do.
+  await page.evaluate(() => {
+    (window as any).__certificateFailure =
+      "Apple refused the request: this team already has 2 active development certificate(s), its maximum. Revoke one at developer.apple.com if it is no longer in use.";
+  });
+  await certificate.click();
+  await expect(
+    page.getByText("already has 2 active development certificate", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    (window as any).__certificateFailure = undefined;
+  });
 
   // Changing the team invalidates the result rather than carrying it across.
   await page.getByLabel("Signing team").selectOption("TEAM1");
