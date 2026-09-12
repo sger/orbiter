@@ -284,6 +284,16 @@ async fn account_request_certificate(
     state.request_certificate(acknowledged).await
 }
 #[tauri::command]
+async fn account_prepare_provisioning(
+    path: String,
+    acknowledged: bool,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::accounts::Preparation, String> {
+    state
+        .prepare_provisioning(std::path::PathBuf::from(path), acknowledged)
+        .await
+}
+#[tauri::command]
 async fn account_refresh_teams(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
@@ -319,6 +329,7 @@ fn main() {
             account_refresh_teams,
             account_register_device,
             account_request_certificate,
+            account_prepare_provisioning,
             inspect_ipa,
             cancel_inspection,
             discover_devices,

@@ -2,7 +2,10 @@
 //! that changes state at Apple rather than only reading it, so it is explicit, acknowledged, and
 //! reports only what it did — never the device identifier it sent.
 use isideload::dev::{
-    developer_session::DeveloperSession, device_type::DeveloperDeviceType, devices::DevicesApi,
+    app_ids::{AppId, AppIdsApi},
+    developer_session::DeveloperSession,
+    device_type::DeveloperDeviceType,
+    devices::DevicesApi,
     teams::DeveloperTeam,
 };
 use serde::Serialize;
@@ -141,9 +144,197 @@ mod tests {
     }
 
     #[test]
+    fn provisioning_is_refused_until_the_identifier_budget_is_acknowledged() {
+        assert!(app_id_refusal(true, true, false).is_some_and(|m| m.contains("Sign in")));
+        assert!(
+            app_id_refusal(true, false, true)
+                .is_some_and(|m| m.contains("Select the signing team"))
+        );
+        let unacknowledged = app_id_refusal(false, true, true).expect("acknowledgement required");
+        assert!(unacknowledged.contains("ten identifiers per seven days"));
+        assert!(app_id_refusal(true, true, true).is_none());
+    }
+
+    #[test]
+    fn only_capabilities_apple_enabled_are_reported_and_unknown_keys_are_not_invented() {
+        let mut features = plist::Dictionary::new();
+        features.insert("APG3427HIY".into(), plist::Value::Boolean(true));
+        features.insert("SOMETHINGNEW".into(), plist::Value::Boolean(true));
+        // A capability Apple reports as disabled is not a capability the build has.
+        features.insert("OM633U5T5G".into(), plist::Value::Boolean(false));
+        let app_id = AppId {
+            app_id_id: "id".into(),
+            identifier: "com.example.app".into(),
+            name: "App".into(),
+            features,
+            expiration_date: None,
+        };
+        let capabilities = enabled_capabilities(&app_id);
+        assert!(capabilities.contains(&"App groups".to_string()));
+        assert!(capabilities.contains(&"an unnamed capability".to_string()));
+        assert!(!capabilities.contains(&"Apple Pay".to_string()));
+    }
+
+    #[test]
     fn the_team_request_carries_only_the_team_identifier() {
         let team = team("T8B3X5UL5W");
         assert_eq!(team.team_id, "T8B3X5UL5W");
         assert!(team.name.is_none() && team.status.is_none() && team.memberships.is_empty());
     }
+}
+
+/// Reasons provisioning is refused before any identifier is registered.
+pub fn app_id_refusal(
+    acknowledged: bool,
+    team_selected: bool,
+    signed_in: bool,
+) -> Option<&'static str> {
+    if !signed_in {
+        return Some("Sign in to Apple before provisioning.");
+    }
+    if !team_selected {
+        return Some("Select the signing team to provision on.");
+    }
+    if !acknowledged {
+        return Some(
+            "Provisioning registers new app identifiers on the team and downloads their profiles. A free personal team may register only ten identifiers per seven days, and an identifier cannot be reused by another team afterwards. Acknowledge before continuing.",
+        );
+    }
+    None
+}
+
+/// Apple's opaque feature identifiers, for the few whose meaning is documented by use.
+fn feature_label(key: &str) -> &'static str {
+    match key {
+        "APG3427HIY" => "App groups",
+        "push" | "APNS" => "Push notifications",
+        "IAD53UNK2F" => "Associated domains",
+        "OM633U5T5G" => "Apple Pay",
+        _ => "an unnamed capability",
+    }
+}
+
+#[derive(Clone, Serialize, Debug)]
+pub struct AppIdOutcome {
+    pub identifier: String,
+    pub created: bool,
+    /// Capabilities Apple actually enabled on this App ID, labelled where the key is known.
+    pub capabilities: Vec<String>,
+    /// App IDs this team may still register in the current seven-day window, when Apple says.
+    pub remaining: Option<i64>,
+}
+
+#[derive(Clone, Serialize, Debug)]
+pub struct ProfileOutcome {
+    pub identifier: String,
+    pub expires: String,
+    pub uuid: String,
+    /// Profile bytes for the signer. Not serialised into the interface.
+    #[serde(skip)]
+    pub encoded: Vec<u8>,
+}
+
+/// Register `identifier` on the team, or reuse Apple's existing App ID for it.
+pub async fn ensure_app_id(
+    session: &mut DeveloperSession,
+    team_id: &str,
+    identifier: &str,
+    name: &str,
+) -> Result<(AppId, AppIdOutcome), String> {
+    let team = team(team_id);
+    let listed = tokio::time::timeout(
+        DEADLINE,
+        session.list_app_ids(&team, DeveloperDeviceType::Ios),
+    )
+    .await
+    .map_err(|_| "Listing the team's app identifiers timed out.".to_string())?
+    .map_err(|error| {
+        format!(
+            "The team's app identifiers could not be listed. {}",
+            isideload::redacted_auth_error(&error)
+        )
+    })?;
+    if let Some(existing) = listed
+        .app_ids
+        .iter()
+        .find(|candidate| candidate.identifier == identifier)
+    {
+        let outcome = AppIdOutcome {
+            identifier: identifier.to_string(),
+            created: false,
+            capabilities: enabled_capabilities(existing),
+            remaining: listed.available_quantity,
+        };
+        return Ok((existing.clone(), outcome));
+    }
+    if listed.available_quantity == Some(0) {
+        return Err(format!(
+            "This team cannot register another app identifier right now: Apple reports none of its {} remaining in the current seven-day window. Wait for the window to pass, or remove an unused identifier at developer.apple.com.",
+            listed
+                .max_quantity
+                .map(|max| max.to_string())
+                .unwrap_or_else(|| "allowed".into())
+        ));
+    }
+    let created = tokio::time::timeout(
+        DEADLINE,
+        session.add_app_id(&team, name, identifier, DeveloperDeviceType::Ios),
+    )
+    .await
+    .map_err(|_| "Registering the app identifier timed out. Check developer.apple.com before retrying: it may still have been registered.".to_string())?
+    .map_err(|error| {
+        format!(
+            "Apple did not register the app identifier {identifier}. {}",
+            isideload::redacted_auth_error(&error)
+        )
+    })?;
+    let outcome = AppIdOutcome {
+        identifier: identifier.to_string(),
+        created: true,
+        capabilities: enabled_capabilities(&created),
+        remaining: listed.available_quantity.map(|left| left - 1),
+    };
+    Ok((created, outcome))
+}
+
+/// Capabilities Apple reports as enabled, as labels. Apple decides these, not the plan.
+fn enabled_capabilities(app_id: &AppId) -> Vec<String> {
+    let mut labels: Vec<String> = app_id
+        .features
+        .iter()
+        .filter(|(_, value)| value.as_boolean() == Some(true))
+        .map(|(key, _)| feature_label(key).to_string())
+        .collect();
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+/// The team provisioning profile for an App ID: it authorises the team's registered devices and,
+/// on a free personal team, expires in seven days.
+pub async fn fetch_profile(
+    session: &mut DeveloperSession,
+    team_id: &str,
+    app_id: &AppId,
+) -> Result<ProfileOutcome, String> {
+    let team = team(team_id);
+    let profile = tokio::time::timeout(
+        DEADLINE,
+        session.download_team_provisioning_profile(&team, app_id, DeveloperDeviceType::Ios),
+    )
+    .await
+    .map_err(|_| "Downloading the provisioning profile timed out.".to_string())?
+    .map_err(|error| {
+        format!(
+            "Apple did not return a provisioning profile for {}. {}",
+            app_id.identifier,
+            isideload::redacted_auth_error(&error)
+        )
+    })?;
+    Ok(ProfileOutcome {
+        identifier: app_id.identifier.clone(),
+        expires: profile.date_expire.to_xml_format(),
+        uuid: profile.uuid,
+        encoded: profile.encoded_profile.as_ref().to_vec(),
+    })
 }

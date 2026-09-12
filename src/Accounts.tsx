@@ -40,12 +40,30 @@ type Registration = {
   team_devices: number;
   message: string;
 };
+type Preparation = {
+  plan: {
+    new_main_identifier: string;
+    blockers: string[];
+    decisions: string[];
+    consequences: string[];
+    app_ids_required: number;
+  };
+  app_ids: {
+    identifier: string;
+    created: boolean;
+    capabilities: string[];
+    remaining: number | null;
+  }[];
+  profiles: { identifier: string; expires: string; uuid: string }[];
+};
 export function Accounts({
   paused,
   deviceId,
+  ipaPath,
 }: {
   paused: boolean;
   deviceId: number | null;
+  ipaPath: string | null;
 }) {
   const [view, setView] = useState<AccountView>(initial);
   const [support, setSupport] = useState<{
@@ -69,6 +87,10 @@ export function Accounts({
   const [certBusy, setCertBusy] = useState(false);
   const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [certError, setCertError] = useState<string | null>(null);
+  const [provAck, setProvAck] = useState(false);
+  const [provBusy, setProvBusy] = useState(false);
+  const [preparation, setPreparation] = useState<Preparation | null>(null);
+  const [provError, setProvError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const mounted = useRef(false);
   const desktop = isTauri();
@@ -116,7 +138,10 @@ export function Accounts({
     setCertificate(null);
     setCertError(null);
     setCertAck(false);
-  }, [deviceId, view.selected_team]);
+    setPreparation(null);
+    setProvError(null);
+    setProvAck(false);
+  }, [deviceId, view.selected_team, ipaPath]);
   async function command(name: string, args?: Record<string, unknown>) {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -551,6 +576,88 @@ export function Accounts({
                     : "."}
                 </p>
               )}
+              <strong>App identifiers & profiles</strong>
+              <p className="hint">
+                Registers the plan's rewritten identifiers on this team and
+                downloads their profiles. Apple, not Orbiter, decides which
+                capabilities the identifiers may carry.
+              </p>
+              <label className="auth-consent">
+                <input
+                  type="checkbox"
+                  checked={provAck}
+                  disabled={disabled || provBusy || !ipaPath}
+                  onChange={(e) => setProvAck(e.target.checked)}
+                />
+                I understand ten identifiers per seven days is the limit on a
+                free personal team, and that an identifier cannot be reused by
+                another team afterwards.
+              </label>
+              <button
+                className="secondary"
+                disabled={disabled || provBusy || !ipaPath || !provAck}
+                onClick={() => {
+                  setProvBusy(true);
+                  setProvError(null);
+                  setPreparation(null);
+                  invoke<Preparation>("account_prepare_provisioning", {
+                    path: ipaPath,
+                    acknowledged: provAck,
+                  })
+                    .then((result) => {
+                      if (mounted.current) setPreparation(result);
+                    })
+                    .catch(() => {
+                      if (mounted.current)
+                        setProvError(
+                          "Provisioning did not complete. Check developer.apple.com before retrying.",
+                        );
+                    })
+                    .finally(() => {
+                      if (mounted.current) setProvBusy(false);
+                    });
+                }}
+              >
+                {provBusy ? "Provisioning…" : "Prepare identifiers & profiles"}
+              </button>
+              <p className="hint" role="status">
+                {provError ??
+                  (!ipaPath
+                    ? "Select an IPA first."
+                    : !provAck
+                      ? "Acknowledge the identifier limit to enable provisioning."
+                      : preparation
+                        ? `Plan identifier: ${preparation.plan.new_main_identifier}`
+                        : "Ready to provision.")}
+              </p>
+              {preparation && preparation.plan.blockers.length > 0 && (
+                <ul className="hint">
+                  {preparation.plan.blockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              )}
+              {preparation?.app_ids.map((appId) => (
+                <p className="hint" key={appId.identifier}>
+                  {appId.identifier} · {appId.created ? "registered" : "reused"}
+                  {appId.capabilities.length
+                    ? ` · Apple enabled: ${appId.capabilities.join(", ")}`
+                    : " · Apple enabled no capabilities"}
+                  {appId.remaining !== null
+                    ? ` · ${appId.remaining} identifier(s) left this week`
+                    : ""}
+                </p>
+              ))}
+              {preparation?.profiles.map((profile) => (
+                <p className="hint" key={profile.uuid}>
+                  Profile for {profile.identifier} expires {profile.expires}.
+                </p>
+              ))}
+              {preparation?.plan.consequences.map((consequence) => (
+                <p className="hint" key={consequence}>
+                  {consequence}
+                </p>
+              ))}
             </div>
           )}
         </>

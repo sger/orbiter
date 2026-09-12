@@ -113,6 +113,15 @@ struct Session {
     developer: DeveloperSession,
     /// Signing key and certificate for this session. Memory only: never written to disk.
     identity: Option<crate::certificates::Identity>,
+    /// Provisioning profiles fetched for this session's plan, held for the signer.
+    profiles: Vec<crate::provisioning::ProfileOutcome>,
+}
+/// What provisioning produced: the plan it followed, what Apple registered, and the profiles.
+#[derive(Clone, Serialize)]
+pub struct Preparation {
+    pub plan: crate::plan::Plan,
+    pub app_ids: Vec<crate::provisioning::AppIdOutcome>,
+    pub profiles: Vec<crate::provisioning::ProfileOutcome>,
 }
 /// A sign-in failure plus any Apple-imposed wait Orbiter must honour before retrying.
 struct Failure {
@@ -409,6 +418,7 @@ impl Accounts {
             inner.session = Some(Session {
                 developer,
                 identity: None,
+                profiles: Vec::new(),
             });
             inner.expires_at = Some(Instant::now() + SESSION_LIFETIME);
             inner.view = View {
@@ -501,6 +511,100 @@ impl Accounts {
             return Err("The account session changed during registration. Check the account at developer.apple.com before retrying.".into());
         }
         outcome
+    }
+    /// Register the plan's identifiers on the team and fetch their provisioning profiles.
+    ///
+    /// This is where Apple, not Orbiter, answers which capabilities the team may create: the
+    /// returned App IDs report what Apple actually enabled.
+    pub async fn prepare_provisioning(
+        &self,
+        path: std::path::PathBuf,
+        acknowledged: bool,
+    ) -> Result<Preparation, String> {
+        let _gate = self
+            .1
+            .try_lock()
+            .map_err(|_| "Another account operation is already running.")?;
+        let (generation, mut developer, team_id, free) = {
+            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            inner.expire();
+            let signed_in = inner.session.is_some();
+            let selected = inner.view.selected_team.clone();
+            if let Some(refusal) =
+                crate::provisioning::app_id_refusal(acknowledged, selected.is_some(), signed_in)
+            {
+                return Err(refusal.into());
+            }
+            let team_id = selected.ok_or("Select the signing team to provision on.")?;
+            let free = inner
+                .view
+                .teams
+                .iter()
+                .find(|candidate| candidate.id == team_id)
+                .and_then(|candidate| candidate.free)
+                .unwrap_or(true);
+            let session = inner
+                .session
+                .as_ref()
+                .ok_or("Sign in before provisioning.")?;
+            (
+                inner.generation.clone(),
+                session.developer.clone(),
+                team_id,
+                free,
+            )
+        };
+        let report = tokio::task::spawn_blocking(move || {
+            crate::inspect(&path, &std::sync::atomic::AtomicBool::new(false), |_| {})
+        })
+        .await
+        .map_err(|_| "Reading the IPA stopped.".to_string())?
+        .map_err(|error| error.to_string())?;
+        let plan = crate::plan::build(
+            &report,
+            &crate::plan::Target {
+                team_id: team_id.clone(),
+                kind: if free {
+                    crate::plan::TeamKind::Personal
+                } else {
+                    crate::plan::TeamKind::Paid
+                },
+            },
+        );
+        if !plan.blockers.is_empty() {
+            // Nothing is written while the plan cannot be carried out.
+            return Ok(Preparation {
+                app_ids: vec![],
+                profiles: vec![],
+                plan,
+            });
+        }
+        let mut app_ids = Vec::new();
+        let mut profiles = Vec::new();
+        for bundle in plan.bundles.iter().filter(|bundle| bundle.consumes_app_id) {
+            let (app_id, outcome) = crate::provisioning::ensure_app_id(
+                &mut developer,
+                &team_id,
+                &bundle.new_identifier,
+                &bundle.name,
+            )
+            .await?;
+            app_ids.push(outcome);
+            profiles
+                .push(crate::provisioning::fetch_profile(&mut developer, &team_id, &app_id).await?);
+        }
+        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        if inner.generation != generation {
+            return Err("The account session changed during provisioning. Check developer.apple.com before retrying.".into());
+        }
+        if let Some(session) = inner.session.as_mut() {
+            session.profiles = profiles.clone();
+        }
+        Ok(Preparation {
+            app_ids,
+            profiles,
+            plan,
+        })
     }
     /// Reuse or obtain this session's development certificate for the selected team.
     pub async fn request_certificate(

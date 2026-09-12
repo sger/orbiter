@@ -289,7 +289,11 @@ function App() {
               </div>
               <Devices onSelect={setDeviceId} paused={installBusy} />
               <SigningIdentities paused={installBusy} />
-              <Accounts paused={installBusy} deviceId={deviceId} />
+              <Accounts
+                paused={installBusy}
+                deviceId={deviceId}
+                ipaPath={ipaPath}
+              />
               <p className="hint">
                 A different account on the same company team shares that team's
                 device allowance. Personal teams have their own limits and

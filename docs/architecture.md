@@ -110,3 +110,14 @@ Registration lists the team's devices first, so an already-registered iPhone wri
 The team's certificates are listed first and matched against the key they certify, not their name, so a rerun with the same session reuses the existing certificate and writes nothing. Reaching Apple's active-certificate maximum is reported with the count and left to the person: Orbiter never revokes, because revoking invalidates every app already signed with that certificate, including apps Orbiter did not produce. A timeout during the request says the certificate may still have been issued and to check developer.apple.com, since there is no rollback.
 
 The key and certificate live in the signed-in session in memory and are not persisted, so restarting Orbiter needs a new certificate. That is a real limitation for the weekly refresh cycle, given the small number of active certificates a team allows, and persistence is deliberately left as its own decision rather than quietly writing a private key somewhere. Apple labels the certificate with the computer name, bounded to plain text with a neutral fallback.
+
+
+## App identifiers and profiles
+
+`provisioning::ensure_app_id` registers the plan's rewritten identifiers on the selected team, reusing any the team already holds so a rerun writes nothing. Apple's remaining-identifier count is reported, and a team with none left is refused with what to do about it rather than attempting a write. Registration is acknowledged first: a free personal team may register only ten identifiers per seven days, and an identifier cannot be reused by another team afterwards.
+
+This step is where Apple answers the capability questions the plan can only propose. The created App ID reports which features Apple actually enabled, and those are shown as labels — the few feature keys whose meaning is established by use are named, and anything else is reported as an unnamed capability rather than guessed. A capability Apple reports as disabled is not presented as present.
+
+`provisioning::fetch_profile` then downloads the team provisioning profile for each identifier, which authorises the team's registered devices and, on a free personal team, expires in seven days. Profile bytes are kept in the signed-in session for the signer and are deliberately not serialised into the interface; only the identifier, expiry, and UUID are shown.
+
+Provisioning runs the plan first and writes nothing at all when the plan has blockers. It is driven from the selected IPA, so changing the IPA, the device, or the team clears the result rather than carrying it across.
