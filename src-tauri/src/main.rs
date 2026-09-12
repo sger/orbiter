@@ -294,6 +294,22 @@ async fn account_prepare_provisioning(
         )
         .await
 }
+/// Withdraw the selected team's development certificates. The interface offers this only when the
+/// team's slots are full and none of them can sign on this Mac.
+#[tauri::command]
+async fn account_withdraw_certificates(
+    acknowledged: bool,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<String, String> {
+    tracing::info!(operation = "certificate-withdrawal", stage = "started");
+    let result = state.withdraw_certificates(acknowledged).await;
+    tracing::info!(
+        operation = "certificate-withdrawal",
+        stage = "finished",
+        success = result.is_ok()
+    );
+    result
+}
 /// Sign the selected IPA for the signed-in account's team. The signed build is written into the
 /// application's own storage; the IPA the person chose is only ever read.
 #[tauri::command]
@@ -377,6 +393,7 @@ fn main() {
             account_request_certificate,
             account_prepare_provisioning,
             account_sign_ipa,
+            account_withdraw_certificates,
             account_forget_signing_key,
             inspect_ipa,
             cancel_inspection,

@@ -1,13 +1,15 @@
 //! Development certificate for the signing team.
 //!
 //! The private key is generated on this Mac and never leaves it: only a certificate signing
-//! request goes to Apple. Nothing is persisted yet, so the key and certificate live as long as the
-//! signed-in session and a restart needs a new certificate — which matters because a team allows
-//! only a few active certificates at once.
+//! request goes to Apple. The key is kept in this Mac's Keychain, so a restart reuses the same
+//! certificate instead of spending another of the team's few slots. The certificate itself is
+//! fetched again per session, which is why signing needs step 3 run once after each restart.
 //!
-//! Certificates are never revoked automatically. Revoking one invalidates every app already signed
-//! with it, including apps this tool did not produce, so reaching the limit is reported and left
-//! to the person.
+//! Certificates are never withdrawn automatically. Withdrawing one invalidates every app already
+//! signed with it, including apps this tool did not produce, so reaching the limit is reported and
+//! left to the person. `withdraw_all` exists for the one case where nothing else can work: a free
+//! personal team has no certificates page at developer.apple.com, so a slot held by a certificate
+//! whose key is not on this Mac can only be cleared from here, with an explicit acknowledgement.
 use isideload::dev::{
     certificates::{CertificatesApi, DevelopmentCertificate},
     developer_session::DeveloperSession,
@@ -124,6 +126,87 @@ fn team(team_id: &str) -> DeveloperTeam {
     }
 }
 
+/// Say what is occupying the team's certificate slots, so the choice to revoke is an informed one.
+fn describe(certificates: &[DevelopmentCertificate]) -> String {
+    let held: Vec<String> = certificates
+        .iter()
+        .map(|certificate| {
+            let machine = certificate
+                .machine_name
+                .clone()
+                .unwrap_or_else(|| "an unnamed Mac".into());
+            match certificate.expiration_date {
+                Some(date) => format!(
+                    "one issued for {machine}, expiring {}",
+                    date.to_xml_format()
+                ),
+                None => format!("one issued for {machine}"),
+            }
+        })
+        .collect();
+    if held.is_empty() {
+        String::new()
+    } else {
+        format!("It holds {}.", held.join("; "))
+    }
+}
+
+/// Revoke every development certificate on the team.
+///
+/// This exists for one situation: the team's only certificate slot is taken by a certificate whose
+/// private key is not on this Mac, so it cannot sign anything here, and a free personal team has no
+/// portal page to revoke it from. It is never automatic — revoking stops every app already signed
+/// with that certificate from launching, including apps Orbiter did not produce.
+pub async fn withdraw_all(
+    session: &mut DeveloperSession,
+    team_id: &str,
+    acknowledged: bool,
+) -> Result<String, String> {
+    if !acknowledged {
+        return Err(
+            "Revoking the team's certificate stops every app already signed with it from launching, on every device. Acknowledge before continuing."
+                .into(),
+        );
+    }
+    let team = team(team_id);
+    let existing = tokio::time::timeout(DEADLINE, session.list_ios_certs(&team))
+        .await
+        .map_err(|_| "Listing the team's certificates timed out.".to_string())?
+        .map_err(|error| {
+            format!(
+                "The team's certificates could not be listed. {}",
+                isideload::redacted_auth_error(&error)
+            )
+        })?;
+    if existing.is_empty() {
+        return Ok("This team holds no development certificates. Nothing was revoked.".into());
+    }
+    let mut revoked = 0usize;
+    for certificate in &existing {
+        let serial = certificate.serial_number.as_deref().ok_or(
+            "Apple did not identify one of the team's certificates, so it was not revoked.",
+        )?;
+        tokio::time::timeout(
+            DEADLINE,
+            session.revoke_development_cert(&team, serial, None),
+        )
+        .await
+        .map_err(|_| {
+            "Revoking a certificate timed out. Check the team before retrying.".to_string()
+        })?
+        .map_err(|error| {
+            format!(
+                "Apple did not revoke one of the team's certificates. {}",
+                isideload::redacted_auth_error(&error)
+            )
+        })?;
+        revoked += 1;
+    }
+    Ok(format!(
+        "{revoked} certificate(s) were revoked. Apps already signed with them no longer launch. Request a signing certificate again to continue."
+    ))
+}
+
 fn limit_reached(error: &rootcause::Report) -> bool {
     error.iter_reports().any(|cause| {
         matches!(
@@ -179,7 +262,8 @@ pub async fn ensure(
                 other => format!("{other} active development certificates"),
             };
             return Err(format!(
-                "Apple refused the request: this team already holds {held}, which is its maximum. Revoke one at developer.apple.com if it is no longer in use — Orbiter will not revoke it, because that invalidates every app already signed with it."
+                "Apple refused the request: this team already holds {held}, which is its maximum, and none of them certifies this Mac's signing key — so none can be used to sign. {} A free personal team has no certificates page at developer.apple.com, so the only way forward is to revoke it here, which invalidates every app already signed with it.",
+                describe(&existing)
             ));
         }
         Err(error) => {

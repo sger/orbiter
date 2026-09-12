@@ -608,6 +608,35 @@ impl Accounts {
             plan,
         })
     }
+    /// Withdraw the selected team's development certificates at Apple. Explicit, acknowledged,
+    /// never automatic: every app already signed with them stops launching.
+    pub async fn withdraw_certificates(&self, acknowledged: bool) -> Result<String, String> {
+        let _gate = self
+            .1
+            .try_lock()
+            .map_err(|_| "Another account operation is already running.")?;
+        let (mut developer, team_id) = {
+            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            inner.expire();
+            let team_id = inner
+                .view
+                .selected_team
+                .clone()
+                .ok_or("Select the signing team whose certificate this applies to.")?;
+            let session = inner.session.as_ref().ok_or("Sign in first.")?;
+            (session.developer.clone(), team_id)
+        };
+        let message =
+            crate::certificates::withdraw_all(&mut developer, &team_id, acknowledged).await?;
+        // This session's identity, if any, rests on a certificate that no longer exists.
+        if let Ok(mut inner) = self.0.lock()
+            && let Some(session) = inner.session.as_mut()
+        {
+            session.identity = None;
+            session.profiles.clear();
+        }
+        Ok(message)
+    }
     /// Sign the IPA with this session's certificate and the profiles Apple returned.
     ///
     /// The plan is rebuilt from the same inputs rather than remembered, so the build that is

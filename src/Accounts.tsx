@@ -74,6 +74,7 @@ export function Accounts({
   onPrepared,
   onAccount,
   onWatch,
+  onCertificate,
 }: {
   paused: boolean;
   deviceId: number | null;
@@ -84,6 +85,9 @@ export function Accounts({
   onAccount: (account: string | null) => void;
   /// The Watch choice governs the plan, so the signer has to be given the same one.
   onWatch: (watch: "undecided" | "remove" | "sign") => void;
+  /// Whether this session holds a certificate. Signing is impossible without one, and the
+  /// certificate lives only as long as the session even though its key is stored.
+  onCertificate: (held: boolean) => void;
 }) {
   const [view, setView] = useState<AccountView>(initial);
   const [email, setEmail] = useState("");
@@ -102,6 +106,7 @@ export function Accounts({
   const [certBusy, setCertBusy] = useState(false);
   const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [certError, setCertError] = useState<string | null>(null);
+  const [withdrawAck, setWithdrawAck] = useState(false);
   const [provAck, setProvAck] = useState(false);
   // Apple's watchOS provisioning under a personal team is unverified and a Watch bundle spends
   // App IDs from a small weekly budget, so nothing is registered until this is chosen.
@@ -160,6 +165,9 @@ export function Accounts({
   useEffect(() => {
     onWatch(watch);
   }, [watch, onWatch]);
+  useEffect(() => {
+    onCertificate(certificate !== null);
+  }, [certificate, onCertificate]);
   useEffect(() => {
     setCode("");
   }, [view.challenge?.id]);
@@ -586,6 +594,53 @@ export function Accounts({
                     ? `. This one expires ${certificate.expires}.`
                     : "."}
                 </p>
+              )}
+              {certError?.includes("which is its maximum") && (
+                <>
+                  <label className="auth-consent">
+                    <input
+                      type="checkbox"
+                      checked={withdrawAck}
+                      disabled={disabled || certBusy}
+                      onChange={(e) => setWithdrawAck(e.target.checked)}
+                    />
+                    I understand withdrawing this team's certificate stops every
+                    app already signed with it from launching, on every device,
+                    and that this cannot be undone.
+                  </label>
+                  <button
+                    className="secondary"
+                    disabled={disabled || certBusy || !withdrawAck}
+                    onClick={() => {
+                      setCertBusy(true);
+                      setCertError(null);
+                      setCertificate(null);
+                      invoke<string>("account_withdraw_certificates", {
+                        acknowledged: withdrawAck,
+                      })
+                        .then((message) => {
+                          if (mounted.current)
+                            setCertError(
+                              reason(message, "The certificate was withdrawn."),
+                            );
+                        })
+                        .catch((error) => {
+                          if (mounted.current)
+                            setCertError(
+                              reason(
+                                error,
+                                "The certificate could not be withdrawn.",
+                              ),
+                            );
+                        })
+                        .finally(() => {
+                          if (mounted.current) setCertBusy(false);
+                        });
+                    }}
+                  >
+                    Withdraw the team's certificate
+                  </button>
+                </>
               )}
               <button
                 className="text-button"

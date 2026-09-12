@@ -138,6 +138,7 @@ function App() {
     "undecided",
   );
   const [signed, setSigned] = useState<Signed | null>(null);
+  const [certificate, setCertificate] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   // Stable: Accounts clears the preparation whenever this identity changes, so an inline closure
@@ -396,6 +397,7 @@ function App() {
                 }
                 onPrepared={prepared}
                 onWatch={setWatch}
+                onCertificate={setCertificate}
                 onAccount={setAccount}
               />
               <p className="hint">
@@ -569,7 +571,11 @@ function App() {
                         preparation.profiles
                           .map((profile) => profile.expires)
                           .sort()[0],
-                      )} · Sign to produce an installable build. The original IPA is never changed.`
+                      )} · ${
+                        certificate
+                          ? "Sign to produce an installable build. The original IPA is never changed."
+                          : "Get a signing certificate in step 3 before signing."
+                      }`
                     : app?.profile?.expires_at
                       ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
                       : "Re-signing requires a signing certificate and prepared profiles. Use the existing-signature flow below for an authorized build.")}
@@ -587,6 +593,7 @@ function App() {
               !isTauri() ||
               signing ||
               !ipaPath ||
+              !certificate ||
               !preparation?.profiles.length ||
               preparation.plan.blockers.length > 0
             }

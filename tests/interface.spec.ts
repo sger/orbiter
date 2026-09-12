@@ -162,6 +162,12 @@ async function nativeMock(
               message: "This iPhone is now registered on the selected team.",
             };
           }
+          if (cmd === "account_withdraw_certificates") {
+            (window as any).__withdrawRequested = {
+              acknowledged: args.acknowledged,
+            };
+            return "1 certificate(s) were withdrawn.";
+          }
           if (cmd === "account_request_certificate") {
             (window as any).__certificateRequested = {
               acknowledged: args.acknowledged,
@@ -948,8 +954,13 @@ test("signing produces a separate build and the installer moves to it", async ({
   await page.getByRole("button", { name: "Verify code" }).click();
   await page.getByLabel("Signing team").selectOption("TEAM2");
 
-  // Nothing may be signed before Apple has returned identifiers and profiles.
+  // Nothing may be signed before there is a certificate and Apple has returned profiles.
   const sign = page.getByRole("button", { name: "Sign IPA" });
+  await expect(sign).toBeDisabled();
+  await page
+    .getByLabel("I understand this uses one of the team's", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Get signing certificate" }).click();
   await expect(sign).toBeDisabled();
   await page
     .getByLabel("I understand ten identifiers per seven days", { exact: false })
@@ -982,4 +993,55 @@ test("signing produces a separate build and the installer moves to it", async ({
       page.evaluate(() => (window as any).__installPrepared?.path),
     )
     .toBe("/synthetic/signed/Test-TEAM2.ipa");
+});
+
+test("withdrawing a certificate is offered only when it is the only way forward", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.evaluate(() => {
+    (window as any).__certificateFailure =
+      "Apple refused the request: this team already holds one active development certificate, which is its maximum, and none of them certifies this Mac's signing key.";
+  });
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team").selectOption("TEAM2");
+
+  // Not offered until Apple has actually refused for that reason.
+  await expect(
+    page.getByRole("button", { name: "Withdraw the team's certificate" }),
+  ).toHaveCount(0);
+  await page
+    .getByLabel("I understand this uses one of the team's", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Get signing certificate" }).click();
+
+  const withdraw = page.getByRole("button", {
+    name: "Withdraw the team's certificate",
+  });
+  await expect(withdraw).toBeVisible();
+  // Irreversible, so it waits for its own acknowledgement.
+  await expect(withdraw).toBeDisabled();
+  await page
+    .getByLabel("I understand withdrawing this team's certificate", {
+      exact: false,
+    })
+    .check();
+  await expect(withdraw).toBeEnabled();
+  await withdraw.click();
+  await expect(
+    page.getByText("certificate(s) were withdrawn", { exact: false }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => (window as any).__withdrawRequested?.acknowledged,
+    ),
+  ).toBe(true);
 });
