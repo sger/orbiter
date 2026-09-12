@@ -316,6 +316,7 @@ async fn account_withdraw_certificates(
 async fn account_sign_ipa(
     path: String,
     watch: String,
+    progress: tauri::ipc::Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::signer::Signed, String> {
@@ -331,6 +332,10 @@ async fn account_sign_ipa(
             out_dir,
             orbiter_core::plan::WatchChoice::parse(&watch),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            move |step| {
+                // A dropped channel means the window went away; the run finishes regardless.
+                let _ = progress.send(step);
+            },
         )
         .await;
     match &signed {

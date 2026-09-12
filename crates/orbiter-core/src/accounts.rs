@@ -648,6 +648,7 @@ impl Accounts {
         out_dir: std::path::PathBuf,
         watch: crate::plan::WatchChoice,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        progress: impl FnMut(crate::signer::Progress) + Send + 'static,
     ) -> Result<crate::signer::Signed, String> {
         let _gate = self
             .1
@@ -693,13 +694,7 @@ impl Accounts {
                 },
             );
             crate::signer::sign(
-                &path,
-                &out_dir,
-                &plan,
-                &profiles,
-                &identity,
-                &cancel,
-                |_| {},
+                &path, &out_dir, &plan, &profiles, &identity, &cancel, progress,
             )
         })
         .await

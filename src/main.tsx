@@ -21,7 +21,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import type { Report, Bundle, Signed } from "./types";
+import type { Report, Bundle, Signed, SigningProgress } from "./types";
 import "./styles.css";
 import { SigningIdentities } from "./SigningIdentities";
 import { Devices } from "./Devices";
@@ -141,6 +141,7 @@ function App() {
   const [certificate, setCertificate] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  const [signStep, setSignStep] = useState<SigningProgress | null>(null);
   // Stable: Accounts clears the preparation whenever this identity changes, so an inline closure
   // here would wipe the result on every render.
   const prepared = useCallback((result: Preparation | null) => {
@@ -550,35 +551,41 @@ function App() {
           <div>
             <div className="action-label">
               <Clock3 size={16} />
-              {signed
-                ? "Signed build expires"
-                : preparation?.profiles.length
-                  ? "Prepared profile expiration"
-                  : app?.profile?.expires_at
-                    ? "Embedded profile expiration"
-                    : "Ready when the next pieces are."}
+              {signing
+                ? "Signing"
+                : signed
+                  ? "Signed build expires"
+                  : preparation?.profiles.length
+                    ? "Prepared profile expiration"
+                    : app?.profile?.expires_at
+                      ? "Embedded profile expiration"
+                      : "Ready when the next pieces are."}
             </div>
             <p>
               {signError ??
-                (signed
-                  ? `${date(signed.expires)} · Signed ${signed.bundles_signed} bundle(s)${
-                      signed.removed.length
-                        ? `, removed ${signed.removed.length}`
-                        : ""
-                    }. Install it below.`
-                  : preparation?.profiles.length
-                    ? `${date(
-                        preparation.profiles
-                          .map((profile) => profile.expires)
-                          .sort()[0],
-                      )} · ${
-                        certificate
-                          ? "Sign to produce an installable build. The original IPA is never changed."
-                          : "Get a signing certificate in step 3 before signing."
-                      }`
-                    : app?.profile?.expires_at
-                      ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
-                      : "Re-signing requires a signing certificate and prepared profiles. Use the existing-signature flow below for an authorized build.")}
+                (signing
+                  ? signStep
+                    ? `${signStep.stage} · ${signStep.done} of ${signStep.total}`
+                    : "Signing. This reads and rewrites the whole app, so it takes a while."
+                  : signed
+                    ? `${date(signed.expires)} · Signed ${signed.bundles_signed} bundle(s)${
+                        signed.removed.length
+                          ? `, removed ${signed.removed.length}`
+                          : ""
+                      }. Install it below.`
+                    : preparation?.profiles.length
+                      ? `${date(
+                          preparation.profiles
+                            .map((profile) => profile.expires)
+                            .sort()[0],
+                        )} · ${
+                          certificate
+                            ? "Sign to produce an installable build. The original IPA is never changed."
+                            : "Get a signing certificate in step 3 before signing."
+                        }`
+                      : app?.profile?.expires_at
+                        ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
+                        : "Re-signing requires a signing certificate and prepared profiles. Use the existing-signature flow below for an authorized build.")}
             </p>
             {signed && (
               <details className="signing-log">
@@ -601,7 +608,14 @@ function App() {
               setSigning(true);
               setSignError(null);
               setSigned(null);
-              invoke<Signed>("account_sign_ipa", { path: ipaPath, watch })
+              setSignStep(null);
+              const progress = new Channel<SigningProgress>();
+              progress.onmessage = setSignStep;
+              invoke<Signed>("account_sign_ipa", {
+                path: ipaPath,
+                watch,
+                progress,
+              })
                 .then(setSigned)
                 .catch((error) =>
                   setSignError(
@@ -610,7 +624,10 @@ function App() {
                       : "Signing did not complete.",
                   ),
                 )
-                .finally(() => setSigning(false));
+                .finally(() => {
+                  setSigning(false);
+                  setSignStep(null);
+                });
             }}
           >
             {signing ? "Signing…" : "Sign IPA"} <ArrowRight size={17} />

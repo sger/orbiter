@@ -56,3 +56,10 @@ export type Signed = {
   /// What each signing stage did, in order.
   log: string[];
 };
+
+/// How far along a signing run is. Counts of real things, never an invented percentage.
+export type SigningProgress = {
+  stage: string;
+  done: number;
+  total: number;
+};

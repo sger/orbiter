@@ -6,3 +6,9 @@ resolver = "2"
 
 [patch.crates-io]
 isideload = { path = "vendor/isideload" }
+
+# Signing hashes and compresses a whole app bundle. Unoptimised dependencies make that minutes
+# instead of seconds, so build the dependency graph with optimisations even in a debug build;
+# this crate's own code stays unoptimised and debuggable.
+[profile.dev.package."*"]
+opt-level = 3

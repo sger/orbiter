@@ -188,6 +188,15 @@ async function nativeMock(
             };
             if ((window as any).__signFailure)
               throw (window as any).__signFailure;
+            // Real runs report counted progress before they return. A Channel reaches the
+            // backend as a callback id, so drive it the way Tauri would.
+            const channel = callbacks.get(
+              Number(String(args.progress).replace(/\D/g, "")),
+            );
+            channel?.({
+              message: { stage: "Signing bundles", done: 3, total: 24 },
+              id: 1,
+            });
             return {
               path: "/synthetic/signed/Test-TEAM2.ipa",
               identifier: "com.example.app.abc123",
