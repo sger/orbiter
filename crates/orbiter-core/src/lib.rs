@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod certificates;
 pub mod devices;
 pub mod installation;
+pub mod keychain;
 pub mod local_anisette;
 mod macho;
 pub mod plan;

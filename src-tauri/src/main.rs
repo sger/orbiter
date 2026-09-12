@@ -294,6 +294,12 @@ async fn account_prepare_provisioning(
         .await
 }
 #[tauri::command]
+async fn account_forget_signing_key(
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<String, String> {
+    state.forget_signing_key().await
+}
+#[tauri::command]
 async fn account_refresh_teams(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
@@ -330,6 +336,7 @@ fn main() {
             account_register_device,
             account_request_certificate,
             account_prepare_provisioning,
+            account_forget_signing_key,
             inspect_ipa,
             cancel_inspection,
             discover_devices,

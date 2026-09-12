@@ -530,8 +530,9 @@ export function Accounts({
               <strong>Signing certificate</strong>
               <p className="hint">
                 The signing key is generated on this Mac and never leaves it;
-                only a certificate request goes to Apple. It is not saved, so
-                restarting Orbiter needs a new certificate.
+                only a certificate request goes to Apple. It is kept in this
+                Mac's Keychain for this account and team, so a restart reuses
+                the same certificate instead of spending another slot.
               </p>
               <label className="auth-consent">
                 <input
@@ -591,6 +592,34 @@ export function Accounts({
                     : "."}
                 </p>
               )}
+              <button
+                className="text-button"
+                disabled={disabled || certBusy}
+                onClick={() => {
+                  setCertBusy(true);
+                  setCertError(null);
+                  setCertificate(null);
+                  invoke<string>("account_forget_signing_key")
+                    .then((message) => {
+                      if (mounted.current)
+                        setCertError(reason(message, "Signing key removed."));
+                    })
+                    .catch((error) => {
+                      if (mounted.current)
+                        setCertError(
+                          reason(
+                            error,
+                            "The stored signing key could not be removed.",
+                          ),
+                        );
+                    })
+                    .finally(() => {
+                      if (mounted.current) setCertBusy(false);
+                    });
+                }}
+              >
+                Forget stored signing key
+              </button>
               <strong>App identifiers & profiles</strong>
               <p className="hint">
                 Registers the plan's rewritten identifiers on this team and

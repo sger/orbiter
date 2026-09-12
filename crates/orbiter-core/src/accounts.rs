@@ -615,7 +615,7 @@ impl Accounts {
             .1
             .try_lock()
             .map_err(|_| "Another account operation is already running.")?;
-        let (generation, mut developer, team, existing) = {
+        let (generation, mut developer, team, existing, stored) = {
             let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
             inner.expire();
             let signed_in = inner.session.is_some();
@@ -626,6 +626,7 @@ impl Accounts {
                 return Err(refusal.into());
             }
             let team = selected.ok_or("Select the signing team the certificate belongs to.")?;
+            let email = inner.view.account.clone().unwrap_or_default();
             let session = inner
                 .session
                 .as_ref()
@@ -633,19 +634,41 @@ impl Accounts {
             (
                 inner.generation.clone(),
                 session.developer.clone(),
-                team,
+                team.clone(),
                 session
                     .identity
                     .as_ref()
                     .map(|identity| identity.key.clone()),
+                crate::keychain::account(&email, &team),
             )
         };
-        // Key generation is CPU-bound: keep it off the async runtime.
+        // The key persists in this Mac's Keychain, so a restart reuses the certificate Apple
+        // already issued instead of spending another of the team's few certificate slots.
         let key = match existing {
             Some(key) => key,
-            None => tokio::task::spawn_blocking(crate::certificates::generate_key)
-                .await
-                .map_err(|_| "Signing key generation stopped.".to_string())??,
+            None => {
+                let account = stored.clone();
+                let loaded = tokio::task::spawn_blocking(move || crate::keychain::load(&account))
+                    .await
+                    .map_err(|_| "Reading the stored signing key stopped.".to_string())??;
+                match loaded.as_deref().map(crate::certificates::decode_key) {
+                    Some(Ok(key)) => key,
+                    // A key that cannot be decoded is replaced rather than blocking the request.
+                    _ => {
+                        let key = tokio::task::spawn_blocking(crate::certificates::generate_key)
+                            .await
+                            .map_err(|_| "Signing key generation stopped.".to_string())??;
+                        let encoded = crate::certificates::encode_key(&key)?;
+                        let account = stored.clone();
+                        tokio::task::spawn_blocking(move || {
+                            crate::keychain::store(&account, &encoded)
+                        })
+                        .await
+                        .map_err(|_| "Storing the signing key stopped.".to_string())??;
+                        key
+                    }
+                }
+            }
         };
         let machine = hostname();
         let (identity, outcome) =
@@ -658,6 +681,27 @@ impl Accounts {
             session.identity = Some(identity);
         }
         Ok(outcome)
+    }
+    /// Remove this account and team's stored signing key from this Mac's Keychain.
+    pub async fn forget_signing_key(&self) -> Result<String, String> {
+        let stored = {
+            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            inner.expire();
+            let team = inner
+                .view
+                .selected_team
+                .clone()
+                .ok_or("Select the team whose stored signing key should be removed.")?;
+            let email = inner.view.account.clone().unwrap_or_default();
+            if let Some(session) = inner.session.as_mut() {
+                session.identity = None;
+            }
+            crate::keychain::account(&email, &team)
+        };
+        tokio::task::spawn_blocking(move || crate::keychain::forget(&stored))
+            .await
+            .map_err(|_| "Removing the stored signing key stopped.".to_string())??;
+        Ok("The stored signing key was removed from this Mac's Keychain. The certificate Apple issued for it still exists: revoke it at developer.apple.com if it is no longer wanted.".into())
     }
     pub async fn refresh_teams(&self) -> Result<View, String> {
         let _gate = self

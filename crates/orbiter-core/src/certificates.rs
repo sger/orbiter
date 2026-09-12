@@ -58,6 +58,20 @@ pub fn refusal(acknowledged: bool, team_selected: bool, signed_in: bool) -> Opti
     None
 }
 
+/// Encode a key for the Keychain. PKCS#8 DER: the same encoding Apple's own tools use.
+pub fn encode_key(key: &RsaPrivateKey) -> Result<zeroize::Zeroizing<Vec<u8>>, String> {
+    key.to_pkcs8_der()
+        .map(|document| zeroize::Zeroizing::new(document.as_bytes().to_vec()))
+        .map_err(|_| "The signing key could not be encoded for storage.".to_string())
+}
+
+/// Decode a key read back from the Keychain.
+pub fn decode_key(bytes: &[u8]) -> Result<RsaPrivateKey, String> {
+    use rsa::pkcs8::DecodePrivateKey;
+    RsaPrivateKey::from_pkcs8_der(bytes)
+        .map_err(|_| "The stored signing key could not be read and must be replaced.".to_string())
+}
+
 /// Generate a signing key on this Mac. Blocking and CPU-bound, so callers run it off the runtime.
 pub fn generate_key() -> Result<RsaPrivateKey, String> {
     RsaPrivateKey::new(&mut rand::rng(), KEY_BITS)
