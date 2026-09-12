@@ -100,7 +100,7 @@ export function DeviceLog({
         </p>
       )}
       {lines.length > 0 && (
-        <pre className="mt-2.5 max-h-[260px] overflow-auto rounded-control border border-line bg-surface-soft px-3 py-2.5 text-xs leading-relaxed break-words whitespace-pre-wrap">
+        <pre className="mt-2.5 max-h-[260px] overflow-auto rounded-control border border-line bg-surface-soft px-3 py-2.5 text-caption leading-relaxed break-words whitespace-pre-wrap">
           {lines.map((line) => line.text).join("\n")}
         </pre>
       )}

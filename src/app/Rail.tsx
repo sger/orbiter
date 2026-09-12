@@ -1,5 +1,6 @@
 import {
   CircleHelp,
+  Settings,
   FileArchive,
   Orbit,
   PanelLeftClose,
@@ -13,6 +14,7 @@ const primaryItems: NavigationItem[] = [
   { id: "ipas", label: "IPAs", icon: <FileArchive size={19} /> },
 ];
 const utilityItems: NavigationItem[] = [
+  { id: "settings", label: "Settings", icon: <Settings size={19} /> },
   { id: "help", label: "Help", icon: <CircleHelp size={19} /> },
 ];
 

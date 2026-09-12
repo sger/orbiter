@@ -165,7 +165,7 @@ What the log cannot show: a failure inside a `WKWebView`. Web content errors, bl
 
 ## Interface structure
 
-The frontend has IPAs and Help routes within a shared app shell. It is organised by feature rather than by kind:
+The frontend has IPAs, Settings, and Help routes within a shared app shell. It is organised by feature rather than by kind:
 
 ```
 src/ipc/commands.ts      every call into the Rust core, typed, one function each
@@ -186,7 +186,7 @@ Each step of the pipeline renders as a stage: a heading, its controls while it n
 
 Collapsing is not sequencing. Apple does not require a registered device before issuing a certificate, and identifiers can be registered before either; only the prerequisites that genuinely exist gate a step. A collapsed stage always offers **Change**, so a completed step is never a dead end — a team, a Watch choice or a device can all be revisited.
 
-The sidebar provides app navigation: IPAs and Help. Signing progress is a collapsible list inside the IPA workspace; each labeled step scrolls to its controls. Contextual help buttons still open a slide-over, while sidebar Help opens a dedicated page. Help holds the prose the panels used to carry: what Orbiter does, what a free team cannot carry and why, the seven-day limit, the "Untrusted Developer" step, what is stored, and how to diagnose a failure — including that a web view's failures never reach the device log. Each stage links to its section, which is what allows the stages themselves to be a control and a result rather than three paragraphs.
+The sidebar provides app navigation: IPAs and Help. Signing progress is an always-visible timeline inside the IPA workspace; each labeled step scrolls to its controls. Contextual help buttons still open a slide-over, while sidebar Help opens a dedicated page. Help holds the prose the panels used to carry: what Orbiter does, what a free team cannot carry and why, the seven-day limit, the "Untrusted Developer" step, what is stored, and how to diagnose a failure — including that a web view's failures never reach the device log. Each stage links to its section, which is what allows the stages themselves to be a control and a result rather than three paragraphs.
 
 ### Styling
 
@@ -198,14 +198,29 @@ One `Select` draws every dropdown. There were two kinds a few pixels apart — t
 
 Browser tests run their own Vite server on port 1421, never the one `npm run tauri dev` occupies on 1420. Reusing that server meant tests silently exercised whatever bundle it had started with: a Vite config added afterwards was invisible to them, so a run could pass green against a build nobody was shipping. It cost real time to notice, and the fix is one port and `reuseExistingServer: false`.
 
-App navigation and signing progress are separate. Progress is generated from the pipeline stages; adding a stage adds a shortcut inside the workspace. To add an app section, extend `AppRoute`, register its view in `App`, and add a typed `NavigationItem` to the sidebar. Only IPAs and Help are exposed today.
+App navigation and signing progress are separate. Progress is generated from the pipeline stages; adding a stage adds a shortcut inside the workspace. To add an app section, extend `AppRoute`, register its view in `App`, and add a typed `NavigationItem` to the sidebar. IPAs, Settings, and Help are exposed today.
 
 ### Frontend organization
 
-The frontend continues to use React and TypeScript with Vite, Tailwind, and Tauri. `main.tsx` only mounts the app. `app` owns shell layout, hash navigation, and the expandable sidebar. Native links target `#/ipas` and `#/help`, support back/forward, and work with Tauri's asset protocol. Empty or unknown hashes normalize to IPAs. Sidebar expansion defaults at 1100px and a manual choice lasts until the app is remounted. Primary and utility navigation groups scroll independently as they grow.
+The frontend continues to use React and TypeScript with Vite, Tailwind, and Tauri. `main.tsx` only mounts the app. `app` owns shell layout, hash navigation, and the expandable sidebar. Native links target `#/ipas`, `#/settings`, and `#/help`, support back/forward, and work with Tauri's asset protocol. Empty or unknown hashes normalize to IPAs. Sidebar expansion defaults at 1100px and a manual choice lasts until the app is remounted. Primary and utility navigation groups scroll independently as they grow.
 
-`App` keeps the IPA workspace mounted but hidden while Help is selected. Inspection, account state, form values, and signing operations survive navigation without a global store or browser storage. Help reuses the same content as the contextual help panel. Route changes focus the destination heading. Signing progress is collapsed initially and retains its disclosure state while switching pages.
+`App` keeps the IPA workspace mounted but hidden while Help is selected. Inspection, account state, form values, and signing operations survive navigation without a global store or browser storage. Help reuses the same content as the contextual help panel. Route changes focus the destination heading. Signing progress shows numbered, connected steps horizontally, switching to a vertical timeline below 700px of content width. Each step remains a keyboard-accessible shortcut.
 
 `components/ui` owns native form controls: `TextField`, `Checkbox`, and `Select`. Feature containers must not style their descendant input/select elements globally. Checkbox text has its own wrapping span, and select chrome is drawn once around a native select. Tokens live in `styles.css`; container queries adapt the workspace at 900px of content width and account fields at 440px.
 
 `features/workspace` composes the inspection, account, compatibility, signing, and installation UI. Inspection and signing lifecycles live in feature hooks; `features/team/useAccounts.ts` owns account state, polling, and invalidation effects. Credentials remain in component memory. `state/pipeline.ts` remains the source of workflow gates, and `ipc/commands.ts` owns typed command names and payloads, including challenge IDs and the discriminated account answer. The routing layer uses browser hash events without a new dependency. No global state store or backend contract change is introduced.
+
+
+### Appearance
+
+Settings offers System (the default), Light, and Dark appearance. Only this preference is stored under `orbiter.appearance` in local storage; account data and credentials are unaffected. Startup applies the preference before React mounts. System mode follows live `prefers-color-scheme` changes, while explicit choices override the OS. Invalid or inaccessible storage falls back to System; changes still work for the session if storage cannot be written.
+
+The neutral gray palette is defined by semantic CSS variables in `styles.css`. Root `data-theme` overrides supply dark values, and `color-scheme` adapts native controls. All component colors use tokens, including focus, controls, sidebar, contextual Help, and warning/error surfaces. Warning amber and error red retain their status meaning. Settings uses native radio controls and shares the app's existing hash navigation; the IPA workspace stays mounted during appearance changes.
+
+Typography uses shared size tokens: 15px body text and controls, 14px labels and helper text, 13px compact metadata, 18px section headings, and 24px page titles. Timeline labels wrap within their steps; stage headings can wrap instead of crowding actions.
+
+Shared spacing tokens define 12px heading/description gaps, 8px field/link gaps, and 16px action gaps. Password fields offer a non-submitting visibility control and return to masked mode when cleared or disabled. Empty compatibility content stays compact until inspection returns findings. Account action emphasis follows the earliest unfinished, enabled action without changing backend prerequisites or acknowledgements.
+
+The UI uses the platform system font through one `--font-sans` token (San Francisco on macOS, Segoe UI on Windows), with no font downloads. Logs and code retain their monospace stack.
+
+Motion uses 140ms hover/press transitions and 200ms content reveals. Route content fades without transforms so contextual Help retains its viewport positioning. Hover movement is limited to enabled actions and appearance choices on pointer devices. Reduced-motion preferences disable transitions, transforms, reveals, smooth scrolling, and spinner animation; textual operation status remains available.

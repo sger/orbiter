@@ -91,13 +91,28 @@ export function Accounts({
     reason,
     command,
   } = useAccounts({ paused, deviceId, ipaPath, onPrepared, onStatus });
+  // Emphasize the earliest unfinished action that can actually run now.
+  // This changes presentation only; acknowledgement and backend gates stay intact.
+  const nextAction =
+    !registration && !disabled && !registering && deviceId && registerAck
+      ? "register"
+      : !certificate && !disabled && !certBusy && certAck
+        ? "certificate"
+        : !preparation &&
+            !disabled &&
+            !provBusy &&
+            ipaPath &&
+            provAck &&
+            (!hasWatchApp || watch !== "undecided")
+          ? "provision"
+          : null;
   return (
     <section
       tabIndex={-1}
       className="accounts"
       aria-label="Apple account authentication"
     >
-      <strong>Apple account</strong>
+      <strong className="account-title">Apple account</strong>
       {!active && !signedIn && (
         <form
           onSubmit={(e) => {
@@ -112,15 +127,15 @@ export function Accounts({
               paragraphs a person must read past every time to reach the password field. */}
           <p className="hint">
             Sign in with the Apple ID this build should be re-signed for.
-            Orbiter talks to Apple directly; passwords are never saved.{" "}
-            <button
-              type="button"
-              className="text-button underline"
-              onClick={() => onHelp("account")}
-            >
-              What is stored
-            </button>
+            Orbiter talks to Apple directly; passwords are never saved.
           </p>
+          <button
+            type="button"
+            className="text-button privacy-link"
+            onClick={() => onHelp("account")}
+          >
+            What is stored
+          </button>
 
           <div className="auth-fields">
             <TextField
@@ -159,7 +174,7 @@ export function Accounts({
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <button
               type="submit"
-              className="secondary !mt-0"
+              className="secondary action-emphasis !mt-0"
               disabled={signInBlocker !== null}
               aria-describedby="sign-in-help"
             >
@@ -212,7 +227,7 @@ export function Accounts({
               />
               <button
                 type="submit"
-                className="secondary"
+                className="secondary action-emphasis"
                 disabled={disabled || !/^\d{6}$/.test(code)}
               >
                 Verify code
@@ -357,7 +372,7 @@ export function Accounts({
                   year, which removing the device later does not return.
                 </Checkbox>
                 <button
-                  className="secondary"
+                  className={`secondary ${nextAction === "register" ? "action-emphasis" : ""}`}
                   disabled={
                     disabled || registering || !deviceId || !registerAck
                   }
@@ -427,7 +442,7 @@ export function Accounts({
                   signed with it.
                 </Checkbox>
                 <button
-                  className="secondary"
+                  className={`secondary ${nextAction === "certificate" ? "action-emphasis" : ""}`}
                   disabled={disabled || certBusy || !certAck}
                   onClick={() => {
                     setCertBusy(true);
@@ -605,7 +620,7 @@ export function Accounts({
                   another team afterwards.
                 </Checkbox>
                 <button
-                  className="secondary"
+                  className={`secondary ${nextAction === "provision" ? "action-emphasis" : ""}`}
                   disabled={
                     disabled ||
                     provBusy ||

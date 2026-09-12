@@ -452,9 +452,17 @@ test("device refresh removes disconnected selection and surfaces service errors"
   // Wrapped recovery instructions must clear the next section's divider.
   for (const width of [1120, 780]) {
     await page.setViewportSize({ width, height: 840 });
-    const message = (await page.locator(".device-status p").boundingBox())!;
-    const account = (await page.locator(".accounts").boundingBox())!;
-    expect(account.y - (message.y + message.height)).toBeGreaterThanOrEqual(16);
+    // Measure both in the same frame: resizing can scroll-anchor the page.
+    const gap = await page.evaluate(() => {
+      const message = document
+        .querySelector(".device-status p")!
+        .getBoundingClientRect();
+      const account = document
+        .querySelector(".accounts")!
+        .getBoundingClientRect();
+      return account.top - message.bottom;
+    });
+    expect(gap).toBeGreaterThanOrEqual(16);
   }
 
   await page.evaluate(() => {
@@ -613,6 +621,24 @@ test("account flow works without a manual support check, requires consent, and n
 
   await page.getByLabel("Apple account email").fill("test@example.invalid");
   await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByRole("button", { name: "Show password", exact: true })
+    .click();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute(
+    "type",
+    "text",
+  );
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue(
+    "synthetic-password",
+  );
+  await page
+    .getByRole("button", { name: "Hide password", exact: true })
+    .click();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute(
+    "type",
+    "password",
+  );
+
   await expect(
     page.getByRole("button", { name: "Sign in to Apple" }),
   ).toBeDisabled();
@@ -1374,6 +1400,36 @@ for (const viewport of [
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    const teamSelect = (await page.locator("#team").boundingBox())!;
+    const teamHint = (await page
+      .locator(".destination > .hint")
+      .boundingBox())!;
+    expect(
+      teamHint.y - teamSelect.y - teamSelect.height,
+    ).toBeGreaterThanOrEqual(14);
+    const installText = (await page
+      .locator(".install-body > p")
+      .first()
+      .boundingBox())!;
+    const reviewButton = (await page
+      .getByRole("button", { name: "Review installation" })
+      .boundingBox())!;
+    expect(
+      reviewButton.y - installText.y - installText.height,
+    ).toBeGreaterThanOrEqual(16);
+    const steps = page
+      .getByRole("list", { name: "Signing steps" })
+      .getByRole("button");
+    await expect(steps).toHaveCount(7);
+    const first = (await steps.nth(0).boundingBox())!;
+    const second = (await steps.nth(1).boundingBox())!;
+    if (viewport.width === 1120) {
+      expect(first.y).toBe(second.y);
+      expect(second.x).toBeGreaterThanOrEqual(first.x + first.width);
+    } else {
+      expect(first.x).toBe(second.x);
+      expect(second.y).toBeGreaterThanOrEqual(first.y + first.height);
+    }
     await page.screenshot({
       path: `test-results/account-${viewport.width}.png`,
       fullPage: true,
@@ -1403,7 +1459,6 @@ test("sidebar toggles, follows shortcuts, and preserves the user's choice on res
     .boundingBox())!;
   expect(password.y).toBeGreaterThan(email.y + email.height);
   expect(password.x).toBe(email.x);
-  await page.locator(".signing-progress > summary").click();
   await page
     .getByRole("button", { name: "iPhone: waiting", exact: true })
     .click();
@@ -1527,14 +1582,13 @@ test("sidebar accepts additional navigation items without hiding Help or the tog
   ).toBeInViewport();
 });
 
-test("app navigation preserves the IPA, form state, and progress disclosure", async ({
+test("app navigation preserves the IPA, form state, and timeline", async ({
   page,
 }) => {
   await nativeMock(page, "success");
   await page.getByRole("button", { name: /Drop your IPA/ }).click();
   await page.getByLabel("Apple account email").fill("test@example.invalid");
   await page.getByRole("checkbox", { name: /I agree to authenticate/ }).check();
-  await page.locator(".signing-progress > summary").click();
   await expect(
     page.getByRole("complementary").getByRole("button", { name: /Build:/ }),
   ).toHaveCount(0);
@@ -1558,7 +1612,7 @@ test("app navigation preserves the IPA, form state, and progress disclosure", as
   await expect(
     page.getByRole("checkbox", { name: /I agree to authenticate/ }),
   ).toBeChecked();
-  await expect(page.locator(".signing-progress")).toHaveAttribute("open", "");
+  await expect(page.getByRole("list", { name: "Signing steps" })).toBeVisible();
   await page.goForward();
   await expect(
     page.getByRole("heading", { name: "Help", exact: true }),
@@ -1829,4 +1883,56 @@ test("turning the marker off leaves both apps named the same, and says so", asyn
       page.evaluate(() => (window as any).__signRequested?.marker),
     )
     .toBe("");
+});
+
+test("account spacing, compact compatibility, and available action emphasis", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  const positions = await page.evaluate(() => {
+    const intro = document
+      .querySelector(".accounts > form > .hint")!
+      .getBoundingClientRect();
+    const privacy = document
+      .querySelector(".privacy-link")!
+      .getBoundingClientRect();
+    const heading = document
+      .querySelector(".account-title")!
+      .getBoundingClientRect();
+    return {
+      titleGap: intro.top - heading.bottom,
+      linkGap: privacy.top - intro.bottom,
+    };
+  });
+  expect(positions.titleGap).toBeGreaterThanOrEqual(12);
+  expect(positions.linkGap).toBeGreaterThanOrEqual(8);
+  expect(
+    (await page.locator(".empty-assessment").boundingBox())!.height,
+  ).toBeLessThan(240);
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page.getByRole("checkbox", { name: /I agree to authenticate/ }).check();
+  const signIn = page.getByRole("button", {
+    name: "Sign in to Apple",
+    exact: true,
+  });
+  await expect(signIn).toHaveClass(/action-emphasis/);
+  await expect(signIn).toBeEnabled();
+  await signIn.click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
+  const certificate = page.getByRole("button", {
+    name: "Get development certificate",
+  });
+  await expect(certificate).toBeDisabled();
+  await expect(certificate).not.toHaveClass(/action-emphasis/);
+  await page
+    .getByRole("checkbox", { name: /I understand this uses one/ })
+    .check();
+  await expect(certificate).toBeEnabled();
+  await expect(certificate).toHaveClass(/action-emphasis/);
+  await expect(page.locator(".accounts .action-emphasis:enabled")).toHaveCount(
+    1,
+  );
 });

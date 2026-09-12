@@ -1,22 +1,21 @@
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 import type { Stage } from "../../state/pipeline";
 
 export function SigningProgress({ stages }: { stages: Stage[] }) {
   const current = stages.find((stage) => stage.state === "current");
   const done = stages.filter((stage) => stage.state === "done").length;
   return (
-    <details className="signing-progress card">
-      <summary>
-        <strong>Signing progress</strong>
+    <section className="signing-progress card" aria-label="Signing progress">
+      <div className="timeline-heading">
+        <h2>Signing progress</h2>
         <span>
           {current ? `Next: ${current.title}` : "Ready to install"} · {done}/
           {stages.length}
         </span>
-        <ChevronDown size={16} aria-hidden="true" />
-      </summary>
+      </div>
       <ol aria-label="Signing steps">
-        {stages.map((stage) => (
-          <li key={stage.id}>
+        {stages.map((stage, index) => (
+          <li key={stage.id} data-state={stage.state}>
             <button
               data-state={stage.state}
               aria-label={`${stage.title}: ${stage.state}`}
@@ -38,9 +37,9 @@ export function SigningProgress({ stages }: { stages: Stage[] }) {
               }}
             >
               <span className="stage-dot" aria-hidden="true">
-                {stage.state === "done" && <Check size={11} />}
+                {stage.state === "done" ? <Check size={14} /> : index + 1}
               </span>
-              <span>{stage.title}</span>
+              <span className="timeline-label">{stage.title}</span>
               <small>
                 {stage.state === "done"
                   ? "Done"
@@ -52,6 +51,6 @@ export function SigningProgress({ stages }: { stages: Stage[] }) {
           </li>
         ))}
       </ol>
-    </details>
+    </section>
   );
 }

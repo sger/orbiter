@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 
-export type AppRoute = "ipas" | "help";
+export type AppRoute = "ipas" | "help" | "settings";
 export const routeHref = (route: AppRoute) => `#/${route}`;
 
 function readRoute(): AppRoute {
+  if (window.location.hash === "#/settings") return "settings";
   return window.location.hash === "#/help" ? "help" : "ipas";
 }
 

@@ -50,9 +50,9 @@ export function Stage({
           summary is the only part allowed to give way when a build's result is long. */}
       <div className="flex items-center gap-2.5">
         <span
-          className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-[11px] font-semibold ${
+          className={`grid h-5 w-5 flex-none place-items-center rounded-full border text-caption font-semibold ${
             state === "done"
-              ? "border-[#bcd9bf] bg-[#e4f1e4] text-go-deep"
+              ? "border-line-strong bg-surface-tint text-accent"
               : state === "current"
                 ? "border-ink-strong bg-ink-strong text-surface-tint"
                 : "border-line-strong bg-surface-soft text-ink-soft"
@@ -62,7 +62,7 @@ export function Stage({
           {state === "done" ? <Check size={13} /> : index}
         </span>
         <strong
-          className={`flex-none text-sm whitespace-nowrap ${
+          className={`min-w-0 text-body ${
             state === "waiting" ? "text-ink-faint" : "text-ink-strong"
           }`}
         >
@@ -70,7 +70,7 @@ export function Stage({
         </strong>
         {summary && state === "done" && !reopened && (
           <span
-            className="stage-summary min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-ink-soft"
+            className="stage-summary min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-label text-ink-soft"
             title={summary}
           >
             {summary}
@@ -78,7 +78,7 @@ export function Stage({
         )}
         {state === "done" && (
           <button
-            className="ml-auto flex-none border-0 bg-transparent px-1 py-0.5 text-[13px] text-[#5d7c63] hover:text-ink-strong hover:underline"
+            className="ml-auto flex-none border-0 bg-transparent px-1 py-0.5 text-label text-ink-muted hover:text-ink-strong hover:underline"
             // Names what it changes: several stages offer one, and so does the build panel.
             aria-label={`${reopened ? "Hide" : "Change"} ${title}`}
             onClick={() => setReopened((value) => !value)}
@@ -88,7 +88,7 @@ export function Stage({
         )}
         {help && onHelp && (
           <button
-            className="ml-1.5 grid flex-none place-items-center border-0 bg-transparent p-0.5 text-[#a9b5a6] last:ml-auto hover:text-ink-strong"
+            className="ml-1.5 grid flex-none place-items-center border-0 bg-transparent p-0.5 text-ink-soft last:ml-auto hover:text-ink-strong"
             // Deliberately does not repeat the stage title: a control whose accessible name
             // contains another control's name makes both ambiguous to anything matching by name.
             aria-label={`Help, step ${index}`}
@@ -99,9 +99,9 @@ export function Stage({
           </button>
         )}
       </div>
-      {open && <div className="pt-2.5">{children}</div>}
+      {open && <div className="stage-content">{children}</div>}
       {state === "waiting" && blocked && (
-        <p className="mt-1.5 ml-[29px] text-[13px] text-ink-faint">{blocked}</p>
+        <p className="mt-1.5 ml-[29px] text-label text-ink-faint">{blocked}</p>
       )}
     </section>
   );

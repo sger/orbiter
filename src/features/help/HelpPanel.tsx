@@ -34,7 +34,7 @@ export function HelpPanel({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-y-0 right-0 z-20 flex w-[min(460px,100vw-68px)] flex-col border-l border-[#e1e7df] bg-surface shadow-[-18px_0_40px_rgba(23,62,55,0.08)]"
+      className="fixed inset-y-0 right-0 z-20 flex w-[min(460px,100vw-68px)] flex-col border-l border-line bg-surface help-panel"
       role="dialog"
       aria-label="Help"
       aria-modal="false"
@@ -50,7 +50,7 @@ export function HelpPanel({
           <X size={16} />
         </button>
       </div>
-      <div className="help-body overflow-y-auto px-[22px] pt-1 pb-8 text-sm leading-[1.7] text-[#5c6a5d]">
+      <div className="help-body overflow-y-auto px-[22px] pt-1 pb-8 text-body leading-[1.7] text-ink-muted">
         <HelpContent />
       </div>
     </div>

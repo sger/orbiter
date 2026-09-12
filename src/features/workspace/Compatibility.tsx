@@ -100,7 +100,9 @@ export function Compatibility({
   preparation: Preparation | null;
 }) {
   return (
-    <section className="card compatibility">
+    <section
+      className={`card compatibility ${!report ? "compatibility-empty" : ""}`}
+    >
       <div className="section-heading">
         <h2>
           <span>03</span> Compatibility
@@ -153,9 +155,8 @@ export function Compatibility({
             <div />
           </div>
           <p>
-            Add an IPA to review its provisioning,
-            <br />
-            embedded apps, and signing capabilities.
+            Add an IPA to review its provisioning, embedded apps, and signing
+            capabilities.
           </p>
           <ul>
             <li>
