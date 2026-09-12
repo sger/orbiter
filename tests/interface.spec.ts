@@ -76,6 +76,96 @@ async function nativeMock(
         },
         unregisterCallback: (id: number) => callbacks.delete(id),
         invoke: async (cmd: string, args?: any) => {
+          if (cmd === "local_auth_support")
+            return (
+              (window as any).__supportResult ?? {
+                available: true,
+                message: "Local macOS authentication support is available.",
+              }
+            );
+          if (cmd === "account_status")
+            return (
+              (window as any).__accountView ?? {
+                stage: "signed_out",
+                account: null,
+                teams: [],
+                selected_team: null,
+                challenge: null,
+                message: "",
+              }
+            );
+          if (cmd === "account_sign_in") {
+            (window as any).__loginRequested = {
+              consent: args.consent,
+              email: args.email,
+            };
+            return ((window as any).__accountView = {
+              stage: "two_factor",
+              account: null,
+              teams: [],
+              selected_team: null,
+              message: "Enter your verification code.",
+              challenge: {
+                id: "challenge-1",
+                sms: false,
+                unknown: false,
+                retry: false,
+                numbers: [{ id: 1, label: "Phone ending in 12" }],
+              },
+            });
+          }
+          if (cmd === "account_answer") {
+            (window as any).__answerRequested = {
+              challengeId: args.challengeId,
+              action: args.answer.action,
+            };
+            return ((window as any).__accountView = {
+              stage: "signed_in",
+              account: "test@example.invalid",
+              selected_team: null,
+              challenge: null,
+              message: "Signed in. Select a team.",
+              teams: [
+                {
+                  id: "TEAM1",
+                  name: "Synthetic Team",
+                  kind: "Company",
+                  free: false,
+                  membership: "Apple Developer Program",
+                },
+                {
+                  id: "TEAM2",
+                  name: "Synthetic Personal",
+                  kind: "Individual",
+                  free: true,
+                  membership: null,
+                },
+              ],
+            });
+          }
+          if (cmd === "account_select_team") {
+            (window as any).__accountView.selected_team = args.id;
+            return (window as any).__accountView;
+          }
+          if (cmd === "account_sign_out")
+            return ((window as any).__accountView = {
+              stage: "signed_out",
+              account: null,
+              teams: [],
+              selected_team: null,
+              challenge: null,
+              message: "Signed out locally.",
+            });
+          if (cmd === "account_refresh_teams")
+            return ((window as any).__accountView = {
+              stage: "signed_out",
+              account: null,
+              teams: [],
+              selected_team: null,
+              challenge: null,
+              message:
+                "Developer session could not be refreshed. Sign in again; your team selection was cleared.",
+            });
           if (cmd === "discover_signing_identities") {
             if ((window as any).__identityError) throw "Keychain failed";
             return (window as any).__identityResult;
@@ -385,5 +475,119 @@ test("local identity inventory clears stale certificates on failed refresh", asy
   );
   await expect(
     page.getByText("Apple Development: Synthetic", { exact: true }),
+  ).toHaveCount(0);
+});
+
+test("account flow works without a manual support check, requires consent, and never auto-selects a team", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await expect(
+    page.getByRole("button", { name: "Sign in to Apple" }),
+  ).toBeDisabled();
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Verify code" }),
+  ).toBeDisabled();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await expect(page.getByLabel("Signing team")).toHaveValue("");
+  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await expect(page.getByLabel("Signing team")).toHaveValue("TEAM2");
+  await expect(
+    page.getByRole("button", { name: "Sign & Install" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  // Signing out clears the secrets, not the account address or the consent already given, so
+  // signing back in needs only the password. The sign-in button must not be stuck disabled.
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Apple account email")).toHaveValue(
+    "test@example.invalid",
+  );
+  await expect(
+    page.getByLabel("I agree to authenticate directly with Apple", {
+      exact: false,
+    }),
+  ).toBeChecked();
+  await expect(page.getByLabel("Signing team")).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Sign in to Apple" }),
+  ).toBeDisabled();
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await expect(
+    page.getByRole("button", { name: "Sign in to Apple" }),
+  ).toBeEnabled();
+});
+
+test("cancelled verification clears secrets and failed team refresh clears selection", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  async function signIn() {
+    await page
+      .getByRole("button", { name: "Check local support", exact: true })
+      .click();
+    await page.getByLabel("Apple account email").fill("test@example.invalid");
+    await page
+      .getByLabel("Password", { exact: true })
+      .fill("synthetic-password");
+    await page
+      .getByLabel("I agree to authenticate directly with Apple", {
+        exact: false,
+      })
+      .check();
+    await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  }
+  await signIn();
+  await page.getByLabel("Verification code").fill("123");
+  await page.getByRole("button", { name: "Cancel sign-in" }).click();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+  await signIn();
+  await page.getByRole("button", { name: "Send SMS", exact: false }).click();
+  await page.getByLabel("Signing team").selectOption("TEAM1");
+  await page.getByRole("button", { name: "Refresh teams" }).click();
+  await expect(page.getByLabel("Signing team")).toBeDisabled();
+  await expect(
+    page.getByText("Developer session could not be refreshed.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+});
+
+test("unavailable local support prevents sign-in without a remote fallback", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.evaluate(() => {
+    (window as any).__supportResult = {
+      available: false,
+      message:
+        "Local authentication is unavailable. No remote fallback was used.",
+    };
+  });
+  await page
+    .getByRole("button", { name: "Check local support", exact: true })
+    .click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await expect(
+    page.getByRole("button", { name: "Sign in to Apple" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Local authentication is unavailable.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("ani.stikstore.app", { exact: false }),
   ).toHaveCount(0);
 });

@@ -1,3 +1,4 @@
+import { Accounts } from "./Accounts";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
@@ -172,7 +173,7 @@ function App() {
               install.
             </p>
           </div>
-          <span className="phase">PREVIEW · INSTALL TRANSPORT</span>
+          <span className="phase">PREVIEW · ACCOUNT SIGN-IN</span>
         </div>
         {!desktop && (
           <div className="notice">
@@ -288,26 +289,7 @@ function App() {
               </div>
               <Devices onSelect={setDeviceId} paused={installBusy} />
               <SigningIdentities paused={installBusy} />
-              <div className="identity-grid">
-                <div>
-                  <label htmlFor="account">Apple account</label>
-                  <div className="select-wrap">
-                    <select id="account" disabled>
-                      <option>Sign-in unavailable</option>
-                    </select>
-                    <ChevronDown size={14} />
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="team">Signing team</label>
-                  <div className="select-wrap">
-                    <select id="team" disabled>
-                      <option>No team selected</option>
-                    </select>
-                    <ChevronDown size={14} />
-                  </div>
-                </div>
-              </div>
+              <Accounts paused={installBusy} />
               <p className="hint">
                 A different account on the same company team shares that team's
                 device allowance. Personal teams have their own limits and
@@ -458,7 +440,7 @@ function App() {
             <p>
               {app?.profile?.expires_at
                 ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
-                : "Re-signing requires account and provisioning integration. Use the existing-signature flow below for an authorized build."}
+                : "Re-signing requires profile matching and a reviewed signing plan. Use the existing-signature flow below for an authorized build."}
             </p>
           </div>
           <button className="primary" disabled>

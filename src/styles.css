@@ -939,3 +939,62 @@ details[open] > summary > svg {
   font-size: 14px;
   margin-top: 6px;
 }
+
+.accounts {
+  border-top: 1px solid #e1e7df;
+  padding-top: 20px;
+}
+.accounts input:not([type="checkbox"]),
+.accounts select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #dce3da;
+  border-radius: 6px;
+  padding: 12px;
+  color: inherit;
+  background: #f9fbf8;
+  font: inherit;
+}
+.accounts .secondary {
+  margin: 12px 0;
+}
+.auth-disclosure {
+  margin: 12px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.auth-disclosure summary {
+  cursor: pointer;
+}
+.auth-consent {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  line-height: 1.6;
+}
+.auth-consent input {
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.auth-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.account-name {
+  overflow-wrap: anywhere;
+}
+
+.accounts .secondary {
+  background: #f8faf6;
+  border: 1px solid #d5dfcf;
+  border-radius: 7px;
+  padding: 10px 16px;
+  color: #365b4d;
+  font-weight: 600;
+}
+.accounts button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

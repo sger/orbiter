@@ -11,6 +11,48 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "aead",
+      "version": "0.5.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "aead",
+      "version": "0.6.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "aes",
+      "version": "0.8.4",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "aes",
+      "version": "0.9.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "aes-gcm",
+      "version": "0.11.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/AEADs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "ahash",
+      "version": "0.8.12",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/tkaitchuck/ahash"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "aho-corasick",
       "version": "1.1.5",
       "license": "Unlicense OR MIT",
@@ -32,10 +74,66 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "anstream",
+      "version": "1.0.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "anstyle",
+      "version": "1.0.14",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "anstyle-parse",
+      "version": "1.0.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "anstyle-query",
+      "version": "1.1.5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "anyhow",
       "version": "1.0.104",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/dtolnay/anyhow"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "arrayvec",
+      "version": "0.7.8",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/bluss/arrayvec"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "asn1-rs",
+      "version": "0.7.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rusticata/asn1-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "asn1-rs-derive",
+      "version": "0.6.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rusticata/asn1-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "asn1-rs-impl",
+      "version": "0.2.0",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/rusticata/asn1-rs.git"
     },
     {
       "ecosystem": "cargo",
@@ -46,6 +144,27 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "async-stream",
+      "version": "0.3.6",
+      "license": "MIT",
+      "repository": "https://github.com/tokio-rs/async-stream"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "async-stream-impl",
+      "version": "0.3.6",
+      "license": "MIT",
+      "repository": "https://github.com/tokio-rs/async-stream"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "async-trait",
+      "version": "0.1.92",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/async-trait"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "async_zip",
       "version": "0.0.18",
       "license": "MIT",
@@ -53,10 +172,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "atomic-waker",
+      "version": "1.1.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/smol-rs/atomic-waker"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "autocfg",
       "version": "1.5.1",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/cuviper/autocfg"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "base16ct",
+      "version": "0.2.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats/tree/master/base16ct"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "base16ct",
+      "version": "1.0.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
     },
     {
       "ecosystem": "cargo",
@@ -88,6 +228,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "bcder",
+      "version": "0.7.7",
+      "license": "BSD-3-Clause",
+      "repository": "https://github.com/nlnetlabs/bcder"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "bit-set",
       "version": "0.8.0",
       "license": "Apache-2.0 OR MIT",
@@ -97,6 +244,13 @@
       "ecosystem": "cargo",
       "name": "bit-vec",
       "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/contain-rs/bit-vec"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "bit-vec",
+      "version": "0.9.1",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/contain-rs/bit-vec"
     },
@@ -116,8 +270,43 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "bitvec",
+      "version": "1.1.1",
+      "license": "MIT",
+      "repository": "https://github.com/bitvecto-rs/bitvec"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "bitvec-nom2",
+      "version": "0.2.1",
+      "license": "MIT",
+      "repository": "https://github.com/rust-bakery/nom-bitvec"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "block-buffer",
       "version": "0.10.4",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "block-padding",
+      "version": "0.3.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "block-padding",
+      "version": "0.4.2",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/RustCrypto/utils"
     },
@@ -172,6 +361,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "bytesize",
+      "version": "1.3.3",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/bytesize-rs/bytesize/"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "bzip2",
+      "version": "0.6.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/trifectatechfoundation/bzip2-rs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "camino",
       "version": "1.2.5",
       "license": "MIT OR Apache-2.0",
@@ -197,6 +400,20 @@
       "version": "0.22.3",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://gitlab.com/lib.rs/cargo_toml"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "cbc",
+      "version": "0.1.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-modes"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "cbc",
+      "version": "0.2.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-modes"
     },
     {
       "ecosystem": "cargo",
@@ -228,6 +445,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "chacha20",
+      "version": "0.9.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/stream-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "chacha20poly1305",
+      "version": "0.10.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "chrono",
       "version": "0.4.45",
       "license": "MIT OR Apache-2.0",
@@ -235,10 +466,73 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "cipher",
+      "version": "0.4.4",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "cipher",
+      "version": "0.5.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "clap",
+      "version": "4.6.6",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "clap_builder",
+      "version": "4.6.6",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "clap_derive",
+      "version": "4.6.4",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "clap_lex",
+      "version": "1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/clap-rs/clap"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "cmov",
+      "version": "0.5.4",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "cms",
       "version": "0.2.3",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/formats/tree/master/cms"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "cms",
+      "version": "0.3.0-pre.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "colorchoice",
+      "version": "1.0.5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/anstyle.git"
     },
     {
       "ecosystem": "cargo",
@@ -256,10 +550,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "console",
+      "version": "0.15.11",
+      "license": "MIT",
+      "repository": "https://github.com/console-rs/console"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "const-oid",
+      "version": "0.10.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "const-oid",
       "version": "0.9.6",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/formats/tree/master/const-oid"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "const_panic",
+      "version": "0.2.17",
+      "license": "Zlib",
+      "repository": "https://github.com/rodrimati1992/const_panic/"
     },
     {
       "ecosystem": "cargo",
@@ -272,6 +587,13 @@
       "ecosystem": "cargo",
       "name": "core-foundation",
       "version": "0.10.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/servo/core-foundation-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "core-foundation",
+      "version": "0.9.4",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/servo/core-foundation-rs"
     },
@@ -298,8 +620,22 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "cpubits",
+      "version": "0.1.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "cpufeatures",
       "version": "0.2.17",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "cpufeatures",
+      "version": "0.3.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/RustCrypto/utils"
     },
@@ -319,6 +655,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "crossbeam-deque",
+      "version": "0.8.8",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/crossbeam-rs/crossbeam"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "crossbeam-epoch",
+      "version": "0.9.21",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/crossbeam-rs/crossbeam"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "crossbeam-utils",
       "version": "0.8.23",
       "license": "MIT OR Apache-2.0",
@@ -326,10 +676,38 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "crypto-bigint",
+      "version": "0.5.5",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/crypto-bigint"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "crypto-bigint",
+      "version": "0.7.5",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/crypto-bigint"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "crypto-common",
       "version": "0.1.7",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "crypto-primes",
+      "version": "0.7.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/entropyxyz/crypto-primes"
     },
     {
       "ecosystem": "cargo",
@@ -361,6 +739,27 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "ctr",
+      "version": "0.10.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-modes"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "ctutils",
+      "version": "0.4.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "curve25519-dalek",
+      "version": "4.1.3",
+      "license": "BSD-3-Clause",
+      "repository": "https://github.com/dalek-cryptography/curve25519-dalek/tree/main/curve25519-dalek"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "darling",
       "version": "0.24.1",
       "license": "MIT",
@@ -379,6 +778,13 @@
       "version": "0.24.1",
       "license": "MIT",
       "repository": "https://github.com/TedDriggs/darling"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "data-encoding",
+      "version": "2.11.1",
+      "license": "MIT",
+      "repository": "https://github.com/ia0/data-encoding"
     },
     {
       "ecosystem": "cargo",
@@ -410,10 +816,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "der",
+      "version": "0.8.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "der-parser",
+      "version": "10.0.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rusticata/der-parser.git"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "der_derive",
       "version": "0.7.3",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/formats/tree/master/der/derive"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "der_derive",
+      "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
     },
     {
       "ecosystem": "cargo",
@@ -438,6 +865,34 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "des",
+      "version": "0.8.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "des",
+      "version": "0.9.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "dialoguer",
+      "version": "0.11.0",
+      "license": "MIT",
+      "repository": "https://github.com/console-rs/dialoguer"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "difference",
+      "version": "2.0.0",
+      "license": "MIT",
+      "repository": "https://github.com/johannhof/difference.rs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "digest",
       "version": "0.10.7",
       "license": "MIT OR Apache-2.0",
@@ -445,10 +900,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "digest",
+      "version": "0.11.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "dirs",
+      "version": "5.0.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/soc/dirs-rs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "dirs",
       "version": "6.0.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/soc/dirs-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "dirs-sys",
+      "version": "0.4.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dirs-dev/dirs-sys-rs"
     },
     {
       "ecosystem": "cargo",
@@ -529,6 +1005,41 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "ecdsa",
+      "version": "0.16.9",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/signatures/tree/master/ecdsa"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "ed25519",
+      "version": "2.2.3",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/signatures/tree/master/ed25519"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "ed25519-dalek",
+      "version": "2.2.0",
+      "license": "BSD-3-Clause",
+      "repository": "https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "either",
+      "version": "1.18.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rayon-rs/either"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "elliptic-curve",
+      "version": "0.13.8",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/traits/tree/master/elliptic-curve"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "embed-resource",
       "version": "3.0.11",
       "license": "MIT",
@@ -540,6 +1051,27 @@
       "version": "1.2.2",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/nvzqz/embed-plist-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "encoding_rs",
+      "version": "0.8.41",
+      "license": "(Apache-2.0 OR MIT) AND BSD-3-Clause",
+      "repository": "https://github.com/hsivonen/encoding_rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "env_filter",
+      "version": "2.0.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/env_logger"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "env_logger",
+      "version": "0.11.11",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-cli/env_logger"
     },
     {
       "ecosystem": "cargo",
@@ -578,6 +1110,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "ff",
+      "version": "0.13.1",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/zkcrypto/ff"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "filetime",
+      "version": "0.2.29",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/alexcrichton/filetime"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "find-msvc-tools",
       "version": "0.1.12",
       "license": "MIT OR Apache-2.0",
@@ -603,6 +1149,13 @@
       "version": "1.0.7",
       "license": "Apache-2.0 / MIT",
       "repository": "https://github.com/servo/rust-fnv"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "foldhash",
+      "version": "0.1.5",
+      "license": "Zlib",
+      "repository": "https://github.com/orlp/foldhash"
     },
     {
       "ecosystem": "cargo",
@@ -638,6 +1191,13 @@
       "version": "1.2.2",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/servo/rust-url"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "funty",
+      "version": "2.0.0",
+      "license": "MIT",
+      "repository": "https://github.com/myrrlyn/funty"
     },
     {
       "ecosystem": "cargo",
@@ -739,6 +1299,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "ghash",
+      "version": "0.6.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/universal-hashes"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "glob",
       "version": "0.3.4",
       "license": "MIT OR Apache-2.0",
@@ -746,8 +1313,50 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "goblin",
+      "version": "0.9.3",
+      "license": "MIT",
+      "repository": "https://github.com/m4b/goblin"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "group",
+      "version": "0.13.0",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/zkcrypto/group"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "h2",
+      "version": "0.4.19",
+      "license": "MIT",
+      "repository": "https://github.com/hyperium/h2"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "hashbrown",
       "version": "0.12.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/hashbrown"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hashbrown",
+      "version": "0.14.5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/hashbrown"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hashbrown",
+      "version": "0.15.5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/hashbrown"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hashbrown",
+      "version": "0.16.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rust-lang/hashbrown"
     },
@@ -774,6 +1383,27 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "hkdf",
+      "version": "0.12.4",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/KDFs/"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hmac",
+      "version": "0.12.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/MACs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hmac",
+      "version": "0.13.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/MACs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "html5ever",
       "version": "0.38.0",
       "license": "MIT OR Apache-2.0",
@@ -785,6 +1415,62 @@
       "version": "1.5.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/hyperium/http"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "http-body",
+      "version": "1.1.0",
+      "license": "MIT",
+      "repository": "https://github.com/hyperium/http-body"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "http-body-util",
+      "version": "0.1.5",
+      "license": "MIT",
+      "repository": "https://github.com/hyperium/http-body"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "httparse",
+      "version": "1.10.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/seanmonstar/httparse"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hybrid-array",
+      "version": "0.4.15",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hybrid-array"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hyper",
+      "version": "1.11.1",
+      "license": "MIT",
+      "repository": "https://github.com/hyperium/hyper"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hyper-rustls",
+      "version": "0.27.9",
+      "license": "Apache-2.0 OR ISC OR MIT",
+      "repository": "https://github.com/rustls/hyper-rustls"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hyper-tls",
+      "version": "0.6.0",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/hyperium/hyper-tls"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "hyper-util",
+      "version": "0.1.20",
+      "license": "MIT",
+      "repository": "https://github.com/hyperium/hyper-util"
     },
     {
       "ecosystem": "cargo",
@@ -865,6 +1551,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "idevice-srp",
+      "version": "0.6.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/PAKEs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "idna",
       "version": "1.1.0",
       "license": "MIT OR Apache-2.0",
@@ -900,6 +1593,125 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "inout",
+      "version": "0.1.4",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "inout",
+      "version": "0.2.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "ipnet",
+      "version": "2.12.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/krisprice/ipnet"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "is_executable",
+      "version": "1.0.6",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/fitzgen/is_executable"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "is_terminal_polyfill",
+      "version": "1.70.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/polyfill-rs/is_terminal_polyfill"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-apple-bundles",
+      "version": "0.21.2",
+      "license": "MPL-2.0",
+      "repository": "https://github.com/nab138/isideload-apple-platform-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-apple-codesign",
+      "version": "0.29.11",
+      "license": "MPL-2.0",
+      "repository": "https://github.com/nab138/isideload-apple-platform-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-apple-flat-package",
+      "version": "0.20.5",
+      "license": "MPL-2.0",
+      "repository": "https://github.com/nab138/isideload-apple-platform-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-apple-xar",
+      "version": "0.20.5",
+      "license": "MPL-2.0",
+      "repository": "https://github.com/nab138/isideload-apple-platform-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-cpio-archive",
+      "version": "0.10.2",
+      "license": "MPL-2.0",
+      "repository": "https://github.com/nab138/isideload-apple-platform-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-cryptographic-message-syntax",
+      "version": "0.31.1",
+      "license": "MPL-2.0",
+      "repository": "https://github.com/nab138/isideload-cryptography-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-p12-keystore",
+      "version": "0.3.0-rc4",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/ancwrd1/p12-keystore"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-simple-file-manifest",
+      "version": "0.11.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/nab138/isideload-apple-platform-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-vfs",
+      "version": "0.0.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": null
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-walkdir",
+      "version": "2.5.1",
+      "license": "Unlicense/MIT",
+      "repository": "https://github.com/nab138/isideload-apple-platform-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "isideload-x509-certificate",
+      "version": "0.26.1",
+      "license": "MPL-2.0",
+      "repository": "https://github.com/nab138/isideload-cryptography-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "itertools",
+      "version": "0.13.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-itertools/itertools"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "itoa",
       "version": "1.0.18",
       "license": "MIT OR Apache-2.0",
@@ -918,6 +1730,13 @@
       "version": "0.1.0",
       "license": "Unlicense OR MIT",
       "repository": "https://github.com/BurntSushi/jiff"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "jobserver",
+      "version": "0.1.35",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/jobserver-rs"
     },
     {
       "ecosystem": "cargo",
@@ -942,6 +1761,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "konst",
+      "version": "0.3.17",
+      "license": "Zlib",
+      "repository": "https://github.com/rodrimati1992/konst/"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "konst_kernel",
+      "version": "0.3.15",
+      "license": "Zlib",
+      "repository": "https://github.com/rodrimati1992/konst/"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "lazy_static",
       "version": "1.5.0",
       "license": "MIT OR Apache-2.0",
@@ -949,10 +1782,38 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "libbz2-rs-sys",
+      "version": "0.2.5",
+      "license": "bzip2-1.0.6",
+      "repository": "https://github.com/trifectatechfoundation/libbzip2-rs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "libc",
       "version": "0.2.189",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rust-lang/libc"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "liblzma",
+      "version": "0.4.8",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/portable-network-archive/liblzma-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "liblzma-sys",
+      "version": "0.4.8",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/portable-network-archive/liblzma-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "libm",
+      "version": "0.2.16",
+      "license": "MIT",
+      "repository": "https://github.com/rust-lang/compiler-builtins"
     },
     {
       "ecosystem": "cargo",
@@ -984,6 +1845,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "md-5",
+      "version": "0.10.6",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hashes"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "memchr",
       "version": "2.8.3",
       "license": "Unlicense OR MIT",
@@ -995,6 +1863,13 @@
       "version": "0.3.17",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/hyperium/mime"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "minimal-lexical",
+      "version": "0.2.1",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/Alexhuszagh/minimal-lexical"
     },
     {
       "ecosystem": "cargo",
@@ -1026,10 +1901,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "multiversion_no_op",
+      "version": "1.0.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/hsivonen/multiversion_no_op"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "native-tls",
+      "version": "0.2.18",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-native-tls/rust-native-tls"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "new_debug_unreachable",
       "version": "1.0.6",
       "license": "MIT",
       "repository": "https://github.com/mbrubeck/rust-debug-unreachable"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "nom",
+      "version": "7.1.3",
+      "license": "MIT",
+      "repository": "https://github.com/Geal/nom"
     },
     {
       "ecosystem": "cargo",
@@ -1040,10 +1936,38 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "num-bigint",
+      "version": "0.4.8",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-num/num-bigint"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "num-bigint-dig",
+      "version": "0.8.6",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/dignifiedquire/num-bigint"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "num-conv",
       "version": "0.2.2",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/jhpratt/num-conv"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "num-integer",
+      "version": "0.1.47",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-num/num-integer"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "num-iter",
+      "version": "0.1.46",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-num/num-iter"
     },
     {
       "ecosystem": "cargo",
@@ -1117,6 +2041,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "object",
+      "version": "0.36.7",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/gimli-rs/object"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "oid-registry",
+      "version": "0.8.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rusticata/oid-registry.git"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "once_cell",
       "version": "1.21.4",
       "license": "MIT OR Apache-2.0",
@@ -1124,10 +2062,38 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "opaque-debug",
+      "version": "0.3.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "option-ext",
       "version": "0.2.0",
       "license": "MPL-2.0",
       "repository": "https://github.com/soc/option-ext.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "p12",
+      "version": "0.6.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/hjiayz/p12"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "p12-keystore",
+      "version": "0.2.1",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/ancwrd1/p12-keystore"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "p256",
+      "version": "0.13.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/elliptic-curves/tree/master/p256"
     },
     {
       "ecosystem": "cargo",
@@ -1152,10 +2118,45 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "pbkdf2",
+      "version": "0.12.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/password-hashes/tree/master/pbkdf2"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pbkdf2",
+      "version": "0.13.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/password-hashes"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pem",
+      "version": "3.0.6",
+      "license": "MIT",
+      "repository": "https://github.com/jcreekmore/pem-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pem",
+      "version": "4.0.0",
+      "license": "MIT",
+      "repository": "https://github.com/jcreekmore/pem-rs.git"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "pem-rfc7468",
       "version": "0.7.0",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/formats/tree/master/pem-rfc7468"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pem-rfc7468",
+      "version": "1.0.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
     },
     {
       "ecosystem": "cargo",
@@ -1222,6 +2223,76 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "pkcs1",
+      "version": "0.7.5",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs1"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkcs1",
+      "version": "0.8.0-rc.4",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkcs12",
+      "version": "0.1.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs12"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkcs12",
+      "version": "0.2.0-pre.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkcs5",
+      "version": "0.7.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs5"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkcs5",
+      "version": "0.8.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkcs8",
+      "version": "0.10.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats/tree/master/pkcs8"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkcs8",
+      "version": "0.11.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "pkg-config",
+      "version": "0.3.34",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-lang/pkg-config-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "plain",
+      "version": "0.2.3",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/randomites/plain"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "plist",
       "version": "1.10.1",
       "license": "MIT",
@@ -1250,6 +2321,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "poly1305",
+      "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/universal-hashes"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "polyval",
+      "version": "0.7.3",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/universal-hashes"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "potential_utf",
       "version": "0.1.6",
       "license": "Unicode-3.0",
@@ -1264,10 +2349,24 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "ppv-lite86",
+      "version": "0.2.21",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/cryptocorrosion/cryptocorrosion"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "precomputed-hash",
       "version": "0.1.1",
       "license": "MIT",
       "repository": "https://github.com/emilio/precomputed-hash"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "primeorder",
+      "version": "0.13.6",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/elliptic-curves/tree/master/primeorder"
     },
     {
       "ecosystem": "cargo",
@@ -1292,8 +2391,29 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "radium",
+      "version": "0.7.0",
+      "license": "MIT",
+      "repository": "https://github.com/bitvecto-rs/radium"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "rand",
       "version": "0.10.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-random/rand"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rand",
+      "version": "0.8.8",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-random/rand"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rand_chacha",
+      "version": "0.3.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rust-random/rand"
     },
@@ -1306,10 +2426,66 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "rand_core",
+      "version": "0.6.4",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rust-random/rand"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rasn",
+      "version": "0.20.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/librasn/rasn.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rasn-derive",
+      "version": "0.20.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/librasn/rasn.git"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "raw-window-handle",
       "version": "0.6.2",
       "license": "MIT OR Apache-2.0 OR Zlib",
       "repository": "https://github.com/rust-windowing/raw-window-handle"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rayon",
+      "version": "1.12.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rayon-rs/rayon"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rayon-core",
+      "version": "1.13.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rayon-rs/rayon"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rc2",
+      "version": "0.8.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rc2",
+      "version": "0.9.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/block-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rcgen",
+      "version": "0.14.10",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rustls/rcgen"
     },
     {
       "ecosystem": "cargo",
@@ -1348,6 +2524,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "reqwest",
+      "version": "0.13.5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/seanmonstar/reqwest"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "reqwest-middleware",
+      "version": "0.5.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/TrueLayer/reqwest-middleware"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "rfd",
       "version": "0.16.0",
       "license": "MIT",
@@ -1362,6 +2552,34 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "rootcause",
+      "version": "0.12.1",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/rootcause-rs/rootcause"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rootcause-internals",
+      "version": "0.12.1",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/rootcause-rs/rootcause"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rsa",
+      "version": "0.10.0-rc.18",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/RSA"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rsa",
+      "version": "0.9.10",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/RSA"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "rustc-hash",
       "version": "2.1.3",
       "license": "Apache-2.0 OR MIT",
@@ -1373,6 +2591,13 @@
       "version": "0.4.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/djc/rustc-version-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rusticata-macros",
+      "version": "4.1.0",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/rusticata/rusticata-macros.git"
     },
     {
       "ecosystem": "cargo",
@@ -1397,10 +2622,52 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "rustls-platform-verifier",
+      "version": "0.7.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rustls/rustls-platform-verifier"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "rustls-webpki",
       "version": "0.103.15",
       "license": "ISC",
       "repository": "https://github.com/rustls/webpki"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rustversion",
+      "version": "1.0.23",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/rustversion"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "ruzstd",
+      "version": "0.7.3",
+      "license": "MIT",
+      "repository": "https://github.com/KillingSpark/zstd-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "ryu",
+      "version": "1.0.23",
+      "license": "Apache-2.0 OR BSL-1.0",
+      "repository": "https://github.com/dtolnay/ryu"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "salsa20",
+      "version": "0.10.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/stream-ciphers"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "salsa20",
+      "version": "0.11.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/stream-ciphers"
     },
     {
       "ecosystem": "cargo",
@@ -1446,6 +2713,62 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "scroll",
+      "version": "0.12.0",
+      "license": "MIT",
+      "repository": "https://github.com/m4b/scroll"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "scroll_derive",
+      "version": "0.12.1",
+      "license": "MIT",
+      "repository": "https://github.com/m4b/scroll"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "scrypt",
+      "version": "0.11.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/password-hashes/tree/master/scrypt"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "scrypt",
+      "version": "0.12.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/password-hashes"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "sec1",
+      "version": "0.7.3",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats/tree/master/sec1"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "security-framework",
+      "version": "2.11.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/kornelski/rust-security-framework"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "security-framework",
+      "version": "3.7.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/kornelski/rust-security-framework"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "security-framework-sys",
+      "version": "2.17.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/kornelski/rust-security-framework"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "selectors",
       "version": "0.36.1",
       "license": "MPL-2.0",
@@ -1471,6 +2794,13 @@
       "version": "0.1.9",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/dtolnay/serde-untagged"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "serde-xml-rs",
+      "version": "0.6.0",
+      "license": "MIT",
+      "repository": "https://github.com/RReverser/serde-xml-rs"
     },
     {
       "ecosystem": "cargo",
@@ -1530,6 +2860,20 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "serde_yaml",
+      "version": "0.9.34+deprecated",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/dtolnay/serde-yaml"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "serdect",
+      "version": "0.4.3",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "serialize-to-javascript",
       "version": "0.1.2",
       "license": "MIT OR Apache-2.0",
@@ -1551,8 +2895,29 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "sha1",
+      "version": "0.10.7",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hashes"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "sha1",
+      "version": "0.11.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hashes"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "sha2",
       "version": "0.10.9",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/hashes"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "sha2",
+      "version": "0.11.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/RustCrypto/hashes"
     },
@@ -1562,6 +2927,13 @@
       "version": "0.1.7",
       "license": "MIT",
       "repository": "https://github.com/hawkw/sharded-slab"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "shell-words",
+      "version": "1.1.1",
+      "license": "MIT/Apache-2.0",
+      "repository": "https://github.com/tmiasko/shell-words"
     },
     {
       "ecosystem": "cargo",
@@ -1579,10 +2951,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "signature",
+      "version": "2.2.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/traits/tree/master/signature"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "signature",
+      "version": "3.0.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "simd-adler32",
       "version": "0.3.10",
       "license": "MIT",
       "repository": "https://github.com/mcountryman/simd-adler32"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "simdutf8",
+      "version": "0.1.5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rusticstuff/simdutf8"
     },
     {
       "ecosystem": "cargo",
@@ -1607,10 +3000,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "snafu",
+      "version": "0.8.9",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/shepmaster/snafu"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "snafu-derive",
+      "version": "0.8.9",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/shepmaster/snafu"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "socket2",
       "version": "0.6.5",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/rust-lang/socket2"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "spin",
+      "version": "0.9.9",
+      "license": "MIT",
+      "repository": "https://github.com/mvdnes/spin-rs.git"
     },
     {
       "ecosystem": "cargo",
@@ -1621,10 +3035,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "spki",
+      "version": "0.8.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "srp",
+      "version": "0.7.0-rc.3",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/PAKEs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "stable_deref_trait",
       "version": "1.2.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/storyyeller/stable_deref_trait"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "static_assertions",
+      "version": "1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/nvzqz/static-assertions-rs"
     },
     {
       "ecosystem": "cargo",
@@ -1677,6 +3112,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "sync_wrapper",
+      "version": "1.0.2",
+      "license": "Apache-2.0",
+      "repository": "https://github.com/Actyx/sync_wrapper"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "synstructure",
       "version": "0.13.2",
       "license": "MIT",
@@ -1684,10 +3126,31 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "system-configuration",
+      "version": "0.7.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/mullvad/system-configuration-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "system-configuration-sys",
+      "version": "0.6.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/mullvad/system-configuration-rs"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "tao",
       "version": "0.35.3",
       "license": "Apache-2.0",
       "repository": "https://github.com/tauri-apps/tao"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "tap",
+      "version": "1.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/myrrlyn/tap"
     },
     {
       "ecosystem": "cargo",
@@ -1873,6 +3336,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "tokio-native-tls",
+      "version": "0.3.1",
+      "license": "MIT",
+      "repository": "https://github.com/tokio-rs/tls"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "tokio-rustls",
       "version": "0.26.5",
       "license": "MIT OR Apache-2.0",
@@ -1929,6 +3399,34 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "tower",
+      "version": "0.5.3",
+      "license": "MIT",
+      "repository": "https://github.com/tower-rs/tower"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "tower-http",
+      "version": "0.6.11",
+      "license": "MIT",
+      "repository": "https://github.com/tower-rs/tower-http"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "tower-layer",
+      "version": "0.3.3",
+      "license": "MIT",
+      "repository": "https://github.com/tower-rs/tower"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "tower-service",
+      "version": "0.3.3",
+      "license": "MIT",
+      "repository": "https://github.com/tower-rs/tower"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "tracing",
       "version": "0.1.44",
       "license": "MIT",
@@ -1978,6 +3476,27 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "triomphe",
+      "version": "0.1.16",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Manishearth/triomphe"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "try-lock",
+      "version": "0.2.5",
+      "license": "MIT",
+      "repository": "https://github.com/seanmonstar/try-lock"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "twox-hash",
+      "version": "1.6.3",
+      "license": "MIT",
+      "repository": "https://github.com/shepmaster/twox-hash"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "typed-path",
       "version": "0.12.3",
       "license": "MIT OR Apache-2.0",
@@ -1996,6 +3515,20 @@
       "version": "1.20.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/paholg/typenum"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "typewit",
+      "version": "1.15.2",
+      "license": "Zlib",
+      "repository": "https://github.com/rodrimati1992/typewit/"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "typewit_proc_macros",
+      "version": "1.8.1",
+      "license": "Zlib",
+      "repository": "https://github.com/rodrimati1992/typewit/"
     },
     {
       "ecosystem": "cargo",
@@ -2048,6 +3581,34 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "unicode-width",
+      "version": "0.2.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/unicode-rs/unicode-width"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "universal-hash",
+      "version": "0.5.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "universal-hash",
+      "version": "0.6.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/RustCrypto/traits"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "unsafe-libyaml",
+      "version": "0.2.11",
+      "license": "MIT",
+      "repository": "https://github.com/dtolnay/unsafe-libyaml"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "untrusted",
       "version": "0.9.0",
       "license": "ISC",
@@ -2062,6 +3623,13 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "urlencoding",
+      "version": "2.1.3",
+      "license": "MIT",
+      "repository": "https://github.com/kornelski/rust_urlencoding"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "urlpattern",
       "version": "0.3.0",
       "license": "MIT",
@@ -2073,6 +3641,13 @@
       "version": "1.0.4",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/hsivonen/utf8_iter"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "utf8parse",
+      "version": "0.2.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/alacritty/vte"
     },
     {
       "ecosystem": "cargo",
@@ -2094,6 +3669,20 @@
       "version": "2.5.0",
       "license": "Unlicense/MIT",
       "repository": "https://github.com/BurntSushi/walkdir"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "want",
+      "version": "0.3.1",
+      "license": "MIT",
+      "repository": "https://github.com/seanmonstar/want"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "web-time",
+      "version": "1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/daxpedda/web-time"
     },
     {
       "ecosystem": "cargo",
@@ -2139,10 +3728,59 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "wyz",
+      "version": "0.5.1",
+      "license": "MIT",
+      "repository": "https://github.com/myrrlyn/wyz"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "x25519-dalek",
+      "version": "2.0.1",
+      "license": "BSD-3-Clause",
+      "repository": "https://github.com/dalek-cryptography/curve25519-dalek/tree/main/x25519-dalek"
+    },
+    {
+      "ecosystem": "cargo",
       "name": "x509-cert",
       "version": "0.2.5",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/formats/tree/master/x509-cert"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "x509-cert",
+      "version": "0.3.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/formats"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "x509-parser",
+      "version": "0.18.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rusticata/x509-parser.git"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "xml-rs",
+      "version": "0.8.29",
+      "license": "MIT",
+      "repository": "https://github.com/kornelski/xml-rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "yasna",
+      "version": "0.5.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/qnighy/yasna.rs"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "yasna",
+      "version": "0.6.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/qnighy/yasna.rs"
     },
     {
       "ecosystem": "cargo",
@@ -2157,6 +3795,13 @@
       "version": "0.8.2",
       "license": "Unicode-3.0",
       "repository": "https://github.com/unicode-org/icu4x"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "zerocopy",
+      "version": "0.8.57",
+      "license": "BSD-2-Clause OR Apache-2.0 OR MIT",
+      "repository": "https://github.com/google/zerocopy"
     },
     {
       "ecosystem": "cargo",
@@ -2176,6 +3821,13 @@
       "ecosystem": "cargo",
       "name": "zeroize",
       "version": "1.9.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/RustCrypto/utils"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "zeroize_derive",
+      "version": "1.5.0",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/RustCrypto/utils"
     },
@@ -2206,6 +3858,13 @@
       "version": "8.6.0",
       "license": "MIT",
       "repository": "https://github.com/zip-rs/zip2"
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "zip_structs",
+      "version": "0.2.1",
+      "license": "MIT",
+      "repository": "https://github.com/tats-u/rust-zip-structs/"
     },
     {
       "ecosystem": "cargo",

@@ -1,4 +1,8 @@
 [workspace]
 members = ["crates/orbiter-core", "src-tauri"]
+exclude = ["vendor/isideload"]
 default-members = ["crates/orbiter-core"]
 resolver = "2"
+
+[patch.crates-io]
+isideload = { path = "vendor/isideload" }

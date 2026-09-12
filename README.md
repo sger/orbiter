@@ -1,6 +1,6 @@
 # Orbiter
 
-A company IPA inspection workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript. **Phase 1 inspection and a Phase 2 installation-transport preview are implemented.** Re-signing, Apple-account authentication, and automatic refresh remain unavailable. Installation of an unchanged, already-signed IPA is available only after review and explicit acknowledgement. Physical installation validation is still pending. The desktop polls the local Apple device service every five seconds and verifies existing pairing sessions without creating or resetting pairing records.
+A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript. Inspection, device discovery, reviewed existing-signature installation, and a **Phase 3 Apple account sign-in preview** are implemented. The user confirmed installation and app operation on an already provisioned iPhone. Re-signing, provisioning changes, and automatic refresh remain unavailable. Live Apple sign-in now works in the desktop app: a personal account signed in and its team was listed and selected. Federated company accounts are not supported. Windows remains unverified.
 
 ## Run
 
@@ -45,7 +45,7 @@ For Windows builds, use a Windows host with MSVC C++ build tools, Rust's MSVC to
 - PNG icons when a standard PNG is declared in bundle metadata; fallback for asset catalogs and Apple CgBI PNGs.
 - Contextual compatibility findings, detailed per-bundle inspection, stage progress, cooperative cancellation, and actionable errors.
 
-The original IPA is never written, extracted, or executed. Inspection makes no network requests. No Apple-account passwords, tokens, or signing keys are requested or stored. Discovery reads existing pairing records from the local Apple device service into memory to verify a session; records are never printed, exported, or persisted by Orbiter. Desktop logs contain operation/stage and success fields only, not filenames, report payloads, or device identifiers.
+The original IPA is never written, extracted, or executed. Inspection makes no network requests. Account credentials are requested only in the explicit desktop sign-in flow described below; passwords and account sessions are not persisted. Discovery reads existing pairing records from the local Apple device service into memory to verify a session; records are never printed, exported, or persisted by Orbiter. Desktop logs contain operation/stage and success fields only, not filenames, report payloads, or device identifiers.
 
 See [architecture and limits](docs/architecture.md), [dependency decisions and Apple requirements](docs/decisions.md), and the [validation matrix and next milestones](docs/validation.md).
 
@@ -81,4 +81,17 @@ The desktop keeps only the latest job's stage and redacted status in `last-insta
 
 ### Local signing identity preview (macOS)
 
-In **Destination & identity**, click **Check Keychain** to list valid iOS signing identities from the current macOS Keychain search list. This is a read-only inventory; it does not export private keys, sign an IPA, contact Apple, or establish profile compatibility. Certificate names are labels, not proof of team authorization. A matching profile for each app/extension and a reviewed signing plan are still required before re-signing can be enabled. Apple account sign-in remains unavailable. Windows identity discovery is not implemented.
+In **Destination & identity**, click **Check Keychain** to list valid iOS signing identities from the current macOS Keychain search list. This is a read-only inventory; it does not export private keys, sign an IPA, contact Apple, or establish profile compatibility. Certificate names are labels, not proof of team authorization. A matching profile for each app/extension and a reviewed signing plan are still required before re-signing can be enabled. Apple account sign-in is available separately as an unvalidated live-account preview. Windows identity discovery is not implemented.
+
+
+## Apple account sign-in preview — local macOS support
+
+1. Run `npm run tauri dev`. A connected iPhone or IPA is not required.
+2. Under **Apple account**, click **Check local support**. The check uses Apple frameworks installed on your Mac and returns status only.
+3. Read **Local authentication & Apple communication**, confirm direct Apple authentication, and enter your test account/password in the application only.
+4. Choose **Sign in to Apple**, complete trusted-device/SMS verification, and select the intended signing team explicitly.
+5. **Refresh teams** checks developer access again. **Sign out** clears the local session. Sessions expire on access after 30 minutes or when the process exits.
+
+No remote Anisette provider or proxy fallback is available. Local support failure stops sign-in. Passwords/codes are never persisted; account sessions remain in memory. macOS manages its own authentication support data. Windows local authentication is not yet implemented. Direct Apple HTTPS access is required, including on corporate networks.
+
+Local generation passed on this Mac; live Apple sign-in still needs a designated test-account acceptance run. No provisioning/certificate/device mutation or re-signing is performed by account sign-in. **Sign & Install** remains unavailable. See [local authentication and data handling](docs/local-authentication.md), including cleanup of any obsolete state from the retired remote preview.

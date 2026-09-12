@@ -228,8 +228,56 @@ fn installation_status(
     }
     job::recover(&journal(&app)?)
 }
+#[tauri::command]
+async fn local_auth_support() -> orbiter_core::local_anisette::Status {
+    orbiter_core::local_anisette::check().await
+}
+#[tauri::command]
+fn account_status(
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::accounts::View, String> {
+    state.status()
+}
+#[tauri::command]
+async fn account_sign_in(
+    email: String,
+    password: String,
+    consent: bool,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::accounts::View, String> {
+    state.start(email, password, consent)
+}
+#[tauri::command]
+fn account_answer(
+    challenge_id: String,
+    answer: orbiter_core::accounts::Answer,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::accounts::View, String> {
+    state.answer(challenge_id, answer)
+}
+#[tauri::command]
+fn account_sign_out(
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::accounts::View, String> {
+    state.sign_out()
+}
+#[tauri::command]
+fn account_select_team(
+    id: String,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::accounts::View, String> {
+    state.select_team(id)
+}
+#[tauri::command]
+async fn account_refresh_teams(
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::accounts::View, String> {
+    state.refresh_teams().await
+}
 fn main() {
     use tracing_subscriber::prelude::*;
+    // Never format upstream authentication reports: they may contain credentials.
+    orbiter_core::accounts::initialize();
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
@@ -243,9 +291,17 @@ fn main() {
         .init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(orbiter_core::accounts::Accounts::default())
         .manage(Inspection::default())
         .manage(Installations::default())
         .invoke_handler(tauri::generate_handler![
+            local_auth_support,
+            account_status,
+            account_sign_in,
+            account_answer,
+            account_sign_out,
+            account_select_team,
+            account_refresh_teams,
             inspect_ipa,
             cancel_inspection,
             discover_devices,

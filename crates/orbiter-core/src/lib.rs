@@ -1,6 +1,9 @@
+pub mod accounts;
 pub mod devices;
 pub mod installation;
+pub mod local_anisette;
 mod macho;
+pub mod plan;
 mod profile;
 pub mod signing;
 
@@ -387,7 +390,7 @@ pub fn inspect(
     }
     progress("Assessing compatibility");
     check(cancel)?;
-    let mut findings=vec![Finding {status:"not_verified",title:"Signing identity required".into(),detail:"No signing team has been selected. Device eligibility, installation, and capability preservation cannot be established from this IPA alone.".into(),bundle:None}];
+    let mut findings=vec![Finding {status:"not_verified",title:"Signing identity required".into(),detail:"This inspection has not been matched to a signing certificate and provisioning profiles. Device eligibility and capability preservation cannot be established from this IPA alone.".into(),bundle:None}];
     for b in &bundles {
         let mut add = |status, title: &str, detail: &str| {
             findings.push(Finding {

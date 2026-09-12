@@ -43,7 +43,7 @@ Future signing-plan validation must use explicit target profiles/certificates, i
 
 ## Subsequent boundaries
 
-Add device transport through evaluated `idevice` APIs before authentication. Add an authentication/team service with native credential storage and no plaintext fallback once Anisette data handling is settled. Certificate/provisioning operations, bundle transformation/signing, and installation jobs belong in the Rust core as their behavior becomes concrete. SQLite can persist refresh/job metadata once resumable jobs exist. Signing outputs must use separate paths and preserve the original IPA; never automatically revoke certificates.
+Add device transport through evaluated `idevice` APIs before authentication. The authentication/team preview now uses in-memory sessions and the local macOS Anisette flow described below. Certificate/provisioning operations, bundle transformation/signing, and installation jobs belong in the Rust core as their behavior becomes concrete. SQLite can persist refresh/job metadata once resumable jobs exist. Signing outputs must use separate paths and preserve the original IPA; never automatically revoke certificates.
 
 ## Device discovery (Phase 2, first increment)
 
@@ -51,7 +51,7 @@ Add device transport through evaluated `idevice` APIs before authentication. Add
 
 Discovery has a three-second daemon deadline and three seconds per device, capped at sixteen transports (maximum roughly 51 seconds). The UI skips overlapping polls, refreshes every five seconds when idle, and clears selections that disappear. Stale sessions are not reused. A timeout/disconnection produces an unavailable state. Missing/unreadable pairing records are reported as unverified, rather than claiming that trust was rejected. A successful TLS session establishes pairing; lock state and Developer Mode remain unverified unless the device explicitly returns a locked error. `PasswordProtected` is not used to infer lock state.
 
-The desktop tracing filter admits only Orbiter's structured events, excluding dependency logs that could contain pairing or protocol payloads. The standalone discovery CLI installs no tracing subscriber. Pairing records remain managed by the OS Apple service; Orbiter neither stores nor mutates them. Windows uses loopback only and requires its own hardware validation. Installation transport is implemented as the preview described below; its physical end-to-end validation is pending.
+The desktop tracing filter admits only Orbiter's structured events, excluding dependency logs that could contain pairing or protocol payloads. The standalone discovery CLI installs no tracing subscriber. Pairing records remain managed by the OS Apple service; Orbiter neither stores nor mutates them. Windows uses loopback only and requires its own hardware validation. Installation transport is implemented as the preview described below; its happy path was confirmed by the user; interruption/recovery validation is pending.
 
 ## Existing-signature installation
 
@@ -68,3 +68,27 @@ Individual AFC calls have a 15-second timeout; device connection/lookup have ten
 ## Local signing identity inventory
 
 `signing::discover` runs the fixed macOS `security find-identity -v -p codesigning` command on explicit UI request, with null stdin/stderr, bounded stdout, a deadline, and child termination on drop. It filters certificate labels to Apple Development/Distribution and legacy iPhone equivalents. It returns public certificate fingerprints and labels only, without inferring team IDs. It neither exports nor exercises private keys. Identities are held in frontend memory and cleared before refresh; they are not logged or persisted. The separate Tauri command performs no signing or account mutation. Windows reports this adapter unavailable. Actual signing must revalidate identity and certificate/profile compatibility rather than trusting this inventory.
+
+
+## Account authentication and team selection
+
+`accounts::Accounts` owns one active attempt or in-memory session per process. Consent/input validation precedes work. Login has a ten-minute deadline; every 2FA prompt has an opaque one-use ID and masked phone labels. Sign-out invalidates the generation and aborts pending login. Late results cannot restore a signed-out account. Team selection is explicit and must belong to the current session. Refresh is serialized and limited to 60 seconds; failure clears account/team state. The local 30-minute expiry is checked on status and account operations. No credentials or tokens are persisted by Orbiter.
+
+The explicit LocalProvider resolves macOS authentication material before the account builder contacts Apple. A bounded Objective-C bridge links only Foundation and dynamically loads installed Apple frameworks. No authentication-support server or remote-provider fallback exists. The vendored upstream adapter enforces direct Apple HTTPS destinations, disables redirects/proxies/debug TLS, and exposes a constructor for local data. See [local-authentication.md](local-authentication.md) for API, privacy, timeout, licensing, and platform limits. Windows authentication returns unavailable. Existing-signature installation and Keychain identity inventory remain independent of account sign-in.
+
+
+## Re-signing plan
+
+`plan.rs` computes what re-signing an inspected IPA under another team would change. It is pure local computation: it signs nothing, writes nothing, and contacts no Apple service. Identifiers are rewritten deterministically from the target team ID, so the same team always produces the same identifiers and a weekly re-sign replaces the tester's app instead of installing a second copy. Nested bundles keep their relationship to the main app's new identifier; frameworks are rewritten but consume no App ID.
+
+Each team-scoped entitlement becomes a decision carrying its action, its reason, and the runtime consequence for the tester: push, associated domains, Apple Pay merchant identifiers, and app groups are proposed for removal under a Personal Team, keychain groups and application/team identifiers are rewritten, and the development entitlement is set. Every such decision is marked as needing portal confirmation, because Apple's published capability table does not cleanly separate Personal Team support; the portal's answer must override the proposal once that work exists. Unrecognised `com.apple.developer.*` keys are proposed for removal rather than silently kept.
+
+Encrypted executables, a missing main identifier, an unselected team, and exceeding a Personal Team's ten App IDs per seven days are blockers. A Watch app is never removed silently: it is raised as an explicit decision, since Watch provisioning under a Personal Team is unverified. Consequences are collected for acknowledgement, including the seven-day expiry that makes a weekly re-sign necessary.
+
+The plan is read-only output today, with no signer behind it:
+
+```sh
+cargo run --locked -p orbiter-core --bin orbiter-sign-plan -- /path/to/company.ipa TEAMID --personal
+```
+
+It exits non-zero when the plan has blockers. Actual signing must revalidate every decision against the real certificate, App ID, and profile rather than trusting this plan.
