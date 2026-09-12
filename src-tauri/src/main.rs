@@ -277,6 +277,13 @@ async fn account_register_device(
     state.register_device(device_id, acknowledged).await
 }
 #[tauri::command]
+async fn account_request_certificate(
+    acknowledged: bool,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::certificates::Outcome, String> {
+    state.request_certificate(acknowledged).await
+}
+#[tauri::command]
 async fn account_refresh_teams(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
@@ -311,6 +318,7 @@ fn main() {
             account_select_team,
             account_refresh_teams,
             account_register_device,
+            account_request_certificate,
             inspect_ipa,
             cancel_inspection,
             discover_devices,

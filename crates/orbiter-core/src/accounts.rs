@@ -111,6 +111,8 @@ pub enum Answer {
 }
 struct Session {
     developer: DeveloperSession,
+    /// Signing key and certificate for this session. Memory only: never written to disk.
+    identity: Option<crate::certificates::Identity>,
 }
 /// A sign-in failure plus any Apple-imposed wait Orbiter must honour before retrying.
 struct Failure {
@@ -404,7 +406,10 @@ impl Accounts {
             }
             inner.task = None;
             inner.response = None;
-            inner.session = Some(Session { developer });
+            inner.session = Some(Session {
+                developer,
+                identity: None,
+            });
             inner.expires_at = Some(Instant::now() + SESSION_LIFETIME);
             inner.view = View {
                 stage: Stage::SignedIn,
@@ -497,6 +502,59 @@ impl Accounts {
         }
         outcome
     }
+    /// Reuse or obtain this session's development certificate for the selected team.
+    pub async fn request_certificate(
+        &self,
+        acknowledged: bool,
+    ) -> Result<crate::certificates::Outcome, String> {
+        let _gate = self
+            .1
+            .try_lock()
+            .map_err(|_| "Another account operation is already running.")?;
+        let (generation, mut developer, team, existing) = {
+            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            inner.expire();
+            let signed_in = inner.session.is_some();
+            let selected = inner.view.selected_team.clone();
+            if let Some(refusal) =
+                crate::certificates::refusal(acknowledged, selected.is_some(), signed_in)
+            {
+                return Err(refusal.into());
+            }
+            let team = selected.ok_or("Select the signing team the certificate belongs to.")?;
+            let session = inner
+                .session
+                .as_ref()
+                .ok_or("Sign in before requesting a signing certificate.")?;
+            (
+                inner.generation.clone(),
+                session.developer.clone(),
+                team,
+                session
+                    .identity
+                    .as_ref()
+                    .map(|identity| identity.key.clone()),
+            )
+        };
+        // Key generation is CPU-bound: keep it off the async runtime.
+        let key = match existing {
+            Some(key) => key,
+            None => tokio::task::spawn_blocking(crate::certificates::generate_key)
+                .await
+                .map_err(|_| "Signing key generation stopped.".to_string())??,
+        };
+        let machine = hostname();
+        let (identity, outcome) =
+            crate::certificates::ensure(&mut developer, &team, &machine, &key).await?;
+        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        if inner.generation != generation {
+            return Err("The account session changed while the certificate was issued. Check developer.apple.com before requesting another.".into());
+        }
+        if let Some(session) = inner.session.as_mut() {
+            session.identity = Some(identity);
+        }
+        Ok(outcome)
+    }
     pub async fn refresh_teams(&self) -> Result<View, String> {
         let _gate = self
             .1
@@ -526,6 +584,24 @@ impl Accounts {
             _ => inner.clear("Developer session could not be refreshed. Sign in again; your team selection was cleared."),
         }
         Ok(inner.view.clone())
+    }
+}
+/// Machine label Apple shows beside the certificate. The computer name, bounded and stripped of
+/// anything that is not plain text, with a neutral fallback.
+fn hostname() -> String {
+    let raw = std::env::var("HOST")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default();
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+        .take(60)
+        .collect();
+    let cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() {
+        "Orbiter Mac".into()
+    } else {
+        cleaned
     }
 }
 struct WorkerGuard(Accounts, String);
@@ -763,6 +839,39 @@ mod tests {
         // Hostile or oversized labels are dropped rather than displayed.
         let hostile = classify(&team("Individual", vec!["bad\nname"]));
         assert_eq!(hostile, (Some(true), None));
+    }
+    #[test]
+    fn the_machine_label_is_plain_text_and_never_empty() {
+        // Apple shows this beside the certificate; it must not carry control characters or grow
+        // without bound, and it must survive an unset environment.
+        unsafe { std::env::set_var("HOSTNAME", "Spiros\u{7} Mac\n") };
+        assert_eq!(hostname(), "Spiros Mac");
+        unsafe { std::env::set_var("HOSTNAME", "!!!") };
+        assert_eq!(hostname(), "Orbiter Mac");
+        unsafe { std::env::set_var("HOSTNAME", "x".repeat(200)) };
+        assert_eq!(hostname().len(), 60);
+    }
+    #[tokio::test]
+    async fn a_certificate_request_refuses_while_no_live_session_exists() {
+        let manager = Accounts::default();
+        assert!(
+            manager
+                .request_certificate(true)
+                .await
+                .is_err_and(|m| m.contains("Sign in"))
+        );
+        {
+            let mut inner = manager.0.lock().unwrap();
+            inner.view.stage = Stage::SignedIn;
+            inner.view.selected_team = Some("T8B3X5UL5W".into());
+        }
+        // Again: a view claiming to be signed in is not a session.
+        assert!(
+            manager
+                .request_certificate(true)
+                .await
+                .is_err_and(|m| m.contains("Sign in"))
+        );
     }
     #[tokio::test]
     async fn device_registration_refuses_while_no_live_session_exists() {

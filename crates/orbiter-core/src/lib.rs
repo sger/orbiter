@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod certificates;
 pub mod devices;
 pub mod installation;
 pub mod local_anisette;

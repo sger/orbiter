@@ -29,6 +29,12 @@ const initial: AccountView = {
   challenge: null,
   message: "",
 };
+type Certificate = {
+  reused: boolean;
+  expires: string | null;
+  active: number;
+  message: string;
+};
 type Registration = {
   registration: "already_registered" | "registered";
   team_devices: number;
@@ -59,6 +65,10 @@ export function Accounts({
   const [registering, setRegistering] = useState(false);
   const [registration, setRegistration] = useState<Registration | null>(null);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  const [certAck, setCertAck] = useState(false);
+  const [certBusy, setCertBusy] = useState(false);
+  const [certificate, setCertificate] = useState<Certificate | null>(null);
+  const [certError, setCertError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const mounted = useRef(false);
   const desktop = isTauri();
@@ -103,6 +113,9 @@ export function Accounts({
     setRegistration(null);
     setRegisterError(null);
     setRegisterAck(false);
+    setCertificate(null);
+    setCertError(null);
+    setCertAck(false);
   }, [deviceId, view.selected_team]);
   async function command(name: string, args?: Record<string, unknown>) {
     if (inFlight.current) return;
@@ -475,6 +488,67 @@ export function Accounts({
                 <p className="hint">
                   Devices on this team after the check:{" "}
                   {registration.team_devices}.
+                </p>
+              )}
+              <strong>Signing certificate</strong>
+              <p className="hint">
+                The signing key is generated on this Mac and never leaves it;
+                only a certificate request goes to Apple. It is not saved, so
+                restarting Orbiter needs a new certificate.
+              </p>
+              <label className="auth-consent">
+                <input
+                  type="checkbox"
+                  checked={certAck}
+                  disabled={disabled || certBusy}
+                  onChange={(e) => setCertAck(e.target.checked)}
+                />
+                I understand this uses one of the team's few active certificate
+                slots, and that Orbiter will never revoke a certificate, because
+                revoking invalidates every app already signed with it.
+              </label>
+              <button
+                className="secondary"
+                disabled={disabled || certBusy || !certAck}
+                onClick={() => {
+                  setCertBusy(true);
+                  setCertError(null);
+                  setCertificate(null);
+                  invoke<Certificate>("account_request_certificate", {
+                    acknowledged: certAck,
+                  })
+                    .then((result) => {
+                      if (mounted.current) setCertificate(result);
+                    })
+                    .catch(() => {
+                      if (mounted.current)
+                        setCertError(
+                          "The certificate request did not complete. Check developer.apple.com before requesting another.",
+                        );
+                    })
+                    .finally(() => {
+                      if (mounted.current) setCertBusy(false);
+                    });
+                }}
+              >
+                {certBusy
+                  ? "Requesting certificate…"
+                  : "Get signing certificate"}
+              </button>
+              <p className="hint" role="status">
+                {certError ??
+                  certificate?.message ??
+                  (certAck
+                    ? "Ready to request. Generating the key takes a moment."
+                    : "Acknowledge the certificate limit to enable the request.")}
+              </p>
+              {certificate && (
+                <p className="hint">
+                  Active development certificates on this team:{" "}
+                  {certificate.active}
+                  {certificate.expires
+                    ? `. This one expires ${certificate.expires}.`
+                    : "."}
                 </p>
               )}
             </div>

@@ -101,3 +101,12 @@ It exits non-zero when the plan has blockers. Actual signing must revalidate eve
 The device identifier is read through the existing verified-iPhone path in the installation module, which requires USB, a readable pairing record, a verified session, and a real iPhone. It is handed straight to Apple with the device name, and never enters the account view, the report, the journal, or any log; the returned outcome carries only whether the device was already registered or was registered now, and how many devices the team then has. A team membership whose kind Apple did not establish is treated as the stricter free allowance rather than the permissive one.
 
 Registration lists the team's devices first, so an already-registered iPhone writes nothing. A timeout during the write says explicitly that the request may still have been applied and to check developer.apple.com, because a portal write has no rollback. The UI offers registration only once a team is selected, clears its result when the device or team changes, and requires the acknowledgement checkbox each time.
+
+
+## Development certificate
+
+`certificates::ensure` obtains the certificate the signer will use. The RSA key is generated on this Mac and never leaves it: only a PKCS#10 request goes to Apple, and its subject carries no account, device, or company information — a test asserts that and that the key is 2048-bit. Key generation is CPU-bound and runs off the async runtime.
+
+The team's certificates are listed first and matched against the key they certify, not their name, so a rerun with the same session reuses the existing certificate and writes nothing. Reaching Apple's active-certificate maximum is reported with the count and left to the person: Orbiter never revokes, because revoking invalidates every app already signed with that certificate, including apps Orbiter did not produce. A timeout during the request says the certificate may still have been issued and to check developer.apple.com, since there is no rollback.
+
+The key and certificate live in the signed-in session in memory and are not persisted, so restarting Orbiter needs a new certificate. That is a real limitation for the weekly refresh cycle, given the small number of active certificates a team allows, and persistence is deliberately left as its own decision rather than quietly writing a private key somewhere. Apple labels the certificate with the computer name, bounded to plain text with a neutral fallback.

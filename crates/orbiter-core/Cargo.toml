@@ -20,6 +20,12 @@ tempfile = "=3.27.0"
 
 isideload = { version = "=0.3.17", default-features = false, features = ["install"] }
 zeroize = "=1.9.0"
+# Development-certificate request: an RSA key generated on this Mac and a PKCS#10 CSR. Versions
+# match the ones the vendored authentication adapter already resolves, so no second copy enters
+# the graph.
+rsa = "=0.10.0-rc.18"
+rand = "=0.10.2"
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem"] }
 
 async-trait = "=0.1.92"
 rootcause = "=0.12.1"

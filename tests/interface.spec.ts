@@ -167,6 +167,17 @@ async function nativeMock(
               message: "This iPhone is now registered on the selected team.",
             };
           }
+          if (cmd === "account_request_certificate") {
+            (window as any).__certificateRequested = {
+              acknowledged: args.acknowledged,
+            };
+            return {
+              reused: false,
+              expires: "2026-09-19T00:00:00Z",
+              active: 1,
+              message: "A development certificate was issued.",
+            };
+          }
           if (cmd === "account_refresh_teams")
             return ((window as any).__accountView = {
               stage: "signed_out",
@@ -589,10 +600,29 @@ test("registering an iPhone needs a device, a team, and an explicit acknowledgem
   expect(
     await page.evaluate(() => (window as any).__registerRequested),
   ).toEqual({ deviceId: 1, acknowledged: true });
+  // The certificate is a separate acknowledgement: registering does not imply it.
+  const certificate = page.getByRole("button", {
+    name: "Get signing certificate",
+  });
+  await expect(certificate).toBeDisabled();
+  await page
+    .getByLabel("I understand this uses one of the team's", { exact: false })
+    .check();
+  await certificate.click();
+  await expect(
+    page.getByText("development certificate was issued", { exact: false }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as any).__certificateRequested),
+  ).toEqual({ acknowledged: true });
+
   // Changing the team invalidates the result rather than carrying it across.
   await page.getByLabel("Signing team").selectOption("TEAM1");
   await expect(
     page.getByText("now registered on the selected team", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("development certificate was issued", { exact: false }),
   ).toHaveCount(0);
 });
 
