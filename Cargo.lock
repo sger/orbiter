@@ -4002,6 +4002,8 @@ dependencies = [
  "der 0.7.10",
  "idevice",
  "isideload",
+ "isideload-apple-codesign",
+ "isideload-x509-certificate",
  "plist",
  "rand 0.10.2",
  "rcgen",

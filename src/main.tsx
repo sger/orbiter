@@ -21,7 +21,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import type { Report, Bundle } from "./types";
+import type { Report, Bundle, Signed } from "./types";
 import "./styles.css";
 import { SigningIdentities } from "./SigningIdentities";
 import { Devices } from "./Devices";
@@ -134,6 +134,20 @@ function App() {
     [drag, setDrag] = useState(false),
     [cancelled, setCancelled] = useState(false);
   const [ipaPath, setIpaPath] = useState<string | null>(null);
+  const [watch, setWatch] = useState<"undecided" | "remove" | "sign">(
+    "undecided",
+  );
+  const [signed, setSigned] = useState<Signed | null>(null);
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
+  // Stable: Accounts clears the preparation whenever this identity changes, so an inline closure
+  // here would wipe the result on every render.
+  const prepared = useCallback((result: Preparation | null) => {
+    // A new plan invalidates anything signed under the previous one.
+    setSigned(null);
+    setSignError(null);
+    setPreparation(result);
+  }, []);
   const [preparation, setPreparation] = useState<Preparation | null>(null);
   const [account, setAccount] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<number | null>(null);
@@ -380,7 +394,8 @@ function App() {
                 hasWatchApp={
                   report?.bundles.some((b) => b.kind === "Watch app") ?? false
                 }
-                onPrepared={setPreparation}
+                onPrepared={prepared}
+                onWatch={setWatch}
                 onAccount={setAccount}
               />
               <p className="hint">
@@ -533,30 +548,64 @@ function App() {
           <div>
             <div className="action-label">
               <Clock3 size={16} />
-              {preparation?.profiles.length
-                ? "Prepared profile expiration"
-                : app?.profile?.expires_at
-                  ? "Embedded profile expiration"
-                  : "Ready when the next pieces are."}
+              {signed
+                ? "Signed build expires"
+                : preparation?.profiles.length
+                  ? "Prepared profile expiration"
+                  : app?.profile?.expires_at
+                    ? "Embedded profile expiration"
+                    : "Ready when the next pieces are."}
             </div>
             <p>
-              {preparation?.profiles.length
-                ? `${date(
-                    preparation.profiles
-                      .map((profile) => profile.expires)
-                      .sort()[0],
-                  )} · Signing is not implemented yet`
-                : app?.profile?.expires_at
-                  ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
-                  : "Re-signing requires profile matching and a reviewed signing plan. Use the existing-signature flow below for an authorized build."}
+              {signError ??
+                (signed
+                  ? `${date(signed.expires)} · Signed ${signed.bundles_signed} bundle(s)${
+                      signed.removed.length
+                        ? `, removed ${signed.removed.length}`
+                        : ""
+                    }. Install it below.`
+                  : preparation?.profiles.length
+                    ? `${date(
+                        preparation.profiles
+                          .map((profile) => profile.expires)
+                          .sort()[0],
+                      )} · Sign to produce an installable build. The original IPA is never changed.`
+                    : app?.profile?.expires_at
+                      ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
+                      : "Re-signing requires a signing certificate and prepared profiles. Use the existing-signature flow below for an authorized build.")}
             </p>
           </div>
-          <button className="primary" disabled>
-            Sign & Install <ArrowRight size={17} />
+          <button
+            className="primary"
+            disabled={
+              !isTauri() ||
+              signing ||
+              !ipaPath ||
+              !preparation?.profiles.length ||
+              preparation.plan.blockers.length > 0
+            }
+            onClick={() => {
+              setSigning(true);
+              setSignError(null);
+              setSigned(null);
+              invoke<Signed>("account_sign_ipa", { path: ipaPath, watch })
+                .then(setSigned)
+                .catch((error) =>
+                  setSignError(
+                    typeof error === "string"
+                      ? error
+                      : "Signing did not complete.",
+                  ),
+                )
+                .finally(() => setSigning(false));
+            }}
+          >
+            {signing ? "Signing…" : "Sign IPA"} <ArrowRight size={17} />
           </button>
         </section>
         <InstallSigned
-          path={ipaPath}
+          path={signed ? signed.path : ipaPath}
+          signed={signed !== null}
           deviceId={deviceId}
           onBusy={installationBusy}
         />

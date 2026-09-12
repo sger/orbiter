@@ -73,6 +73,7 @@ export function Accounts({
   hasWatchApp,
   onPrepared,
   onAccount,
+  onWatch,
 }: {
   paused: boolean;
   deviceId: number | null;
@@ -81,6 +82,8 @@ export function Accounts({
   hasWatchApp: boolean;
   onPrepared: (preparation: Preparation | null) => void;
   onAccount: (account: string | null) => void;
+  /// The Watch choice governs the plan, so the signer has to be given the same one.
+  onWatch: (watch: "undecided" | "remove" | "sign") => void;
 }) {
   const [view, setView] = useState<AccountView>(initial);
   const [email, setEmail] = useState("");
@@ -154,6 +157,9 @@ export function Accounts({
   useEffect(() => {
     onAccount(view.stage === "signed_in" ? view.account : null);
   }, [view.stage, view.account, onAccount]);
+  useEffect(() => {
+    onWatch(watch);
+  }, [watch, onWatch]);
   useEffect(() => {
     setCode("");
   }, [view.challenge?.id]);

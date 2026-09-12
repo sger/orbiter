@@ -27,6 +27,11 @@ rsa = "=0.10.0-rc.18"
 rand = "=0.10.2"
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem"] }
 
+# The signer. Same fork and version the vendored sideloading crate resolves, so one copy of the
+# code-signing implementation is in the graph, not two.
+apple-codesign = { version = "=0.29.11", package = "isideload-apple-codesign", default-features = false }
+x509-certificate = { version = "=0.26.1", package = "isideload-x509-certificate" }
+
 async-trait = "=0.1.92"
 rootcause = "=0.12.1"
 rustls = { version = "=0.23.44", default-features = false, features = ["ring", "std", "tls12"] }

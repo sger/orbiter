@@ -294,6 +294,29 @@ async fn account_prepare_provisioning(
         )
         .await
 }
+/// Sign the selected IPA for the signed-in account's team. The signed build is written into the
+/// application's own storage; the IPA the person chose is only ever read.
+#[tauri::command]
+async fn account_sign_ipa(
+    path: String,
+    watch: String,
+    app: tauri::AppHandle,
+    state: State<'_, orbiter_core::accounts::Accounts>,
+) -> Result<orbiter_core::signer::Signed, String> {
+    let out_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Cannot locate application storage.")?
+        .join("signed");
+    state
+        .sign_ipa(
+            std::path::PathBuf::from(path),
+            out_dir,
+            orbiter_core::plan::WatchChoice::parse(&watch),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+}
 #[tauri::command]
 async fn account_forget_signing_key(
     state: State<'_, orbiter_core::accounts::Accounts>,
@@ -336,6 +359,7 @@ fn main() {
             account_register_device,
             account_request_certificate,
             account_prepare_provisioning,
+            account_sign_ipa,
             account_forget_signing_key,
             inspect_ipa,
             cancel_inspection,

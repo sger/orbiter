@@ -121,3 +121,15 @@ This step is where Apple answers the capability questions the plan can only prop
 `provisioning::fetch_profile` then downloads the team provisioning profile for each identifier, which authorises the team's registered devices and, on a free personal team, expires in seven days. Profile bytes are kept in the signed-in session for the signer and are deliberately not serialised into the interface; only the identifier, expiry, and UUID are shown.
 
 Provisioning runs the plan first and writes nothing at all when the plan has blockers. It is driven from the selected IPA, so changing the IPA, the device, or the team clears the result rather than carrying it across.
+
+## The signer
+
+`signer.rs` turns a reviewed plan, Apple's profiles, and this Mac's certificate into a new IPA. The IPA the person selected is opened read-only and never written; everything happens in a temporary directory inside the application's own storage, which is removed when the operation returns, and the result is a separate file named for the team it was signed for.
+
+Order of work: extract the archive under the same refusals inspection applies (unsafe paths, symlinks, special files, case-colliding duplicates, 2 GiB / 50,000 entries / 8 GiB expanded); remove every bundle the plan left out, shallowest first, so a removed Watch app takes its extensions and frameworks with it and is reported once; rewrite identifiers; install one profile per bundle that holds an App ID; sign from the inside out; repackage with the file permissions on disk, so executables stay executable.
+
+Identifier rewriting replaces whole strings only, anywhere in an Info.plist, using the plan's old-to-new map. That moves `CFBundleIdentifier` and every cross-reference bundles hold to each other — `WKCompanionAppBundleIdentifier`, `WKAppBundleIdentifier`, `NSExtension` attributes — without guessing at substrings inside unrelated text. The bundle's own `CFBundleIdentifier` is then set outright, because a bundle signed for an identifier its Info.plist does not claim is one iOS refuses.
+
+The signer never chooses entitlements. Each bundle is signed with the entitlements inside Apple's own provisioning profile for that identifier, read from the CMS payload. A capability the plan said would be lost is lost because Apple did not grant it, not because this code removed it.
+
+Signing runs on a blocking thread: it reads and writes a whole app bundle and hashes every file. The plan is rebuilt from the IPA, team, and Watch choice rather than remembered, so the build that is signed is the build that was reviewed, and a plan whose profiles were never prepared is refused before the archive is opened. The signed build then goes through the same installation review as any other IPA — including whether the iPhone is in its profile — so the existing preflight validates the signer's own output.

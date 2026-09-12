@@ -43,9 +43,7 @@ test("browser preview keeps native and signing actions unavailable", async ({
   await expect(
     page.getByText("Browser preview.", { exact: false }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Sign & Install" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
   await expect(
     page.getByRole("button", { name: /Drop your IPA/ }),
   ).toBeDisabled();
@@ -177,6 +175,23 @@ async function nativeMock(
               message: "A development certificate was issued.",
             };
           }
+          if (cmd === "account_sign_ipa") {
+            (window as any).__signRequested = {
+              path: args.path,
+              watch: args.watch,
+            };
+            if ((window as any).__signFailure)
+              throw (window as any).__signFailure;
+            return {
+              path: "/synthetic/signed/Test-TEAM2.ipa",
+              identifier: "com.example.app.abc123",
+              expires: "2026-09-19T00:00:00Z",
+              bundles_signed: 3,
+              removed: ["Payload/Test.app/Watch/Watch.app"],
+              message:
+                "A signed IPA was produced. The original IPA is unchanged.",
+            };
+          }
           if (cmd === "account_prepare_provisioning") {
             (window as any).__provisioningRequested = {
               path: args.path,
@@ -242,7 +257,10 @@ async function nativeMock(
           }
           if (cmd === "installation_status")
             return (window as any).__jobResult ?? null;
-          if (cmd === "prepare_install") return (window as any).__reviewResult;
+          if (cmd === "prepare_install") {
+            (window as any).__installPrepared = { path: args.path };
+            return (window as any).__reviewResult;
+          }
           if (cmd === "discard_install") return;
           if (cmd === "execute_install") {
             (window as any).__executed = args;
@@ -307,9 +325,7 @@ test("selected file renders inspection and retains unavailable signing", async (
   await expect(
     page.getByText("Inspection complete", { exact: false }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Sign & Install" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
   await expect(page.getByLabel("Signing team")).toBeDisabled();
   await page.getByText("Bundle inspection details", { exact: false }).click();
   await page.getByText("Main app", { exact: true }).click();
@@ -330,9 +346,7 @@ test("failed inspection gives a recovery instruction and permits retry", async (
   await expect(
     page.getByRole("button", { name: /Drop your IPA/ }),
   ).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: "Sign & Install" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
 });
 test("cancel waits for worker acknowledgement and permits another inspection", async ({
   page,
@@ -390,9 +404,7 @@ test("device refresh removes disconnected selection and surfaces service errors"
   });
   await page.getByRole("button", { name: "Refresh devices" }).click();
   await expect(page.getByText("Synthetic service unavailable.")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Sign & Install" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
 });
 
 async function readyForReview(
@@ -547,9 +559,7 @@ test("local identity inventory clears stale certificates on failed refresh", asy
   await expect(
     page.getByText("Apple Development: Synthetic", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Sign & Install" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
   await page.evaluate(() => {
     (window as any).__identityError = true;
   });
@@ -585,9 +595,7 @@ test("account flow works without a manual support check, requires consent, and n
   await expect(page.getByLabel("Signing team")).toHaveValue("");
   await page.getByLabel("Signing team").selectOption("TEAM2");
   await expect(page.getByLabel("Signing team")).toHaveValue("TEAM2");
-  await expect(
-    page.getByRole("button", { name: "Sign & Install" }),
-  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   // Signing out clears the secrets, not the account address or the consent already given, so
   // signing back in needs only the password. The sign-in button must not be stuck disabled.
@@ -898,4 +906,69 @@ test("a Watch app must be decided before any identifier is registered", async ({
       page.evaluate(() => (window as any).__provisioningRequested?.watch),
     )
     .toBe("remove");
+});
+
+test("signing produces a separate build and the installer moves to it", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team").selectOption("TEAM2");
+
+  // Nothing may be signed before Apple has returned identifiers and profiles.
+  const sign = page.getByRole("button", { name: "Sign IPA" });
+  await expect(sign).toBeDisabled();
+  await page
+    .getByLabel("I understand ten identifiers per seven days", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Prepare identifiers & profiles" })
+    .click();
+  await expect(sign).toBeEnabled();
+  await sign.click();
+
+  // The result names the build that was produced, not the one that was chosen.
+  await expect(page.getByText("Signed build expires")).toBeVisible();
+  await expect(page.getByText("Signed 3 bundle(s), removed 1")).toBeVisible();
+  await expect(page.getByText("Install the signed build")).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as any).__signRequested?.path),
+    )
+    .toBe("/synthetic/Test.ipa");
+
+  // The installer reviews the signed file, leaving the original alone.
+  await page.getByRole("button", { name: "Review installation" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => (window as any).__installPrepared?.path),
+    )
+    .toBe("/synthetic/signed/Test-TEAM2.ipa");
 });

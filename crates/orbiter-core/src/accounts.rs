@@ -608,6 +608,74 @@ impl Accounts {
             plan,
         })
     }
+    /// Sign the IPA with this session's certificate and the profiles Apple returned.
+    ///
+    /// The plan is rebuilt from the same inputs rather than remembered, so the build that is
+    /// signed is the build that was reviewed: a different IPA, team, or Watch choice produces a
+    /// different plan, and a plan whose profiles were never prepared is refused.
+    pub async fn sign_ipa(
+        &self,
+        path: std::path::PathBuf,
+        out_dir: std::path::PathBuf,
+        watch: crate::plan::WatchChoice,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<crate::signer::Signed, String> {
+        let _gate = self
+            .1
+            .try_lock()
+            .map_err(|_| "Another account operation is already running.")?;
+        let (team_id, free, identity, profiles) = {
+            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            inner.expire();
+            let team_id = inner
+                .view
+                .selected_team
+                .clone()
+                .ok_or("Select the signing team before signing.")?;
+            let free = inner
+                .view
+                .teams
+                .iter()
+                .find(|candidate| candidate.id == team_id)
+                .and_then(|candidate| candidate.free)
+                .unwrap_or(true);
+            let session = inner.session.as_ref().ok_or("Sign in before signing.")?;
+            let identity = session
+                .identity
+                .clone()
+                .ok_or("Get a signing certificate before signing.")?;
+            (team_id, free, identity, session.profiles.clone())
+        };
+        // Signing is local and CPU-bound: it reads and writes a whole app bundle and computes
+        // hashes over every file, so it never runs on the async runtime's threads.
+        tokio::task::spawn_blocking(move || {
+            let report =
+                crate::inspect(&path, &cancel, |_| {}).map_err(|error| error.to_string())?;
+            let plan = crate::plan::build(
+                &report,
+                &crate::plan::Target {
+                    team_id,
+                    kind: if free {
+                        crate::plan::TeamKind::Personal
+                    } else {
+                        crate::plan::TeamKind::Paid
+                    },
+                    watch,
+                },
+            );
+            crate::signer::sign(
+                &path,
+                &out_dir,
+                &plan,
+                &profiles,
+                &identity,
+                &cancel,
+                |_| {},
+            )
+        })
+        .await
+        .map_err(|_| "Signing stopped unexpectedly.".to_string())?
+    }
     /// Reuse or obtain this session's development certificate for the selected team.
     pub async fn request_certificate(
         &self,

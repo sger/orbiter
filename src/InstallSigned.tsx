@@ -31,10 +31,13 @@ type Job = {
 };
 export function InstallSigned({
   path,
+  signed,
   deviceId,
   onBusy,
 }: {
   path: string | null;
+  /// True when `path` is the build Orbiter just signed rather than the chosen IPA.
+  signed: boolean;
   deviceId: number | null;
   onBusy: (busy: boolean) => void;
 }) {
@@ -176,14 +179,16 @@ export function InstallSigned({
   return (
     <section className="card signed-install">
       <div className="section-heading">
-        <h2>Install existing signature</h2>
+        <h2>
+          {signed ? "Install the signed build" : "Install existing signature"}
+        </h2>
         <span className="subtle">TRANSPORT PREVIEW</span>
       </div>
       <div className="install-body">
         <p>
-          Install the selected IPA unchanged on the selected USB iPhone. No
-          Apple account is needed. The build must already be provisioned for
-          this device.
+          {signed
+            ? "Install the build Orbiter just signed on the selected USB iPhone. The review below checks it the same way as any other IPA, including whether this iPhone is in its profile."
+            : "Install the selected IPA unchanged on the selected USB iPhone. No Apple account is needed. The build must already be provisioned for this device."}
         </p>
         <button
           className="review-button"

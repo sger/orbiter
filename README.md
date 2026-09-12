@@ -1,6 +1,6 @@
 # Orbiter
 
-A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript. Inspection, device discovery, reviewed existing-signature installation, and a **Phase 3 Apple account sign-in preview** are implemented. The user confirmed installation and app operation on an already provisioned iPhone. Re-signing, provisioning changes, and automatic refresh remain unavailable. Live Apple sign-in now works in the desktop app: a personal account signed in and its team was listed and selected. Federated company accounts are not supported. Windows remains unverified.
+A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2, React, and TypeScript. Inspection, device discovery, reviewed existing-signature installation, and a **Phase 3 Apple account sign-in preview** are implemented. The user confirmed installation and app operation on an already provisioned iPhone. Re-signing now produces a signed IPA from a reviewed plan; automatic weekly refresh remains unavailable. Live Apple sign-in now works in the desktop app: a personal account signed in and its team was listed and selected. Federated company accounts are not supported. Windows remains unverified.
 
 ## Run
 

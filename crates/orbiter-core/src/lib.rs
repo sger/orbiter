@@ -8,6 +8,7 @@ mod macho;
 pub mod plan;
 mod profile;
 pub mod provisioning;
+pub mod signer;
 pub mod signing;
 
 use base64::Engine;
@@ -175,7 +176,7 @@ fn preflight(f: &mut File, size: u64) -> Result<usize> {
     f.rewind().map_err(|_| Error::Io)?;
     Ok(u16at(10) as usize)
 }
-fn safe_name(n: &str) -> bool {
+pub(crate) fn safe_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= 4096
         && !n.starts_with('/')

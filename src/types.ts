@@ -44,3 +44,13 @@ export interface Report {
   findings: Finding[];
   icon_data_url: string | null;
 }
+
+/// What the signer produced. The original IPA is never modified.
+export type Signed = {
+  path: string;
+  identifier: string;
+  expires: string;
+  bundles_signed: number;
+  removed: string[];
+  message: string;
+};
