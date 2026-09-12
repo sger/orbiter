@@ -1,0 +1,153 @@
+import { test, expect } from "@playwright/test";
+const report = {
+  size_bytes: 1024 * 1024,
+  main_path: "Payload/Test.app",
+  icon_data_url: null,
+  bundles: [
+    {
+      path: "Payload/Test.app",
+      kind: "Main app",
+      name: "Synthetic Test App",
+      identifier: "test.synthetic",
+      version: "1.0",
+      build: "1",
+      minimum_os: "15.0",
+      supported_platforms: ["iPhoneOS"],
+      device_families: [1],
+      slices: [
+        {
+          architecture: "arm64",
+          encrypted: false,
+          entitlements: {},
+          xml_entitlements_present: false,
+          der_entitlements_present: false,
+        },
+      ],
+      profile: null,
+      issues: [],
+    },
+  ],
+  findings: [
+    {
+      status: "not_verified",
+      title: "Signing identity required",
+      detail: "No target team selected.",
+      bundle: null,
+    },
+  ],
+};
+test("browser preview keeps native and signing actions unavailable", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.getByText("Browser preview.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign & Install" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: /Drop your IPA/ }),
+  ).toBeDisabled();
+  await page.getByText("Advanced options", { exact: true }).click();
+  await expect(
+    page.getByText("Your app identifiers and capabilities are left intact."),
+  ).toBeVisible();
+  await page.screenshot({ path: "test-results/preview.png", fullPage: true });
+});
+async function nativeMock(
+  page: import("@playwright/test").Page,
+  mode: "success" | "error" | "cancel",
+) {
+  await page.addInitScript(
+    ({ report, mode }) => {
+      let pendingReject: ((e: string) => void) | undefined;
+      let callbackId = 0;
+      (window as any).isTauri = true;
+      const callbacks = new Map();
+      (window as any).__TAURI_INTERNALS__ = {
+        metadata: {
+          currentWindow: { label: "main" },
+          currentWebview: { label: "main" },
+        },
+        transformCallback: (fn: unknown) => {
+          callbacks.set(++callbackId, fn);
+          return callbackId;
+        },
+        unregisterCallback: (id: number) => callbacks.delete(id),
+        invoke: async (cmd: string) => {
+          if (cmd === "plugin:event|listen") return 1;
+          if (cmd === "plugin:dialog|open") return "/synthetic/Test.ipa";
+          if (cmd === "inspect_ipa") {
+            if (mode === "error")
+              throw "Invalid or unsupported ZIP archive. Export a fresh IPA from your build system.";
+            if (mode === "cancel")
+              return await new Promise((_resolve, reject) => {
+                pendingReject = reject;
+              });
+            return report;
+          }
+          if (cmd === "cancel_inspection") {
+            pendingReject?.(
+              "Inspection cancelled. The original IPA is unchanged.",
+            );
+          }
+        },
+      };
+      (window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+        unregisterListener: () => {},
+      };
+    },
+    { report, mode },
+  );
+  await page.goto("/");
+}
+test("selected file renders inspection and retains unavailable signing", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Synthetic Test App" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Inspection complete", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign & Install" }),
+  ).toBeDisabled();
+  await expect(page.getByLabel("Signing team")).toBeDisabled();
+  await page.getByText("Bundle inspection details", { exact: false }).click();
+  await page.getByText("Main app", { exact: true }).click();
+  await expect(
+    page.getByText("No XML or DER entitlements found"),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/inspection.png",
+    fullPage: true,
+  });
+});
+test("failed inspection gives a recovery instruction and permits retry", async ({
+  page,
+}) => {
+  await nativeMock(page, "error");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await expect(page.getByRole("alert")).toContainText("Export a fresh IPA");
+  await expect(
+    page.getByRole("button", { name: /Drop your IPA/ }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Sign & Install" }),
+  ).toBeDisabled();
+});
+test("cancel waits for worker acknowledgement and permits another inspection", async ({
+  page,
+}) => {
+  await nativeMock(page, "cancel");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.getByRole("button", { name: "Cancel inspection" }).click();
+  await expect(page.getByRole("alert")).toContainText("Inspection cancelled");
+  await expect(
+    page.getByRole("button", { name: /Drop your IPA/ }),
+  ).toBeEnabled();
+});

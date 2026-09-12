@@ -1,0 +1,15 @@
+[package]
+name = "orbiter-core"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+plist = { version = "=1.10.1", features = ["enable_unstable_features_that_may_break_with_minor_version_bumps"] }
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+cms = "=0.2.3"
+der = { version = "=0.7.10", features = ["alloc"] }
+base64 = "=0.23.1"
+thiserror = "=2.0.20"
+[dev-dependencies]
+tempfile = "=3.27.0"
