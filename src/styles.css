@@ -874,12 +874,6 @@ details[open] > summary > svg {
   accent-color: #386e54;
 }
 
-.local-signing {
-  border-top: 1px solid var(--border, #e1e7df);
-  /* Same inset as the account panel and the destination rows above it. */
-  margin: 20px 0 0;
-  padding: 20px 22px 0;
-}
 .signing-identities {
   padding-left: 20px;
 }

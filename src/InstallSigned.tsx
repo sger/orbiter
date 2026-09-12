@@ -182,7 +182,9 @@ export function InstallSigned({
         <h2>
           {signed ? "Install the signed build" : "Install existing signature"}
         </h2>
-        <span className="subtle">TRANSPORT PREVIEW</span>
+        <span className="subtle">
+          {signed ? "SIGNED BUILD" : "TRANSPORT PREVIEW"}
+        </span>
       </div>
       <div className="install-body">
         <p>
@@ -257,7 +259,8 @@ export function InstallSigned({
                   disabled={!accepted || working}
                   onClick={install}
                 >
-                  Install unchanged IPA <ArrowRight size={16} />
+                  {signed ? "Install signed IPA" : "Install unchanged IPA"}{" "}
+                  <ArrowRight size={16} />
                 </button>
               </>
             )}

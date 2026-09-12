@@ -10,7 +10,6 @@ pub mod plan;
 mod profile;
 pub mod provisioning;
 pub mod signer;
-pub mod signing;
 
 use base64::Engine;
 use plist::{Dictionary, Value};

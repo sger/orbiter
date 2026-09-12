@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import type { Report, Bundle, Signed, SigningProgress } from "./types";
 import "./styles.css";
-import { SigningIdentities } from "./SigningIdentities";
 import { Devices } from "./Devices";
 import { InstallSigned } from "./InstallSigned";
 import { DeviceLog } from "./DeviceLog";
@@ -393,7 +392,6 @@ function App() {
                 </h2>
               </div>
               <Devices onSelect={setDeviceId} paused={installBusy} />
-              <SigningIdentities paused={installBusy} />
               <Accounts
                 paused={installBusy}
                 deviceId={deviceId}
@@ -589,7 +587,7 @@ function App() {
                             : "Get a signing certificate in step 3 before signing."
                         }`
                       : app?.profile?.expires_at
-                        ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
+                        ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "The company build's own profile"}`
                         : "Re-signing requires a signing certificate and prepared profiles. Use the existing-signature flow below for an authorized build.")}
             </p>
             {signed && (

@@ -285,10 +285,6 @@ async function nativeMock(
               message:
                 "Developer session could not be refreshed. Sign in again; your team selection was cleared.",
             });
-          if (cmd === "discover_signing_identities") {
-            if ((window as any).__identityError) throw "Keychain failed";
-            return (window as any).__identityResult;
-          }
           if (cmd === "installation_status")
             return (window as any).__jobResult ?? null;
           if (cmd === "prepare_install") {
@@ -576,36 +572,6 @@ test("a reopened window follows an active installation until its terminal outcom
   ).toBeEnabled();
 });
 
-test("local identity inventory clears stale certificates on failed refresh", async ({
-  page,
-}) => {
-  await nativeMock(page, "success");
-  await page.evaluate(() => {
-    (window as any).__identityResult = {
-      identities: [
-        { fingerprint: "A".repeat(40), name: "Apple Development: Synthetic" },
-      ],
-      available: true,
-      message: "Profile matching has not been tested.",
-    };
-  });
-  await page.getByRole("button", { name: "Check Keychain" }).click();
-  await expect(
-    page.getByText("Apple Development: Synthetic", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign IPA" })).toBeDisabled();
-  await page.evaluate(() => {
-    (window as any).__identityError = true;
-  });
-  await page.getByRole("button", { name: "Check Keychain" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Could not check local signing identities",
-  );
-  await expect(
-    page.getByText("Apple Development: Synthetic", { exact: true }),
-  ).toHaveCount(0);
-});
-
 test("account flow works without a manual support check, requires consent, and never auto-selects a team", async ({
   page,
 }) => {
@@ -733,7 +699,6 @@ test("the account panel keeps its content off the panel border", async ({
   // Text flush against the border reads as a broken layout; every panel keeps the same inset.
   for (const [container, label] of [
     ["section.accounts", "Apple account"],
-    [".local-signing", "Local signing identities"],
   ] as const) {
     const section = page.locator(container);
     const panel = await section.boundingBox();
@@ -1045,7 +1010,7 @@ test("signing produces a separate build and the installer moves to it", async ({
   await page
     .getByRole("checkbox", { name: /I authorize installation/ })
     .check();
-  await page.getByRole("button", { name: "Install unchanged IPA" }).click();
+  await page.getByRole("button", { name: "Install signed IPA" }).click();
   await expect(
     page.getByText("Trust the developer on the iPhone"),
   ).toBeVisible();

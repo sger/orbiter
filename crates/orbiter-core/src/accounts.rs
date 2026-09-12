@@ -426,7 +426,7 @@ impl Accounts {
                 account: Some(account),
                 teams,
                 message:
-                    "Signed in. Select a signing team explicitly. Re-signing is not enabled yet."
+                    "Signed in. Select the signing team this build should be re-signed for."
                         .into(),
                 ..View::default()
             };
