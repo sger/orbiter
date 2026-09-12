@@ -909,6 +909,24 @@ details[open] > summary > svg {
   background: #f9fbf8;
   font: inherit;
 }
+/* Native select chrome does not match anything else in the panel: draw the control, and one
+   chevron of our own, so the team and Watch choices read like the device selector above them. */
+.accounts select {
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23708071' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  text-overflow: ellipsis;
+}
+.accounts select:disabled {
+  color: #9ba698;
+  opacity: 1;
+}
+.accounts select:focus-visible {
+  outline: 2px solid #9fb79a;
+  outline-offset: 1px;
+}
 .accounts .secondary {
   margin: 12px 0;
 }
@@ -980,15 +998,6 @@ details[open] > summary > svg {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-}
-.original-findings {
-  margin-top: 18px;
-  font-size: 13px;
-  color: #8a9588;
-}
-.original-findings summary {
-  cursor: pointer;
-  padding: 10px 0;
 }
 
 .header-account {
