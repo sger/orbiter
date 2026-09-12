@@ -1,26 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import {
+  accountRefreshTeams,
+  accountStatus,
+  forgetSigningKey,
+  isTauri,
+  prepareProvisioning,
+  registerDevice,
+  requestCertificate,
+  withdrawCertificates,
+} from "../../ipc/commands";
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  AccountView,
+  Certificate,
+  Preparation,
+  Registration,
+  TeamStatus,
+  WatchChoice,
+} from "../../types";
 
-type AccountView = {
-  stage: "signed_out" | "signing_in" | "two_factor" | "signed_in" | "failed";
-  account: string | null;
-  teams: {
-    id: string;
-    name: string;
-    kind: string | null;
-    free: boolean | null;
-    membership: string | null;
-  }[];
-  selected_team: string | null;
-  challenge: {
-    id: string;
-    sms: boolean;
-    unknown: boolean;
-    retry: boolean;
-    numbers: { id: number; label: string }[];
-  } | null;
-  message: string;
-};
 const initial: AccountView = {
   stage: "signed_out",
   account: null,
@@ -29,52 +27,13 @@ const initial: AccountView = {
   challenge: null,
   message: "",
 };
-type Certificate = {
-  reused: boolean;
-  expires: string | null;
-  active: number;
-  message: string;
-};
-type Registration = {
-  registration: "already_registered" | "registered";
-  team_devices: number;
-  message: string;
-};
-export type Preparation = {
-  plan: {
-    new_main_identifier: string;
-    blockers: string[];
-    consequences: string[];
-    app_ids_required: number;
-    bundles: {
-      name: string;
-      identifier: string;
-      new_identifier: string;
-      capabilities: {
-        key: string;
-        action: "keep" | "rewrite" | "remove";
-        reason: string;
-        consequence: string;
-      }[];
-    }[];
-  };
-  app_ids: {
-    identifier: string;
-    created: boolean;
-    capabilities: string[];
-    remaining: number | null;
-  }[];
-  profiles: { identifier: string; expires: string; uuid: string }[];
-};
 export function Accounts({
   paused,
   deviceId,
   ipaPath,
   hasWatchApp,
   onPrepared,
-  onAccount,
-  onWatch,
-  onCertificate,
+  onStatus,
 }: {
   paused: boolean;
   deviceId: number | null;
@@ -82,12 +41,9 @@ export function Accounts({
   /// Whether the selected IPA contains a Watch app, so the choice is only asked when it applies.
   hasWatchApp: boolean;
   onPrepared: (preparation: Preparation | null) => void;
-  onAccount: (account: string | null) => void;
-  /// The Watch choice governs the plan, so the signer has to be given the same one.
-  onWatch: (watch: "undecided" | "remove" | "sign") => void;
-  /// Whether this session holds a certificate. Signing is impossible without one, and the
-  /// certificate lives only as long as the session even though its key is stored.
-  onCertificate: (held: boolean) => void;
+  /// Everything above this panel needs to know, in one shape: the pipeline derives its gates from
+  /// it, the header shows the account, and the signer is given the same Watch choice the plan had.
+  onStatus: (status: TeamStatus) => void;
 }) {
   const [view, setView] = useState<AccountView>(initial);
   const [email, setEmail] = useState("");
@@ -110,9 +66,7 @@ export function Accounts({
   const [provAck, setProvAck] = useState(false);
   // Apple's watchOS provisioning under a personal team is unverified and a Watch bundle spends
   // App IDs from a small weekly budget, so nothing is registered until this is chosen.
-  const [watch, setWatch] = useState<"undecided" | "remove" | "sign">(
-    "undecided",
-  );
+  const [watch, setWatch] = useState<WatchChoice>("undecided");
   const [provBusy, setProvBusy] = useState(false);
   const [preparation, setPreparation] = useState<Preparation | null>(null);
   const [provError, setProvError] = useState<string | null>(null);
@@ -133,7 +87,7 @@ export function Accounts({
       polling = true;
       const epoch = generation.current;
       try {
-        const next = await invoke<AccountView>("account_status");
+        const next = await accountStatus();
         if (mounted.current && epoch === generation.current) {
           setView(next);
           setReady(true);
@@ -158,16 +112,41 @@ export function Accounts({
     };
   }, [desktop]);
   const generation = useRef(0);
-  // The signed-in account is global state: the header shows it and offers signing out there.
+  const signedIn = view.stage === "signed_in";
+  const team = view.teams.find(
+    (candidate) => candidate.id === view.selected_team,
+  );
+  // One report upward, recomputed whenever any part of it changes.
   useEffect(() => {
-    onAccount(view.stage === "signed_in" ? view.account : null);
-  }, [view.stage, view.account, onAccount]);
-  useEffect(() => {
-    onWatch(watch);
-  }, [watch, onWatch]);
-  useEffect(() => {
-    onCertificate(certificate !== null);
-  }, [certificate, onCertificate]);
+    onStatus({
+      signedIn,
+      account: signedIn ? view.account : null,
+      teamId: view.selected_team,
+      teamLabel: team
+        ? `${team.name}${
+            team.free === true
+              ? " · Free personal team"
+              : team.free === false
+                ? ` · ${team.membership ?? "Paid membership"}`
+                : ""
+          }`
+        : null,
+      registered: registration !== null,
+      registrationSummary: registration?.message ?? "",
+      certificate: certificate !== null,
+      certificateSummary: certificate?.message ?? "",
+      watch,
+    });
+  }, [
+    onStatus,
+    signedIn,
+    view.account,
+    view.selected_team,
+    team,
+    registration,
+    certificate,
+    watch,
+  ]);
   useEffect(() => {
     setCode("");
   }, [view.challenge?.id]);
@@ -207,7 +186,6 @@ export function Accounts({
     }
   }
   const active = view.stage === "signing_in" || view.stage === "two_factor";
-  const signedIn = view.stage === "signed_in";
   const disabled = !desktop || !ready || busy || paused;
   const signInBlocker = !desktop
     ? "Open the desktop app to sign in."
@@ -478,10 +456,7 @@ export function Accounts({
                   setRegistering(true);
                   setRegisterError(null);
                   setRegistration(null);
-                  invoke<Registration>("account_register_device", {
-                    deviceId,
-                    acknowledged: registerAck,
-                  })
+                  registerDevice(deviceId!, registerAck)
                     .then((result) => {
                       if (mounted.current) setRegistration(result);
                     })
@@ -541,9 +516,7 @@ export function Accounts({
                   setCertBusy(true);
                   setCertError(null);
                   setCertificate(null);
-                  invoke<Certificate>("account_request_certificate", {
-                    acknowledged: certAck,
-                  })
+                  requestCertificate(certAck)
                     .then((result) => {
                       if (mounted.current) setCertificate(result);
                     })
@@ -601,9 +574,7 @@ export function Accounts({
                       setCertBusy(true);
                       setCertError(null);
                       setCertificate(null);
-                      invoke<string>("account_withdraw_certificates", {
-                        acknowledged: withdrawAck,
-                      })
+                      withdrawCertificates(withdrawAck)
                         .then((message) => {
                           if (mounted.current)
                             setCertError(
@@ -635,7 +606,7 @@ export function Accounts({
                   setCertBusy(true);
                   setCertError(null);
                   setCertificate(null);
-                  invoke<string>("account_forget_signing_key")
+                  forgetSigningKey()
                     .then((message) => {
                       if (mounted.current)
                         setCertError(reason(message, "Signing key removed."));
@@ -669,11 +640,7 @@ export function Accounts({
                     id="watch-choice"
                     value={watch}
                     disabled={disabled || provBusy}
-                    onChange={(e) =>
-                      setWatch(
-                        e.target.value as "undecided" | "remove" | "sign",
-                      )
-                    }
+                    onChange={(e) => setWatch(e.target.value as WatchChoice)}
                   >
                     <option value="undecided">Choose what happens to it</option>
                     <option value="remove">
@@ -714,11 +681,7 @@ export function Accounts({
                   setProvBusy(true);
                   setProvError(null);
                   setPreparation(null);
-                  invoke<Preparation>("account_prepare_provisioning", {
-                    path: ipaPath,
-                    acknowledged: provAck,
-                    watch,
-                  })
+                  prepareProvisioning(ipaPath!, provAck, watch)
                     .then((result) => {
                       if (!mounted.current) return;
                       setPreparation(result);

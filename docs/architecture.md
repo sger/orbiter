@@ -148,3 +148,20 @@ A capture stops when asked, after five minutes, or after 500 matching lines, whi
 The signed build and the build it was made from are normally installed side by side, and their processes share a name, so the filter is told both identifiers: a line naming the superseded one and not this one belongs to the other app and is dropped. The rewritten identifier contains the original as a substring, so this build's own lines name both and survive.
 
 What the log cannot show: a failure inside a `WKWebView`. Web content errors, blocked requests, and JavaScript exceptions never reach the system log — the system log only records that the web process ran. A development-signed build carries `get-task-allow`, so Safari's Web Inspector can attach to it and show those directly; a company distribution build cannot be inspected that way, which makes the re-signed build the more diagnosable of the two.
+
+## Interface structure
+
+The front end is one screen, so there is no router. It is organised by feature rather than by kind:
+
+```
+src/ipc/commands.ts      every call into the Rust core, typed, one function each
+src/state/pipeline.ts    what is done, what is next, and why anything is refused
+src/features/…           build, device, team, sign, install, diagnose, help
+src/types.ts             the shapes crossing the IPC boundary
+```
+
+Components never name a command string. The whole IPC surface is one file, so what the interface can ask the backend to do is readable in one place, and a command's name or arguments change once.
+
+`state/pipeline.ts` exists because of a real defect. Each control used to derive its own enabled state from whatever was in scope, and "Re-sign IPA" ended up clickable in a session holding no certificate: the button knew about prepared profiles and nothing else, so it offered an action the backend then refused with a sentence the screen never showed. Gates now come from `signBlocked` and `installBlocked` over one `Pipeline` value, and each returns the sentence explaining the refusal — so a disabled control and the reason beside it cannot disagree. The order of the checks is deliberate: the earliest unmet requirement is the one a person can act on.
+
+The team panel reports one `TeamStatus` upward rather than several callbacks, which keeps the derivation above it and stops the same state being reconstructed in two places.

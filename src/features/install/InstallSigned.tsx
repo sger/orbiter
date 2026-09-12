@@ -1,34 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import {
+  cancelInstall,
+  channel,
+  discardInstall,
+  executeInstall,
+  installationStatus,
+  isTauri,
+  prepareInstall,
+} from "../../ipc/commands";
+import type { Job, Review } from "../../types";
 import { ArrowRight, LoaderCircle } from "lucide-react";
-type Review = {
-  token: string;
-  app_name: string;
-  bundle_id: string;
-  version: string | null;
-  device_name: string;
-  size_bytes: number;
-  sha256: string;
-  existing_app: { version: string | null; build: string | null } | null;
-  blockers: string[];
-  notes: string[];
-};
-type Job = {
-  id: string;
-  stage:
-    | "preparing"
-    | "transferring"
-    | "installing"
-    | "installed"
-    | "failed"
-    | "cancelled"
-    | "unknown";
-  message: string;
-  transferred_bytes: number;
-  total_bytes: number;
-  device_percent: number | null;
-  cleanup_pending: boolean;
-};
 export function InstallSigned({
   path,
   signed,
@@ -54,7 +35,7 @@ export function InstallSigned({
     const old = current.current;
     current.current = null;
     if (old)
-      void invoke("discard_install", { token: old.token }).catch(() => {});
+      void discardInstall(old.token).catch(() => {});
   }
   useEffect(() => {
     generation.current++;
@@ -78,7 +59,7 @@ export function InstallSigned({
         return;
       }
       try {
-        const status = await invoke<Job | null>("installation_status");
+        const status = await installationStatus();
         if (disposed) return;
         if (operation.current) {
           timer = setTimeout(readStatus, 1000);
@@ -115,9 +96,9 @@ export function InstallSigned({
     setPreparing(true);
     onBusy(true);
     try {
-      const next = await invoke<Review>("prepare_install", { path, deviceId });
+      const next = await prepareInstall(path, deviceId);
       if (generation.current !== version) {
-        void invoke("discard_install", { token: next.token });
+        void discardInstall(next.token);
         return;
       }
       current.current = next;
@@ -137,20 +118,15 @@ export function InstallSigned({
     onBusy(true);
     setError("");
     setJob(null);
-    const progress = new Channel<Job>();
-    progress.onmessage = setJob;
+    const progress = channel<Job>(setJob);
     try {
       setJob(
-        await invoke<Job>("execute_install", {
-          token: review.token,
-          acknowledged: accepted,
-          progress,
-        }),
+        await executeInstall(review.token, accepted, progress),
       );
     } catch (e) {
       setError(String(e));
       try {
-        setJob(await invoke<Job | null>("installation_status"));
+        setJob(await installationStatus());
       } catch {
         /* Keep the actionable execution error. */
       }
@@ -165,7 +141,7 @@ export function InstallSigned({
   }
   async function cancel() {
     try {
-      const accepted = await invoke<boolean>("cancel_install");
+      const accepted = await cancelInstall();
       if (!accepted)
         setError(
           "iOS installation has already started or the job finished. Check the reported outcome.",

@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import {
+  channel,
+  isTauri,
+  startDeviceLog,
+  stopDeviceLog,
+} from "../../ipc/commands";
+import type { LogLine, LogSummary } from "../../types";
 import { LoaderCircle } from "lucide-react";
 
-type LogLine = { text: string };
-type Summary = { matched: number; discarded: number; message: string };
 
 /// Reads the iPhone's log while a person reproduces a failure, keeping only the lines about the
 /// app being diagnosed. The rest of the device's log is read and dropped, never shown or stored.
@@ -23,7 +27,7 @@ export function DeviceLog({
 }) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summary, setSummary] = useState<LogSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(false);
   useEffect(() => {
@@ -31,7 +35,7 @@ export function DeviceLog({
     return () => {
       mounted.current = false;
       // A capture must not outlive the panel that asked for it.
-      if (isTauri()) void invoke("stop_device_log").catch(() => {});
+      if (isTauri()) void stopDeviceLog().catch(() => {});
     };
   }, []);
   const subjectKey = subjects.join(" ");
@@ -50,22 +54,17 @@ export function DeviceLog({
           disabled={disabled || !ready}
           onClick={() => {
             if (running) {
-              void invoke("stop_device_log").catch(() => {});
+              void stopDeviceLog().catch(() => {});
               return;
             }
             setRunning(true);
             setLines([]);
             setSummary(null);
             setError(null);
-            const progress = new Channel<LogLine>();
-            progress.onmessage = (line) =>
-              setLines((previous) => [...previous, line]);
-            invoke<Summary>("start_device_log", {
-              deviceId,
-              subjects,
-              superseded,
-              progress,
-            })
+            const progress = channel<LogLine>((line) =>
+              setLines((previous) => [...previous, line]),
+            );
+            startDeviceLog(deviceId!, subjects, superseded, progress)
               .then((result) => {
                 if (mounted.current) setSummary(result);
               })

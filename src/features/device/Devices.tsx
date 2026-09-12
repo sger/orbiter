@@ -1,25 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { discoverDevices, isTauri } from "../../ipc/commands";
+import type { Device, Discovery } from "../../types";
 import { ChevronDown, RefreshCw, Smartphone } from "lucide-react";
-type Device = {
-  id: number;
-  name: string | null;
-  product_type: string | null;
-  ios_version: string | null;
-  connection: string;
-  state:
-    | "paired"
-    | "locked"
-    | "trust_required"
-    | "pairing_unverified"
-    | "unavailable";
-  message: string;
-};
-type Discovery = {
-  devices: Device[];
-  service_available: boolean;
-  message: string | null;
-};
 const labels = {
   paired: "Pairing verified",
   locked: "Locked",
@@ -45,7 +27,7 @@ export function Devices({
     active.current = true;
     setBusy(true);
     try {
-      const next = await invoke<Discovery>("discover_devices");
+      const next = await discoverDevices();
       if (!mounted.current) return;
       setResult(next);
       setSelected((current) =>

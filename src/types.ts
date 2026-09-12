@@ -63,3 +63,136 @@ export type SigningProgress = {
   done: number;
   total: number;
 };
+
+/// A connected iPhone as discovery reports it. `id` is an ephemeral transport identifier, never
+/// a UDID — nothing that crosses this boundary identifies a device durably.
+export type Device = {
+  id: number;
+  name: string | null;
+  product_type: string | null;
+  ios_version: string | null;
+  connection: string;
+  state:
+    | "paired"
+    | "locked"
+    | "trust_required"
+    | "pairing_unverified"
+    | "unavailable";
+  message: string;
+};
+export type Discovery = {
+  devices: Device[];
+  service_available: boolean;
+  message: string | null;
+};
+
+export type Team = {
+  id: string;
+  name: string;
+  kind: string | null;
+  free: boolean | null;
+  membership: string | null;
+};
+export type AccountView = {
+  stage: "signed_out" | "signing_in" | "two_factor" | "signed_in" | "failed";
+  account: string | null;
+  teams: Team[];
+  selected_team: string | null;
+  challenge: {
+    id: string;
+    sms: boolean;
+    unknown: boolean;
+    retry: boolean;
+    numbers: { id: number; label: string }[];
+  } | null;
+  message: string;
+};
+export type Certificate = {
+  reused: boolean;
+  expires: string | null;
+  active: number;
+  message: string;
+};
+export type Registration = {
+  registration: "already_registered" | "registered";
+  team_devices: number;
+  message: string;
+};
+export type WatchChoice = "undecided" | "remove" | "sign";
+export type Capability = {
+  key: string;
+  action: "keep" | "rewrite" | "remove";
+  reason: string;
+  consequence: string;
+};
+export type Preparation = {
+  plan: {
+    new_main_identifier: string;
+    blockers: string[];
+    consequences: string[];
+    app_ids_required: number;
+    bundles: {
+      name: string;
+      identifier: string;
+      new_identifier: string;
+      capabilities: Capability[];
+    }[];
+  };
+  app_ids: {
+    identifier: string;
+    created: boolean;
+    capabilities: string[];
+    remaining: number | null;
+  }[];
+  profiles: { identifier: string; expires: string; uuid: string }[];
+};
+
+export type Review = {
+  token: string;
+  app_name: string;
+  bundle_id: string;
+  version: string | null;
+  device_name: string;
+  size_bytes: number;
+  sha256: string;
+  existing_app: { version: string | null; build: string | null } | null;
+  blockers: string[];
+  notes: string[];
+};
+export type Job = {
+  id: string;
+  stage:
+    | "preparing"
+    | "transferring"
+    | "installing"
+    | "installed"
+    | "failed"
+    | "cancelled"
+    | "unknown";
+  message: string;
+  transferred_bytes: number;
+  total_bytes: number;
+  device_percent: number | null;
+  cleanup_pending: boolean;
+};
+
+export type LogLine = { text: string };
+export type LogSummary = {
+  matched: number;
+  discarded: number;
+  message: string;
+};
+
+/// What the team panel reports upward, so the pipeline can derive gates in one place instead of
+/// each control working its own state out from whatever is in scope.
+export type TeamStatus = {
+  signedIn: boolean;
+  account: string | null;
+  teamId: string | null;
+  teamLabel: string | null;
+  registered: boolean;
+  registrationSummary: string;
+  certificate: boolean;
+  certificateSummary: string;
+  watch: WatchChoice;
+};

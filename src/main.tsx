@@ -1,7 +1,14 @@
-import { Accounts, type Preparation } from "./Accounts";
+import { Accounts } from "./features/team/Accounts";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import {
+  accountSignOut,
+  cancelInspection,
+  channel,
+  inspectIpa,
+  isTauri,
+  signIpa,
+} from "./ipc/commands";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -21,11 +28,19 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import type { Report, Bundle, Signed, SigningProgress } from "./types";
+import type {
+  Bundle,
+  Preparation,
+  Report,
+  Signed,
+  SigningProgress,
+  TeamStatus,
+} from "./types";
+import { hasWatchApp, signBlocked, type Pipeline } from "./state/pipeline";
 import "./styles.css";
-import { Devices } from "./Devices";
-import { InstallSigned } from "./InstallSigned";
-import { DeviceLog } from "./DeviceLog";
+import { Devices } from "./features/device/Devices";
+import { InstallSigned } from "./features/install/InstallSigned";
+import { DeviceLog } from "./features/diagnose/DeviceLog";
 const stages = [
   "Checking archive",
   "Reading bundles and signatures",
@@ -130,6 +145,19 @@ function date(value: string | null) {
       })
     : "Not available";
 }
+/// No account, no team, nothing registered. The starting point every session returns to on
+/// sign-out, and what the pipeline reads before anyone has signed in.
+const noTeam: TeamStatus = {
+  signedIn: false,
+  account: null,
+  teamId: null,
+  teamLabel: null,
+  registered: false,
+  registrationSummary: "",
+  certificate: false,
+  certificateSummary: "",
+  watch: "undecided",
+};
 function App() {
   const [report, setReport] = useState<Report | null>(null),
     [busy, setBusy] = useState(false),
@@ -138,11 +166,8 @@ function App() {
     [drag, setDrag] = useState(false),
     [cancelled, setCancelled] = useState(false);
   const [ipaPath, setIpaPath] = useState<string | null>(null);
-  const [watch, setWatch] = useState<"undecided" | "remove" | "sign">(
-    "undecided",
-  );
+  const [team, setTeam] = useState<TeamStatus>(noTeam);
   const [signed, setSigned] = useState<Signed | null>(null);
-  const [certificate, setCertificate] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [signStep, setSignStep] = useState<SigningProgress | null>(null);
@@ -155,7 +180,6 @@ function App() {
     setPreparation(result);
   }, []);
   const [preparation, setPreparation] = useState<Preparation | null>(null);
-  const [account, setAccount] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<number | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const installActive = useRef(false);
@@ -174,10 +198,9 @@ function App() {
     setError("");
     setCancelled(false);
     setStage(stages[0]);
-    const progress = new Channel<string>();
-    progress.onmessage = setStage;
+    const progress = channel<string>(setStage);
     try {
-      setReport(await invoke<Report>("inspect_ipa", { path, progress }));
+      setReport(await inspectIpa(path, progress));
       setStage("Inspection complete");
       setIpaPath(path);
     } catch (e) {
@@ -230,7 +253,7 @@ function App() {
   }
   async function cancel() {
     try {
-      await invoke("cancel_inspection");
+      await cancelInspection();
       setCancelled(true);
     } catch {
       setError(
@@ -239,6 +262,15 @@ function App() {
     }
   }
   const app = report?.bundles.find((b) => b.path === report.main_path);
+  const pipeline: Pipeline = {
+    report,
+    ipaPath,
+    deviceId,
+    team,
+    preparation,
+    signed,
+  };
+  const blocked = signBlocked(pipeline);
   const frameworks =
     report?.bundles.filter((b) => b.kind === "Framework").length ?? 0;
   const nested =
@@ -261,14 +293,14 @@ function App() {
       <main>
         <header>
           <div className="wordmark">orbiter</div>
-          {account ? (
+          {team.account ? (
             <div className="header-account">
-              <span className="header-account-name" title={account}>
-                {account}
+              <span className="header-account-name" title={team.account}>
+                {team.account}
               </span>
               <button
                 className="text-button"
-                onClick={() => void invoke("account_sign_out").catch(() => {})}
+                onClick={() => void accountSignOut().catch(() => {})}
               >
                 Sign out
               </button>
@@ -396,13 +428,9 @@ function App() {
                 paused={installBusy}
                 deviceId={deviceId}
                 ipaPath={ipaPath}
-                hasWatchApp={
-                  report?.bundles.some((b) => b.kind === "Watch app") ?? false
-                }
+                hasWatchApp={hasWatchApp(report)}
                 onPrepared={prepared}
-                onWatch={setWatch}
-                onCertificate={setCertificate}
-                onAccount={setAccount}
+                onStatus={setTeam}
               />
               <p className="hint">
                 A different account on the same company team shares that team's
@@ -569,13 +597,12 @@ function App() {
                             .map((profile) => profile.expires)
                             .sort()[0],
                         )} · ${
-                          certificate
-                            ? "Re-sign to produce an installable build. The original IPA is never changed."
-                            : "Get a development certificate in step 3 before re-signing."
+                          blocked ||
+                          "Re-sign to produce an installable build. The original IPA is never changed."
                         }`
                       : app?.profile?.expires_at
                         ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "The company build's own profile"}`
-                        : "Re-signing needs a development certificate and prepared profiles. Use the existing-signature flow below for a build this iPhone is already provisioned for.")}
+                        : blocked)}
             </p>
             {signed && (
               <details className="signing-log">
@@ -586,26 +613,16 @@ function App() {
           </div>
           <button
             className="primary"
-            disabled={
-              !isTauri() ||
-              signing ||
-              !ipaPath ||
-              !certificate ||
-              !preparation?.profiles.length ||
-              preparation.plan.blockers.length > 0
-            }
+            // One source for the gate and for the sentence beside it, so a refused action can
+            // never be offered without its reason.
+            disabled={!isTauri() || signing || blocked !== ""}
             onClick={() => {
               setSigning(true);
               setSignError(null);
               setSigned(null);
               setSignStep(null);
-              const progress = new Channel<SigningProgress>();
-              progress.onmessage = setSignStep;
-              invoke<Signed>("account_sign_ipa", {
-                path: ipaPath,
-                watch,
-                progress,
-              })
+              const progress = channel<SigningProgress>(setSignStep);
+              signIpa(ipaPath!, team.watch, progress)
                 .then(setSigned)
                 .catch((error) =>
                   setSignError(
