@@ -31,6 +31,33 @@ pub const STAGES: [&str; 5] = [
     "Repackaging",
 ];
 
+/// A record of what the signer did, for a person checking whether it did anything at all.
+///
+/// It carries counts, sizes, and the identifiers already shown in the interface — never a path
+/// from the person's disk, and never a device identifier.
+#[derive(Default)]
+struct Log {
+    stage: &'static str,
+    lines: Vec<String>,
+}
+
+impl Log {
+    fn stage(&mut self, stage: &'static str) {
+        self.stage = stage;
+        self.lines.push(stage.to_string());
+    }
+    fn note(&mut self, line: String) {
+        self.lines.push(format!("  {line}"));
+    }
+    /// Say which stage a failure happened in: "it did not work" is not a diagnosis.
+    fn failed(&self, error: String) -> String {
+        format!(
+            "Signing failed while {}. {error}",
+            self.stage.to_lowercase()
+        )
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Signed {
     /// The new IPA. The original is untouched.
@@ -42,6 +69,8 @@ pub struct Signed {
     /// Bundles the plan left out of the build, by their original identifier.
     pub removed: Vec<String>,
     pub message: String,
+    /// What each stage did, in order.
+    pub log: Vec<String>,
 }
 
 /// Reasons signing is refused before the archive is opened.
@@ -77,7 +106,7 @@ fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
 
 /// Extract the archive, applying the same refusals inspection applies. Symlinks, special files,
 /// absolute or traversing paths, and case-colliding duplicates are rejected rather than written.
-fn extract(ipa: &Path, dest: &Path, cancel: &AtomicBool) -> Result<(), String> {
+fn extract(ipa: &Path, dest: &Path, cancel: &AtomicBool) -> Result<usize, String> {
     let file = fs::File::open(ipa).map_err(|_| "The IPA could not be opened.".to_string())?;
     let size = file
         .metadata()
@@ -93,6 +122,7 @@ fn extract(ipa: &Path, dest: &Path, cancel: &AtomicBool) -> Result<(), String> {
     }
     let mut seen = std::collections::BTreeSet::new();
     let mut written = 0u64;
+    let mut files = 0usize;
     for index in 0..archive.len() {
         cancelled(cancel)?;
         let mut entry = archive
@@ -138,8 +168,9 @@ fn extract(ipa: &Path, dest: &Path, cancel: &AtomicBool) -> Result<(), String> {
             use std::os::unix::fs::PermissionsExt;
             let _ = fs::set_permissions(&target, fs::Permissions::from_mode(mode & 0o777));
         }
+        files += 1;
     }
-    Ok(())
+    Ok(files)
 }
 
 /// Remove every bundle the plan left out, deepest first. This is how a Watch app is dropped: the
@@ -319,6 +350,37 @@ pub fn sign(
     cancel: &AtomicBool,
     mut progress: impl FnMut(&'static str),
 ) -> Result<Signed, String> {
+    let mut log = Log::default();
+    match run(
+        ipa,
+        out_dir,
+        plan,
+        profiles,
+        identity,
+        cancel,
+        &mut progress,
+        &mut log,
+    ) {
+        Ok(mut signed) => {
+            signed.log = log.lines;
+            Ok(signed)
+        }
+        Err(error) => Err(log.failed(error)),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run(
+    ipa: &Path,
+    out_dir: &Path,
+    plan: &Plan,
+    profiles: &[ProfileOutcome],
+    identity: &Identity,
+    cancel: &AtomicBool,
+    progress: &mut impl FnMut(&'static str),
+    log: &mut Log,
+) -> Result<Signed, String> {
+    log.stage("Checking the plan");
     if let Some(refusal) = refusal(plan, profiles, true) {
         return Err(refusal);
     }
@@ -332,10 +394,21 @@ pub fn sign(
     let root = work.path();
 
     progress(STAGES[0]);
-    extract(ipa, root, cancel)?;
+    log.stage(STAGES[0]);
+    let extracted = extract(ipa, root, cancel)?;
+    log.note(format!(
+        "{extracted} file(s), {} MB",
+        fs::metadata(ipa)
+            .map(|m| m.len() / 1024 / 1024)
+            .unwrap_or(0)
+    ));
 
     progress(STAGES[1]);
+    log.stage(STAGES[1]);
     let removed = prune(root, plan)?;
+    for path in &removed {
+        log.note(format!("removed {path}"));
+    }
     let map: BTreeMap<String, String> = plan
         .bundles
         .iter()
@@ -345,8 +418,14 @@ pub fn sign(
         cancelled(cancel)?;
         rewrite_info(&root.join(&bundle.path), &bundle.new_identifier, &map)?;
     }
+    log.note(format!(
+        "{} bundle(s) rewritten, main identifier now {}",
+        plan.bundles.len(),
+        plan.new_main_identifier
+    ));
 
     progress(STAGES[2]);
+    log.stage(STAGES[2]);
     for bundle in plan.bundles.iter().filter(|bundle| bundle.consumes_app_id) {
         let profile = profiles
             .iter()
@@ -357,9 +436,14 @@ pub fn sign(
             &profile.encoded,
         )
         .map_err(|_| "A provisioning profile could not be installed in the build.".to_string())?;
+        log.note(format!(
+            "{} expires {}",
+            bundle.new_identifier, profile.expires
+        ));
     }
 
     progress(STAGES[3]);
+    log.stage(STAGES[3]);
     // Inside out: a container's signature seals its nested bundles, so they must be final first.
     let mut order: Vec<_> = plan.bundles.iter().collect();
     order.sort_by_key(|bundle| std::cmp::Reverse(bundle.path.split('/').count()));
@@ -382,15 +466,27 @@ pub fn sign(
                     signing_failure(&error)
                 )
             })?;
+        log.note(format!(
+            "signed {} as {}",
+            bundle.kind.to_lowercase(),
+            bundle.new_identifier
+        ));
     }
 
     progress(STAGES[4]);
+    log.stage(STAGES[4]);
     let name = ipa
         .file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
         .unwrap_or_else(|| "app".into());
     let output = out_dir.join(format!("{name}-{}.ipa", plan.team_id));
     repackage(root, &output, cancel)?;
+    log.note(format!(
+        "{} MB written",
+        fs::metadata(&output)
+            .map(|meta| meta.len() / 1024 / 1024)
+            .unwrap_or(0)
+    ));
 
     let expires = profiles
         .iter()
@@ -404,6 +500,7 @@ pub fn sign(
         bundles_signed: order.len(),
         removed,
         message: "A signed IPA was produced. The original IPA is unchanged.".into(),
+        log: Vec::new(),
     })
 }
 
@@ -689,5 +786,19 @@ mod tests {
         assert!(names.contains(&"Payload/App.app/App".to_string()));
         let entry = archive.by_name("Payload/App.app/App").expect("executable");
         assert_eq!(entry.unix_mode().map(|mode| mode & 0o111), Some(0o111));
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn a_failure_says_which_stage_it_happened_in() {
+        let mut log = Log::default();
+        log.stage(STAGES[3]);
+        let message = log.failed("The signature could not be produced.".into());
+        assert!(message.contains("signing bundles"));
+        assert!(message.contains("The signature could not be produced."));
     }
 }

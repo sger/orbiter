@@ -190,6 +190,12 @@ async function nativeMock(
               removed: ["Payload/Test.app/Watch/Watch.app"],
               message:
                 "A signed IPA was produced. The original IPA is unchanged.",
+              log: [
+                "Extracting the archive",
+                "  4213 file(s), 207 MB",
+                "Signing bundles",
+                "  signed main app as com.example.app.abc123",
+              ],
             };
           }
           if (cmd === "account_prepare_provisioning") {
@@ -958,6 +964,11 @@ test("signing produces a separate build and the installer moves to it", async ({
   await expect(page.getByText("Signed build expires")).toBeVisible();
   await expect(page.getByText("Signed 3 bundle(s), removed 1")).toBeVisible();
   await expect(page.getByText("Install the signed build")).toBeVisible();
+  // The record of what happened is in the interface, not only in a terminal.
+  await page.getByText("What signing did").click();
+  await expect(
+    page.getByText("signed main app as com.example.app.abc123"),
+  ).toBeVisible();
   await expect
     .poll(async () =>
       page.evaluate(() => (window as any).__signRequested?.path),

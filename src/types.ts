@@ -53,4 +53,6 @@ export type Signed = {
   bundles_signed: number;
   removed: string[];
   message: string;
+  /// What each signing stage did, in order.
+  log: string[];
 };

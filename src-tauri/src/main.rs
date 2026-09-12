@@ -308,14 +308,31 @@ async fn account_sign_ipa(
         .app_data_dir()
         .map_err(|_| "Cannot locate application storage.")?
         .join("signed");
-    state
+    tracing::info!(operation = "signing", stage = "started");
+    let signed = state
         .sign_ipa(
             std::path::PathBuf::from(path),
             out_dir,
             orbiter_core::plan::WatchChoice::parse(&watch),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
-        .await
+        .await;
+    match &signed {
+        Ok(signed) => {
+            // The same record the interface shows, so a terminal and a screenshot agree.
+            for line in &signed.log {
+                tracing::info!(operation = "signing", detail = %line);
+            }
+            tracing::info!(
+                operation = "signing",
+                stage = "finished",
+                bundles = signed.bundles_signed,
+                removed = signed.removed.len()
+            );
+        }
+        Err(error) => tracing::info!(operation = "signing", stage = "failed", detail = %error),
+    }
+    signed
 }
 #[tauri::command]
 async fn account_forget_signing_key(

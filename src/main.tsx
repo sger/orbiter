@@ -574,6 +574,12 @@ function App() {
                       ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
                       : "Re-signing requires a signing certificate and prepared profiles. Use the existing-signature flow below for an authorized build.")}
             </p>
+            {signed && (
+              <details className="signing-log">
+                <summary>What signing did</summary>
+                <pre>{(signed.log ?? []).join("\n")}</pre>
+              </details>
+            )}
           </div>
           <button
             className="primary"
