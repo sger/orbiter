@@ -108,6 +108,10 @@ fn redacted_auth_error_detail(report: &Report) -> String {
         if let Some(error) = cause.downcast_current_context::<SideloadError>() {
             match error {
                 SideloadError::AuthWithMessage(-22320, _) => return "Apple requires federated organization sign-in. Orbiter does not yet support that flow; retrying the password or entering a Microsoft Authenticator code here will not complete it.".into(),
+                // Allowlisted meanings for the codes a person can act on. The numeric code is
+                // kept for traceability; Apple's own text is still never shown.
+                SideloadError::AuthWithMessage(-20101 | -22406, _) => return "Apple did not accept this account and password. Check the password by signing in at appleid.apple.com, then retype it here — the field is cleared after every attempt. A Managed Apple ID that signs in through an organization's identity provider cannot be used here at all.".into(),
+                SideloadError::AuthWithMessage(-21669, _) => return "Apple did not accept that verification code. Request a new code and try again.".into(),
                 SideloadError::AuthWithMessage(code, _) => return format!("Apple authentication error {code}."),
                 SideloadError::RateLimited(retry, shape) => {
                     let wait = match retry {

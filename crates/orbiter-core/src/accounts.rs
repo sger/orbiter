@@ -686,6 +686,28 @@ mod tests {
     }
 
     #[test]
+    fn rejected_credentials_are_explained_without_apple_text() {
+        for code in [-20101, -22406] {
+            let error = rootcause::report!(isideload::SideloadError::AuthWithMessage(
+                code,
+                "SECRET_SERVER_TEXT".into()
+            ))
+            .into_dynamic();
+            let message = isideload::redacted_auth_error(&error);
+            assert!(message.contains("did not accept this account and password"));
+            assert!(message.contains("appleid.apple.com"));
+            assert!(!message.contains("SECRET"));
+            // A rejection is conclusive: it must not be softened into "Apple did not complete".
+            assert!(!isideload::auth_error_is_inconclusive(&error));
+        }
+        let wrong_code = rootcause::report!(isideload::SideloadError::AuthWithMessage(
+            -21669,
+            "SECRET".into()
+        ))
+        .into_dynamic();
+        assert!(isideload::redacted_auth_error(&wrong_code).contains("verification code"));
+    }
+    #[test]
     fn authentication_stages_are_allowlisted() {
         for (context, expected) in [
             (
