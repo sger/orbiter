@@ -41,6 +41,7 @@ export function Stage({
   const open = state === "current" || reopened;
   return (
     <section
+      tabIndex={-1}
       data-stage={id}
       className="scroll-mt-6 border-t border-line-soft py-3.5 first-of-type:border-t-0"
       aria-current={open || undefined}

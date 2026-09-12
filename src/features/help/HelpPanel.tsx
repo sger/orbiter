@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import { sections } from "./content";
+import { HelpContent } from "./HelpContent";
 
 /// A slide-over beside the work, not a modal over it.
 ///
@@ -51,14 +51,7 @@ export function HelpPanel({
         </button>
       </div>
       <div className="help-body overflow-y-auto px-[22px] pt-1 pb-8 text-sm leading-[1.7] text-[#5c6a5d]">
-        {sections.map((entry) => (
-          <section key={entry.id} id={`help-${entry.id}`}>
-            <h3 className="mt-6 mb-2 text-[15px] text-ink-strong">
-              {entry.title}
-            </h3>
-            {entry.body}
-          </section>
-        ))}
+        <HelpContent />
       </div>
     </div>
   );

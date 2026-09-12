@@ -1,3 +1,4 @@
+import { Checkbox } from "../../components/ui/Checkbox";
 import { useEffect, useRef, useState } from "react";
 import {
   cancelInstall,
@@ -34,8 +35,7 @@ export function InstallSigned({
   function discard() {
     const old = current.current;
     current.current = null;
-    if (old)
-      void discardInstall(old.token).catch(() => {});
+    if (old) void discardInstall(old.token).catch(() => {});
   }
   useEffect(() => {
     generation.current++;
@@ -120,9 +120,7 @@ export function InstallSigned({
     setJob(null);
     const progress = channel<Job>(setJob);
     try {
-      setJob(
-        await executeInstall(review.token, accepted, progress),
-      );
+      setJob(await executeInstall(review.token, accepted, progress));
     } catch (e) {
       setError(String(e));
       try {
@@ -219,17 +217,15 @@ export function InstallSigned({
               </div>
             ) : (
               <>
-                <label className="install-consent">
-                  <input
-                    type="checkbox"
-                    checked={accepted}
-                    onChange={(e) => setAccepted(e.target.checked)}
-                    disabled={working}
-                  />
+                <Checkbox
+                  checked={accepted}
+                  onChange={(e) => setAccepted(e.target.checked)}
+                  disabled={working}
+                >
                   I authorize installation on this iPhone, including replacement
                   of the same app if present. I understand data retention is not
                   guaranteed.
-                </label>
+                </Checkbox>
                 <button
                   className="review-button"
                   disabled={!accepted || working}

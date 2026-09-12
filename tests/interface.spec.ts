@@ -433,6 +433,14 @@ test("device refresh removes disconnected selection and surfaces service errors"
     page.getByLabel("Physical iPhone", { exact: true }),
   ).toBeDisabled();
   await expect(page.getByText("Synthetic pairing verified.")).toHaveCount(0);
+  // Wrapped recovery instructions must clear the next section's divider.
+  for (const width of [1120, 780]) {
+    await page.setViewportSize({ width, height: 840 });
+    const message = (await page.locator(".device-status p").boundingBox())!;
+    const account = (await page.locator(".accounts").boundingBox())!;
+    expect(account.y - (message.y + message.height)).toBeGreaterThanOrEqual(16);
+  }
+
   await page.evaluate(() => {
     (window as any).__deviceResult = {
       devices: [],
@@ -1243,7 +1251,7 @@ test("help explains the losses without the panels having to", async ({
   await nativeMock(page, "success");
   // Closed until asked for: it must not occupy the window by default.
   await expect(page.getByRole("dialog", { name: "Help" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Help" }).click();
+  await page.getByRole("button", { name: "What is stored" }).click();
   const help = page.getByRole("dialog", { name: "Help" });
   await expect(help).toBeVisible();
   // The four capability losses and the seven-day rule are stated in one place.
@@ -1291,4 +1299,270 @@ test("a finished step collapses to its result and can be reopened", async ({
   await page.getByRole("button", { name: "Change Signing team" }).click();
   await expect(select).toBeVisible();
   await expect(select).toHaveValue("TEAM2");
+});
+
+for (const viewport of [
+  { width: 1120, height: 840 },
+  { width: 780, height: 640 },
+]) {
+  test(`account controls align and remain usable at ${viewport.width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await nativeMock(page, "success");
+    const email = page.getByLabel("Apple account email");
+    const password = page.getByLabel("Password", { exact: true });
+    const consent = page.getByRole("checkbox", {
+      name: /I agree to authenticate/,
+    });
+    const button = page.getByRole("button", { name: "Sign in to Apple" });
+    const e = (await email.boundingBox())!;
+    const p = (await password.boundingBox())!;
+    const c = (await consent.boundingBox())!;
+    const b = (await button.boundingBox())!;
+    expect(Math.abs(e.y - p.y)).toBeLessThan(1);
+    expect(Math.abs(e.width - p.width)).toBeLessThan(1);
+    expect(c.y).toBeGreaterThan(e.y + e.height);
+    expect(b.y).toBeGreaterThan(c.y + c.height);
+    expect(Math.abs(e.x - c.x)).toBeLessThan(1);
+    expect(Math.abs(e.x - b.x)).toBeLessThan(1);
+    await consent.locator("..").locator("span").click();
+    await expect(consent).toBeChecked();
+    await consent.focus();
+    await page.keyboard.press("Space");
+    await expect(consent).not.toBeChecked();
+    await expect(consent).toBeFocused();
+    const geometry = await consent.locator("..").evaluate((label) => {
+      const input = label.querySelector("input")!.getBoundingClientRect();
+      const text = label.querySelector("span")!.getBoundingClientRect();
+      return { gap: text.left - input.right, top: input.top - text.top };
+    });
+    expect(geometry.gap).toBe(10);
+    expect(geometry.top).toBe(2);
+    const selects = await page
+      .locator(".select-control")
+      .evaluateAll((controls) =>
+        controls.map((control) => {
+          const style = getComputedStyle(control);
+          return [
+            style.height,
+            style.borderRadius,
+            style.borderColor,
+            style.backgroundColor,
+          ];
+        }),
+      );
+    expect(selects[0]).toEqual(selects[1]);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/account-${viewport.width}.png`,
+      fullPage: true,
+    });
+  });
+}
+
+test("sidebar toggles, follows shortcuts, and preserves the user's choice on resize", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const sidebar = page.getByRole("complementary", {
+    name: "Workspace sidebar",
+  });
+  await expect(sidebar).toHaveCSS("width", "220px");
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar).toHaveCSS("width", "68px");
+  await page.setViewportSize({ width: 780, height: 640 });
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(sidebar).toHaveCSS("width", "220px");
+  // Exercise a narrower browser preview as well as the native minimum.
+  await page.setViewportSize({ width: 680, height: 640 });
+  // This forces the form below its two-column threshold.
+  const email = (await page.getByLabel("Apple account email").boundingBox())!;
+  const password = (await page
+    .getByLabel("Password", { exact: true })
+    .boundingBox())!;
+  expect(password.y).toBeGreaterThan(email.y + email.height);
+  expect(password.x).toBe(email.x);
+  await page.locator(".signing-progress > summary").click();
+  await page
+    .getByRole("button", { name: "iPhone: waiting", exact: true })
+    .click();
+  await expect(page.locator('[data-stage="device"]')).toBeFocused();
+  await page.setViewportSize({ width: 1120, height: 840 });
+  await expect(sidebar).toHaveCSS("width", "220px");
+  await page.getByRole("link", { name: "Help", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Help", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "IPAs", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "IPAs", exact: true }),
+  ).toBeVisible();
+});
+
+test("all account dropdowns share geometry and long labels stay within the form", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as any).__withWatchApp = true;
+  });
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page.getByRole("checkbox", { name: /I agree to authenticate/ }).check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
+  await page.getByRole("button", { name: "Change Signing team" }).click();
+  await page.setViewportSize({ width: 780, height: 640 });
+  await page
+    .getByLabel("Signing team", { exact: true })
+    .evaluate((select: HTMLSelectElement) => {
+      select.selectedOptions[0].textContent =
+        "A very long developer team name ".repeat(20);
+    });
+  const heights = await page
+    .locator(".select-control")
+    .evaluateAll((controls) =>
+      controls.map((control) => control.getBoundingClientRect().height),
+    );
+  expect(heights).toEqual([42, 42, 42]);
+  for (const label of await page.locator(".checkbox-field").all()) {
+    const bounds = await label.evaluate((element) => {
+      const input = element.querySelector("input")!.getBoundingClientRect();
+      const text = element.querySelector("span")!.getBoundingClientRect();
+      return {
+        gap: text.left - input.right,
+        top: input.top - text.top,
+        right: text.right,
+        edge: element.getBoundingClientRect().right,
+      };
+    });
+    expect(bounds.gap).toBe(10);
+    expect(bounds.top).toBe(2);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.edge);
+  }
+  await page.getByLabel("Watch app", { exact: true }).focus();
+  await expect(page.getByLabel("Watch app", { exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("checkbox", { name: /I understand ten identifiers/ }),
+  ).toBeFocused();
+  await page.getByLabel("Watch app", { exact: true }).selectOption("remove");
+  await expect(page.getByLabel("Watch app", { exact: true })).toHaveValue(
+    "remove",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "test-results/account-signed-in.png",
+    fullPage: true,
+  });
+});
+
+test("sidebar accepts additional navigation items without hiding Help or the toggle", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const reactUrl = "/node_modules/.vite/deps/react.js";
+    const domUrl = "/node_modules/.vite/deps/react-dom_client.js";
+    const railUrl = "/src/app/Rail.tsx";
+    const [{ default: React }, { default: ReactDOM }, { Rail }] =
+      await Promise.all([import(reactUrl), import(domUrl), import(railUrl)]);
+    document.getElementById("root")!.style.display = "none";
+    const host = document.createElement("div");
+    host.className = "shell";
+    host.dataset.expanded = "true";
+    document.body.append(host);
+    ReactDOM.createRoot(host).render(
+      React.createElement(Rail, {
+        expanded: true,
+        onToggle: () => {},
+        route: "ipas",
+        items: Array.from({ length: 40 }, (_, i) => ({
+          id: `page-${i}`,
+          label: `Page ${i}`,
+          icon: null,
+        })),
+      }),
+    );
+  });
+  await page
+    .getByRole("link", { name: "Page 39", exact: true })
+    .scrollIntoViewIfNeeded();
+  await expect(
+    page.getByRole("link", { name: "Page 39", exact: true }),
+  ).toBeInViewport();
+  await expect(
+    page.getByRole("link", { name: "Help", exact: true }),
+  ).toBeInViewport();
+  await expect(
+    page.getByRole("button", { name: "Collapse sidebar" }),
+  ).toBeInViewport();
+});
+
+test("app navigation preserves the IPA, form state, and progress disclosure", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByRole("checkbox", { name: /I agree to authenticate/ }).check();
+  await page.locator(".signing-progress > summary").click();
+  await expect(
+    page.getByRole("complementary").getByRole("button", { name: /Build:/ }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "Help", exact: true }).click();
+  await expect(page).toHaveURL(/#\/help$/);
+  await expect(
+    page.getByRole("link", { name: "Help", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("heading", { name: "Help", exact: true }),
+  ).toBeFocused();
+  await expect(page.getByLabel("Apple account email")).not.toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/ipas$/);
+  await expect(
+    page.getByRole("heading", { name: "Synthetic Test App" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Apple account email")).toHaveValue(
+    "test@example.invalid",
+  );
+  await expect(
+    page.getByRole("checkbox", { name: /I agree to authenticate/ }),
+  ).toBeChecked();
+  await expect(page.locator(".signing-progress")).toHaveAttribute("open", "");
+  await page.goForward();
+  await expect(
+    page.getByRole("heading", { name: "Help", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "IPAs", exact: true }).click();
+  await expect(
+    page.getByRole("link", { name: "IPAs", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+});
+
+test("Help can be opened directly and unknown routes recover to IPAs", async ({
+  page,
+}) => {
+  await page.goto("/#/help");
+  await expect(
+    page.getByRole("heading", { name: "Help", exact: true }),
+  ).toBeVisible();
+  await page.goto("/#/missing");
+  await expect(page).toHaveURL(/#\/ipas$/);
+  await expect(
+    page.getByRole("heading", { name: "IPAs", exact: true }),
+  ).toBeVisible();
 });

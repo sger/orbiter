@@ -3,8 +3,7 @@
 /* The palette the interface already had, named once so it stops being retyped as hex.
    These are the values that were scattered through the stylesheet, not a new design. */
 @theme {
-  --font-sans:
-    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
   /* Ink */
   --color-ink: #263c39;
@@ -260,43 +259,16 @@
     padding-bottom: 18px;
   }
   .destination > label,
-  .identity-grid,
-  .destination > .select-wrap,
   .destination > .hint {
     margin-left: 22px;
     margin-right: 22px;
   }
-  .destination label {
+  .destination label:not(.checkbox-field) {
     display: block;
     font-size: 13px;
     font-weight: 600;
     color: var(--color-ink-muted);
     margin-bottom: 7px;
-  }
-  .select-wrap {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    border: 1px solid var(--color-line);
-    background: var(--color-surface-soft);
-    border-radius: 6px;
-    padding: 10px 11px;
-    color: var(--color-ink-faint);
-  }
-  .select-wrap select {
-    appearance: none;
-    width: 100%;
-    min-width: 0;
-    border: 0;
-    background: transparent;
-    color: #939e91;
-    font-size: 14px;
-  }
-  .identity-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 16px;
   }
   .hint {
     font-size: 13px;
@@ -728,9 +700,6 @@
     .workspace {
       gap: 14px;
     }
-    .identity-grid {
-      grid-template-columns: 1fr;
-    }
     .empty-assessment {
       min-height: 390px;
     }
@@ -754,9 +723,6 @@
       width: 100%;
       justify-content: center;
     }
-    .identity-grid {
-      grid-template-columns: 1fr 1fr;
-    }
     footer {
       gap: 12px;
     }
@@ -767,6 +733,7 @@
 
   .devices {
     margin: 0 22px;
+    padding-bottom: 16px;
   }
   .device-label {
     display: flex;
@@ -790,9 +757,6 @@
   }
   .device-status p {
     margin: 4px 0 0;
-  }
-  .devices select:enabled {
-    color: #496641;
   }
 
   .signed-install {
@@ -851,17 +815,6 @@
     margin: 8px 0;
     line-height: 1.6;
   }
-  .install-consent {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    line-height: 1.6;
-    margin: 16px 0;
-  }
-  .install-consent input {
-    margin-top: 5px;
-    flex-shrink: 0;
-  }
   .install-job progress {
     width: 100%;
     accent-color: #386e54;
@@ -885,47 +838,8 @@
     /* Match the inset the destination panel's other rows use, so nothing sits on the border. */
     padding: 20px 22px 0;
   }
-  .accounts input:not([type="checkbox"]),
-  .accounts select {
-    width: 100%;
-    min-width: 0;
-    border: 1px solid var(--color-line-strong);
-    border-radius: 6px;
-    padding: 12px;
-    color: inherit;
-    background: #f9fbf8;
-    font: inherit;
-  }
-  /* Native select chrome does not match anything else in the panel: draw the control, and one
-     chevron of our own, so the team and Watch choices read like the device selector above them. */
-  .accounts select {
-    appearance: none;
-    padding-right: 34px;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23708071' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    text-overflow: ellipsis;
-  }
-  .accounts select:disabled {
-    color: var(--color-ink-faint);
-    opacity: 1;
-  }
-  .accounts select:focus-visible {
-    outline: 2px solid #9fb79a;
-    outline-offset: 1px;
-  }
   .accounts .secondary {
     margin: 12px 0;
-  }
-  .auth-consent {
-    display: flex;
-    align-items: start;
-    gap: 10px;
-    line-height: 1.6;
-  }
-  .auth-consent input {
-    margin-top: 5px;
-    flex-shrink: 0;
   }
   .auth-actions {
     display: flex;
@@ -1070,5 +984,343 @@
   /* Kept as a hook: the summary is the one part of a stage a test identifies by role-free text. */
   .stage-summary {
     min-width: 0;
+  }
+}
+
+@layer components {
+  .shell {
+    --sidebar-width: 68px;
+  }
+  .shell[data-expanded="true"] {
+    --sidebar-width: 220px;
+  }
+  .app-main {
+    margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
+    min-width: 0;
+    padding-inline: 28px;
+    container-type: inline-size;
+    container-name: workspace;
+  }
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  @container workspace (min-width: 900px) {
+    .workspace {
+      grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr);
+    }
+  }
+  .accounts {
+    container-type: inline-size;
+    container-name: account;
+  }
+  .auth-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-block: 16px;
+  }
+  @container account (min-width: 440px) {
+    .auth-fields {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .text-field {
+    min-width: 0;
+  }
+  .text-field input,
+  .two-factor input {
+    width: 100%;
+    min-width: 0;
+    height: 42px;
+    padding: 10px 11px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-soft);
+    font: inherit;
+  }
+  .text-field input:disabled {
+    color: var(--color-ink-faint);
+  }
+  .text-field input:focus-visible,
+  .two-factor input:focus-visible {
+    outline: 2px solid #47a898;
+    outline-offset: 2px;
+  }
+  .checkbox-field {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-block: 14px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--color-ink-muted);
+    line-height: 1.6;
+    cursor: pointer;
+  }
+  .checkbox-field input {
+    appearance: auto;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    margin: 2px 0 0;
+    accent-color: #386e54;
+  }
+  .checkbox-field span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .checkbox-field:has(input:disabled) {
+    cursor: not-allowed;
+    color: var(--color-ink-soft);
+  }
+  .checkbox-field input:focus-visible {
+    outline: 2px solid #47a898;
+    outline-offset: 3px;
+  }
+  .select-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 42px;
+    min-width: 0;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+    background: var(--color-surface-soft);
+    color: var(--color-ink-muted);
+  }
+  .select-control select {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    padding: 0 34px 0 11px;
+    border-radius: inherit;
+    font-size: 14px;
+    color: var(--color-ink);
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .select-control:has(.select-icon) select {
+    padding-left: 38px;
+  }
+  .select-icon {
+    position: absolute;
+    left: 11px;
+    display: flex;
+    pointer-events: none;
+  }
+  .select-chevron {
+    position: absolute;
+    right: 11px;
+    pointer-events: none;
+  }
+  .select-control[data-disabled] {
+    color: var(--color-ink-faint);
+  }
+  .select-control select:disabled {
+    color: var(--color-ink-faint);
+    opacity: 1;
+    cursor: not-allowed;
+  }
+  .select-control select:focus-visible {
+    outline: 2px solid #47a898;
+    outline-offset: 2px;
+  }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 10;
+    width: var(--sidebar-width);
+    display: flex;
+    flex-direction: column;
+    padding: 22px 10px 16px;
+    background: var(--color-rail);
+    color: var(--color-rail-ink);
+  }
+  .sidebar-top {
+    flex: none;
+    margin-bottom: 16px;
+  }
+  .sidebar-top a {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--color-rail-bright);
+    text-decoration: none;
+    font-size: 21px;
+  }
+  .sidebar-toggle,
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 36px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    color: var(--color-rail-ink);
+    background: transparent;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .sidebar-toggle {
+    flex: none;
+    margin-bottom: 16px;
+  }
+  .sidebar-item svg,
+  .sidebar-toggle svg {
+    flex-shrink: 0;
+  }
+  .sidebar-item span:last-child {
+    overflow-wrap: anywhere;
+  }
+  .sidebar-item:hover,
+  .sidebar-toggle:hover,
+  .sidebar-item[aria-current="page"] {
+    background: #52726866;
+    color: var(--color-rail-bright);
+  }
+  .sidebar-item[data-state="current"] {
+    background: #52726844;
+    color: var(--color-rail-bright);
+  }
+  .sidebar-navigation {
+    flex: 1 1 auto;
+    min-height: 64px;
+    overflow-y: auto;
+    padding: 4px;
+  }
+  .stage-dot {
+    display: grid;
+    place-items: center;
+    flex: 0 0 14px;
+    height: 14px;
+    border: 1px solid var(--color-rail-line);
+    border-radius: 50%;
+  }
+  [data-state="done"] .stage-dot {
+    background: var(--color-go);
+    border-color: var(--color-go);
+    color: var(--color-rail);
+  }
+  [data-state="current"] .stage-dot {
+    background: var(--color-rail-bright);
+    border-color: var(--color-rail-bright);
+  }
+  .sidebar-utilities {
+    flex: 0 1 auto;
+    min-height: 48px;
+    max-height: 35%;
+    overflow-y: auto;
+    border-top: 1px solid var(--color-rail-line);
+    margin-top: 16px;
+    padding: 8px 4px 4px;
+  }
+  [data-expanded="false"] .sidebar-item,
+  [data-expanded="false"] .sidebar-toggle {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  [data-stage]:focus-visible {
+    outline: 2px solid #47a898;
+    outline-offset: 3px;
+  }
+  @media (max-width: 900px) {
+    .app-main {
+      padding-inline: 18px;
+    }
+  }
+}
+
+@layer components {
+  .page-title {
+    margin: 0 0 16px;
+    font-size: 22px;
+    font-weight: 650;
+    color: var(--color-ink-strong);
+  }
+  .page-title:focus {
+    outline: none;
+  }
+  .sidebar-item {
+    text-decoration: none;
+  }
+  .sidebar-navigation .sidebar-item + .sidebar-item {
+    margin-top: 4px;
+  }
+  .help-page {
+    padding: 0 24px 24px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .signing-progress {
+    margin-bottom: 20px;
+  }
+  .signing-progress > summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 13px;
+  }
+  .signing-progress > summary span {
+    margin-left: auto;
+    color: var(--color-ink-muted);
+  }
+  .signing-progress > summary svg {
+    flex-shrink: 0;
+  }
+  .signing-progress[open] > summary svg {
+    transform: rotate(180deg);
+  }
+  .signing-progress ol {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    list-style: none;
+    gap: 4px 12px;
+    padding: 4px 14px 14px;
+    margin: 0;
+  }
+  .signing-progress button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 40px;
+    padding: 8px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-ink);
+    text-align: left;
+    font-size: 13px;
+  }
+  .signing-progress button:hover {
+    background: var(--color-surface-tint);
+  }
+  .signing-progress button[data-state="current"] {
+    background: var(--color-surface-tint);
+  }
+  .signing-progress small {
+    margin-left: auto;
+    color: var(--color-ink-muted);
+  }
+  .signing-progress .stage-dot {
+    border-color: var(--color-line-strong);
+  }
+  .signing-progress [data-state="current"] .stage-dot {
+    background: var(--color-go-deep);
+    border-color: var(--color-go-deep);
+  }
+  .signing-progress [data-state="done"] .stage-dot {
+    border-color: var(--color-go);
   }
 }

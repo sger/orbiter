@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { discoverDevices, isTauri } from "../../ipc/commands";
-import type { Device, Discovery } from "../../types";
+import type { Discovery } from "../../types";
 import { RefreshCw, Smartphone } from "lucide-react";
-import { Select } from "../../app/Select";
+import { Select } from "../../components/ui/Select";
 const labels = {
   paired: "Pairing verified",
   locked: "Locked",
@@ -71,7 +71,7 @@ export function Devices({
     );
   }, [device?.id, device?.state, device?.connection, onSelect]);
   return (
-    <div className="devices">
+    <div className="devices" tabIndex={-1} data-stage="device">
       <div className="device-label">
         <label htmlFor="device">Physical iPhone</label>
         <button

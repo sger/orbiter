@@ -44,8 +44,12 @@ export const accountSignIn = (
   password: string,
   consent: boolean,
 ) => invoke<AccountView>("account_sign_in", { email, password, consent });
-export const accountAnswer = (answer: unknown) =>
-  invoke<AccountView>("account_answer", { answer });
+export type AccountAnswer =
+  | { action: "code"; value: string }
+  | { action: "sms"; value: number }
+  | { action: "devices" | "resend" };
+export const accountAnswer = (challengeId: string, answer: AccountAnswer) =>
+  invoke<AccountView>("account_answer", { challengeId, answer });
 export const accountSignOut = () => invoke<AccountView>("account_sign_out");
 export const accountSelectTeam = (id: string) =>
   invoke<AccountView>("account_select_team", { id });
