@@ -106,3 +106,11 @@ Verified initial-login 503 compatibility regression: credential-free direct-Appl
 Against the personal free team, Orbiter registered the plan's rewritten identifiers for the company IPA and downloaded their profiles. Apple reported **no capabilities enabled** on either identifier — the main app and the Watch app — and both profiles expire seven days out. That is Apple's own answer to the question the plan could only propose: on this free personal team the build loses push notifications, universal links, Apple Pay, and app-group sharing, and keychain items saved under the company team are unreadable. The identifier budget dropped from ten to eight, two per re-signed IPA.
 
 This validates identifier rewriting, App ID registration, profile download, expiry, and the capability consequences shown to the user. It does not validate signing, installation of a re-signed build, or whether the app runs usefully without those capabilities.
+
+## Signed build on a physical iPhone
+
+The signer produced a build from the company IPA under the free personal team `T8B3X5UL5W`, and it installed and launched on the connected iPhone. Observed, in order: the plan's rewritten identifier `com.stoiximan.Stoiximan.56b41ac3` installed as a second app beside the company build rather than replacing it; iOS refused to launch it until the development certificate was trusted on the device under Settings → General → VPN & Device Management; after trusting, the app launched.
+
+**Push notifications do not work in the re-signed build.** This is the plan's stated consequence occurring, not a defect: Apple enabled no capabilities on either App ID registered for this team, so the profile authorises no push entitlement and the build is signed without one. Associated domains, Apple Pay, and app-group sharing are unavailable for the same reason and have not been separately confirmed on the device.
+
+One signing defect was found by Orbiter's own installation preflight before anything reached the phone: identifiers were rewritten by matching string values, which renamed `CFBundleExecutable` in the one framework whose bundle identifier equalled its executable's filename. Rewriting is now keyed. Signing the 24-bundle build takes about eleven seconds once dependencies are built with optimisations.

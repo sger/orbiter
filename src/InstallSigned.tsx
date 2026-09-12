@@ -278,6 +278,22 @@ export function InstallSigned({
                   : `Installation: ${job.stage}`}
             </strong>
             <p>{job.message}</p>
+            {signed && job.stage === "installed" && (
+              // iOS refuses to run a build signed by a free personal team until the certificate
+              // is trusted on the device. It is asked once per certificate, so a weekly re-sign
+              // with the same certificate does not ask again.
+              <div className="install-next">
+                <strong>
+                  Trust the developer on the iPhone before launching
+                </strong>
+                <p>
+                  Settings → General → VPN &amp; Device Management → the
+                  developer entry for your Apple account → Trust. The iPhone
+                  needs internet access to verify it. This is asked once per
+                  signing certificate, not once per app.
+                </p>
+              </div>
+            )}
             {job.stage === "transferring" && (
               <>
                 <progress max={job.total_bytes} value={job.transferred_bytes} />

@@ -1036,3 +1036,19 @@ details[open] > summary > svg {
   white-space: pre-wrap;
   overflow-x: auto;
 }
+
+/* The one manual step iOS still requires after a signed build lands. */
+.install-next {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #dbe6d6;
+  border-radius: 8px;
+  background: #f4f8f1;
+}
+.install-next strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.install-next p {
+  margin: 0;
+}

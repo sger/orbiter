@@ -1002,6 +1002,40 @@ test("signing produces a separate build and the installer moves to it", async ({
       page.evaluate(() => (window as any).__installPrepared?.path),
     )
     .toBe("/synthetic/signed/Test-TEAM2.ipa");
+
+  // A free-team build will not launch until its certificate is trusted on the device, so the
+  // one manual step left is stated where the install finishes.
+  await page.evaluate(() => {
+    (window as any).__reviewResult = {
+      token: "synthetic-review",
+      app_name: "Synthetic Test App",
+      bundle_id: "com.example.app.abc123",
+      version: "1.0",
+      device_name: "Synthetic iPhone",
+      size_bytes: 1048576,
+      sha256: "synthetic-fingerprint",
+      existing_app: null,
+      blockers: [],
+      notes: [],
+    };
+    (window as any).__jobResult = {
+      id: "job",
+      stage: "installed",
+      message: "iOS reported installation complete.",
+      transferred_bytes: 10,
+      total_bytes: 10,
+      device_percent: null,
+      cleanup_pending: false,
+    };
+  });
+  await page.getByRole("button", { name: "Review installation" }).click();
+  await page
+    .getByRole("checkbox", { name: /I authorize installation/ })
+    .check();
+  await page.getByRole("button", { name: "Install unchanged IPA" }).click();
+  await expect(
+    page.getByText("Trust the developer on the iPhone"),
+  ).toBeVisible();
 });
 
 test("withdrawing a certificate is offered only when it is the only way forward", async ({
@@ -1053,4 +1087,66 @@ test("withdrawing a certificate is offered only when it is the only way forward"
       () => (window as any).__withdrawRequested?.acknowledged,
     ),
   ).toBe(true);
+});
+
+test("a signed build says how to trust it before it will launch", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.evaluate(() => {
+    (window as any).__jobResult = {
+      id: "job",
+      stage: "installed",
+      message: "iOS reported installation complete.",
+      transferred_bytes: 10,
+      total_bytes: 10,
+      device_percent: null,
+      cleanup_pending: false,
+    };
+    (window as any).__reviewResult = {
+      token: "synthetic-review",
+      app_name: "Synthetic Test App",
+      bundle_id: "test.synthetic",
+      version: "1.0",
+      device_name: "Synthetic iPhone",
+      size_bytes: 1048576,
+      sha256: "synthetic-fingerprint",
+      existing_app: null,
+      blockers: [],
+      notes: [],
+    };
+  });
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  await page.evaluate(() => {
+    (window as any).__deviceResult = {
+      devices: [
+        {
+          id: 1,
+          name: "Synthetic iPhone",
+          product_type: "iPhoneTest",
+          ios_version: "18.0",
+          connection: "USB",
+          state: "paired",
+          message: "Synthetic pairing verified.",
+        },
+      ],
+      service_available: true,
+      message: null,
+    };
+  });
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByLabel("Physical iPhone")).toHaveValue("1");
+
+  // An unchanged company build is already trusted on a provisioned device: no instruction.
+  await page.getByRole("button", { name: "Review installation" }).click();
+  await page
+    .getByRole("checkbox", { name: /I authorize installation/ })
+    .check();
+  await page.getByRole("button", { name: "Install unchanged IPA" }).click();
+  await expect(
+    page.getByText("iOS reported installation complete").first(),
+  ).toBeVisible();
+  await expect(page.getByText("Trust the developer on the iPhone")).toHaveCount(
+    0,
+  );
 });
