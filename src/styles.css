@@ -1014,3 +1014,27 @@ details[open] > summary > svg {
 .register-device > p {
   margin: 0;
 }
+
+.step {
+  display: block;
+  margin-top: 18px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #708071;
+}
+.account-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.original-findings {
+  margin-top: 18px;
+  font-size: 13px;
+  color: #8a9588;
+}
+.original-findings summary {
+  cursor: pointer;
+  padding: 10px 0;
+}

@@ -177,6 +177,55 @@ async function nativeMock(
               message: "A development certificate was issued.",
             };
           }
+          if (cmd === "account_prepare_provisioning") {
+            (window as any).__provisioningRequested = {
+              path: args.path,
+              acknowledged: args.acknowledged,
+            };
+            return {
+              plan: {
+                new_main_identifier: "com.example.app.abc123",
+                blockers: [],
+                decisions: [],
+                consequences: [
+                  "A Personal Team profile expires after seven days, so the app must be re-signed and reinstalled every week.",
+                ],
+                app_ids_required: 1,
+                bundles: [
+                  {
+                    name: "App",
+                    identifier: "com.example.app",
+                    new_identifier: "com.example.app.abc123",
+                    capabilities: [
+                      {
+                        key: "aps-environment",
+                        action: "remove",
+                        reason:
+                          "A Personal Team cannot create a push capability.",
+                        consequence:
+                          "Push notifications stop working in the re-signed app.",
+                      },
+                    ],
+                  },
+                ],
+              },
+              app_ids: [
+                {
+                  identifier: "com.example.app.abc123",
+                  created: true,
+                  capabilities: [],
+                  remaining: 9,
+                },
+              ],
+              profiles: [
+                {
+                  identifier: "com.example.app.abc123",
+                  expires: "2026-09-19T14:31:34Z",
+                  uuid: "synthetic-uuid",
+                },
+              ],
+            };
+          }
           if (cmd === "account_refresh_teams")
             return ((window as any).__accountView = {
               stage: "signed_out",
@@ -545,6 +594,59 @@ test("account flow works without a manual support check, requires consent, and n
   await expect(
     page.getByRole("button", { name: "Sign in to Apple" }),
   ).toBeEnabled();
+});
+
+test("provisioning replaces unverified findings with what the team established", async ({
+  page,
+}) => {
+  await nativeMock(page, "success");
+  await page.getByRole("button", { name: /Drop your IPA/ }).click();
+  // Before provisioning, the panel can only say the identity is unknown.
+  await expect(page.getByText("Signing identity required")).toBeVisible();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Verification code").fill("123456");
+  await page.getByRole("button", { name: "Verify code" }).click();
+  await page.getByLabel("Signing team").selectOption("TEAM2");
+  await page
+    .getByLabel("I understand ten identifiers per seven days", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Prepare identifiers & profiles" })
+    .click();
+
+  // Afterwards it states what Apple decided, against the identifier that will install.
+  await expect(
+    page.getByText("Identifiers and profiles prepared"),
+  ).toBeVisible();
+  await expect(
+    page.locator(".findings h4", { hasText: "Push notifications" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Push notifications stop working in the re-signed app."),
+  ).toBeVisible();
+  await expect(
+    page
+      .locator(".findings code", { hasText: "com.example.app.abc123" })
+      .first(),
+  ).toBeVisible();
+  // The contradicted finding is kept, but behind the record of the original build.
+  await expect(page.getByText("Signing identity required")).toBeHidden();
+  await expect(
+    page.getByText("Findings from the original build", { exact: false }),
+  ).toBeVisible();
+  // The action bar shows the profile that will govern the build, not the company one.
+  await expect(page.getByText("Prepared profile expiration")).toBeVisible();
+
+  // Changing the IPA invalidates all of it rather than describing a build that is gone.
+  await page.getByRole("button", { name: "Change" }).click();
+  await expect(page.getByText("Identifiers and profiles prepared")).toHaveCount(
+    0,
+  );
 });
 
 test("the account panel keeps its content off the panel border", async ({

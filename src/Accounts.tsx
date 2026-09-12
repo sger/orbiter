@@ -40,13 +40,24 @@ type Registration = {
   team_devices: number;
   message: string;
 };
-type Preparation = {
+export type Preparation = {
   plan: {
     new_main_identifier: string;
     blockers: string[];
     decisions: string[];
     consequences: string[];
     app_ids_required: number;
+    bundles: {
+      name: string;
+      identifier: string;
+      new_identifier: string;
+      capabilities: {
+        key: string;
+        action: "keep" | "rewrite" | "remove";
+        reason: string;
+        consequence: string;
+      }[];
+    }[];
   };
   app_ids: {
     identifier: string;
@@ -60,10 +71,12 @@ export function Accounts({
   paused,
   deviceId,
   ipaPath,
+  onPrepared,
 }: {
   paused: boolean;
   deviceId: number | null;
   ipaPath: string | null;
+  onPrepared: (preparation: Preparation | null) => void;
 }) {
   const [view, setView] = useState<AccountView>(initial);
   const [email, setEmail] = useState("");
@@ -142,7 +155,8 @@ export function Accounts({
     setPreparation(null);
     setProvError(null);
     setProvAck(false);
-  }, [deviceId, view.selected_team, ipaPath]);
+    onPrepared(null);
+  }, [deviceId, view.selected_team, ipaPath, onPrepared]);
   async function command(name: string, args?: Record<string, unknown>) {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -201,10 +215,9 @@ export function Accounts({
           }}
         >
           <p className="hint">
-            Sign in to list your developer teams, register this iPhone, and
-            prepare identifiers and profiles. Signing itself is still being
-            built. Local macOS authentication support is checked as part of
-            signing in.
+            Four steps prepare this team to sign the build: sign in, register
+            the iPhone, get a certificate, and register the identifiers. Signing
+            itself is still being built.
           </p>
           <details className="auth-disclosure">
             <summary>Local authentication & Apple communication</summary>
@@ -369,7 +382,21 @@ export function Accounts({
       )}
       {signedIn && (
         <>
-          <p className="account-name">{view.account}</p>
+          <div className="account-header">
+            <p className="account-name">{view.account}</p>
+            <button
+              className="text-button"
+              disabled={busy}
+              onClick={() => {
+                setPassword("");
+                setCode("");
+                void command("account_sign_out");
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+          <strong className="step">1 · Signing team</strong>
           <label htmlFor="team">Signing team</label>
           <select
             id="team"
@@ -428,7 +455,7 @@ export function Accounts({
           </button>
           {view.selected_team && (
             <div className="register-device">
-              <strong>Register this iPhone</strong>
+              <strong className="step">2 · Register this iPhone</strong>
               <p className="hint">
                 Re-signing for a device requires it registered on the signing
                 team. This writes to your Apple account; nothing else is
@@ -490,7 +517,7 @@ export function Accounts({
                   {registration.team_devices}.
                 </p>
               )}
-              <strong>Signing certificate</strong>
+              <strong className="step">3 · Signing certificate</strong>
               <p className="hint">
                 The signing key is generated on this Mac and never leaves it;
                 only a certificate request goes to Apple. It is kept in this
@@ -583,7 +610,7 @@ export function Accounts({
               >
                 Forget stored signing key
               </button>
-              <strong>App identifiers & profiles</strong>
+              <strong className="step">4 · App identifiers and profiles</strong>
               <p className="hint">
                 Registers the plan's rewritten identifiers on this team and
                 downloads their profiles. Apple, not Orbiter, decides which
@@ -612,7 +639,9 @@ export function Accounts({
                     acknowledged: provAck,
                   })
                     .then((result) => {
-                      if (mounted.current) setPreparation(result);
+                      if (!mounted.current) return;
+                      setPreparation(result);
+                      onPrepared(result);
                     })
                     .catch((error) => {
                       if (mounted.current)
@@ -663,11 +692,6 @@ export function Accounts({
                   Profile for {profile.identifier} expires {profile.expires}.
                 </p>
               ))}
-              {preparation?.plan.consequences.map((consequence) => (
-                <p className="hint" key={consequence}>
-                  {consequence}
-                </p>
-              ))}
             </div>
           )}
         </>
@@ -680,7 +704,7 @@ export function Accounts({
           </select>
         </>
       )}
-      {(active || signedIn) && (
+      {active && (
         <button
           className="secondary"
           disabled={busy}
@@ -693,7 +717,7 @@ export function Accounts({
             void command("account_sign_out");
           }}
         >
-          {active ? "Cancel sign-in" : "Sign out"}
+          Cancel sign-in
         </button>
       )}
       {(statusError || error) && <p role="alert">{statusError || error}</p>}

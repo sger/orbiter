@@ -1,4 +1,4 @@
-import { Accounts } from "./Accounts";
+import { Accounts, type Preparation } from "./Accounts";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
@@ -37,6 +37,80 @@ const labels = {
   unsupported: "Unsupported",
   preserved: "Supported & preserved",
 };
+/// Findings the prepared team actually establishes. Once Apple has answered, "not yet verified"
+/// is no longer true of these capabilities: they are decided, and the decision is what to show.
+function preparedFindings(preparation: Preparation) {
+  const findings: {
+    status: keyof typeof labels;
+    title: string;
+    detail: string;
+    bundle: string | null;
+  }[] = [];
+  const plan = preparation.plan;
+  if (plan.blockers.length) {
+    for (const blocker of plan.blockers)
+      findings.push({
+        status: "unsupported",
+        title: "Re-signing blocked",
+        detail: blocker,
+        bundle: null,
+      });
+    return findings;
+  }
+  const expiry = preparation.profiles
+    .map((profile) => profile.expires)
+    .sort()[0];
+  findings.push({
+    status: "preserved",
+    title: "Identifiers and profiles prepared",
+    detail: `Apple registered ${preparation.app_ids.length} identifier(s) for this team and returned their profiles${
+      expiry ? `, valid until ${date(expiry)}` : ""
+    }. The build will install under a rewritten identifier, not the company one.`,
+    bundle: plan.new_main_identifier,
+  });
+  // One finding per capability the team could not carry, stated as decided rather than unknown.
+  const removed = new Map<string, { detail: string; bundle: string }>();
+  for (const bundle of plan.bundles)
+    for (const capability of bundle.capabilities)
+      if (capability.action === "remove" && capability.consequence)
+        removed.set(capability.key, {
+          detail: capability.consequence,
+          bundle: bundle.new_identifier,
+        });
+  for (const [key, entry] of removed)
+    findings.push({
+      status: "unsupported",
+      title: capabilityTitle(key),
+      detail: entry.detail,
+      bundle: entry.bundle,
+    });
+  for (const decision of plan.decisions)
+    findings.push({
+      status: "requires_configuration",
+      title: "Decision required",
+      detail: decision,
+      bundle: null,
+    });
+  const weekly = plan.consequences.find((c) => c.includes("seven days"));
+  if (weekly)
+    findings.push({
+      status: "requires_configuration",
+      title: "Weekly re-signing",
+      detail: weekly,
+      bundle: null,
+    });
+  return findings;
+}
+function capabilityTitle(key: string) {
+  const titles: Record<string, string> = {
+    "aps-environment": "Push notifications",
+    "com.apple.developer.aps-environment": "Push notifications",
+    "com.apple.developer.associated-domains": "Associated domains",
+    "com.apple.developer.in-app-payments": "Apple Pay",
+    "com.apple.security.application-groups": "App groups",
+  };
+  return titles[key] ?? key;
+}
 function date(value: string | null) {
   return value
     ? new Date(value).toLocaleString(undefined, {
@@ -53,6 +127,7 @@ function App() {
     [drag, setDrag] = useState(false),
     [cancelled, setCancelled] = useState(false);
   const [ipaPath, setIpaPath] = useState<string | null>(null);
+  const [preparation, setPreparation] = useState<Preparation | null>(null);
   const [deviceId, setDeviceId] = useState<number | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const installActive = useRef(false);
@@ -293,6 +368,7 @@ function App() {
                 paused={installBusy}
                 deviceId={deviceId}
                 ipaPath={ipaPath}
+                onPrepared={setPreparation}
               />
               <p className="hint">
                 A different account on the same company team shares that team's
@@ -329,11 +405,15 @@ function App() {
               <>
                 <h3>Know what needs attention.</h3>
                 <p className="assessment-intro">
-                  Static findings from this build. Target-team compatibility and
-                  runtime behavior are not verified.
+                  {preparation
+                    ? "What the prepared team establishes for this build. Runtime behavior is still not verified."
+                    : "Static findings from this build. Target-team compatibility and runtime behavior are not verified."}
                 </p>
                 <div className="findings">
-                  {report.findings.map((f, i) => (
+                  {(preparation
+                    ? preparedFindings(preparation)
+                    : report.findings
+                  ).map((f, i) => (
                     <article className={`finding ${f.status}`} key={i}>
                       <div className="finding-icon">
                         {f.status === "unsupported" ? (
@@ -353,6 +433,30 @@ function App() {
                     </article>
                   ))}
                 </div>
+                {preparation && (
+                  <details className="original-findings">
+                    <summary>
+                      Findings from the original build, before this team
+                    </summary>
+                    <div className="findings">
+                      {report.findings.map((f, i) => (
+                        <article className={`finding ${f.status}`} key={i}>
+                          <div className="finding-icon">
+                            <Info size={15} />
+                          </div>
+                          <div>
+                            <div className="finding-heading">
+                              <h4>{f.title}</h4>
+                              <span>{labels[f.status]}</span>
+                            </div>
+                            <p>{f.detail}</p>
+                            {f.bundle && <code>{f.bundle}</code>}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </>
             ) : (
               <div className="empty-assessment">
@@ -437,14 +541,22 @@ function App() {
           <div>
             <div className="action-label">
               <Clock3 size={16} />
-              {app?.profile?.expires_at
-                ? "Embedded profile expiration"
-                : "Ready when the next pieces are."}
+              {preparation?.profiles.length
+                ? "Prepared profile expiration"
+                : app?.profile?.expires_at
+                  ? "Embedded profile expiration"
+                  : "Ready when the next pieces are."}
             </div>
             <p>
-              {app?.profile?.expires_at
-                ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
-                : "Re-signing requires profile matching and a reviewed signing plan. Use the existing-signature flow below for an authorized build."}
+              {preparation?.profiles.length
+                ? `${date(
+                    preparation.profiles
+                      .map((profile) => profile.expires)
+                      .sort()[0],
+                  )} · Signing is not implemented yet`
+                : app?.profile?.expires_at
+                  ? `${date(app.profile.expires_at)} · ${app.profile.expired ? "Expired" : "Renewal not implemented"}`
+                  : "Re-signing requires profile matching and a reviewed signing plan. Use the existing-signature flow below for an authorized build."}
             </p>
           </div>
           <button className="primary" disabled>

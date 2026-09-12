@@ -174,9 +174,12 @@ pub async fn ensure(
     let submitted = match submitted {
         Ok(submitted) => submitted,
         Err(error) if limit_reached(&error) => {
+            let held = match existing.len() {
+                1 => "one active development certificate".to_string(),
+                other => format!("{other} active development certificates"),
+            };
             return Err(format!(
-                "Apple refused the request: this team already has {} active development certificate(s), its maximum. Revoke one at developer.apple.com if it is no longer in use — Orbiter will not revoke it, because that invalidates every app already signed with it.",
-                existing.len()
+                "Apple refused the request: this team already holds {held}, which is its maximum. Revoke one at developer.apple.com if it is no longer in use — Orbiter will not revoke it, because that invalidates every app already signed with it."
             ));
         }
         Err(error) => {
