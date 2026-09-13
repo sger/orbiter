@@ -899,7 +899,93 @@ mod tests {
         assert!(message.contains("additional sign-in step"));
         assert!(!message.contains("SECRET"));
         assert!(!isideload::auth_error_is_inconclusive(&error));
+
+        // A plain token naming the step has no room to carry anything but the step, so it is
+        // repeated: knowing which step Apple asked for is what makes the gap fixable.
+        let named = rootcause::report!(isideload::SideloadError::UnsupportedStep(
+            "federatedAuth".into()
+        ))
+        .into_dynamic();
+        assert!(isideload::redacted_auth_error(&named).contains("\"federatedAuth\""));
+        assert!(isideload::auth_diagnostic(&named).contains("UnsupportedStep(federatedAuth)"));
     }
+    #[test]
+    /// Apple answering the password step without the fields it needs is named, and the federated
+    /// organisation account that produces that shape is named as the likely reason.
+    ///
+    /// This case previously produced the bare "could not complete this step" fallback with no
+    /// stage, which told a person nothing about where to look.
+    fn a_login_response_without_password_fields_names_the_federated_account() {
+        let error = rootcause::report!("SECRET_PLIST_BODY")
+            .context("Failed to parse initial login response")
+            .into_dynamic();
+        let message = isideload::redacted_auth_error(&error);
+        assert!(message.starts_with("Initial Apple login:"));
+        assert!(message.contains("identity provider"));
+        assert!(message.contains("personal Apple ID"));
+        assert!(!message.contains("SECRET"));
+        assert!(!message.contains("could not complete this step"));
+    }
+
+    #[test]
+    /// Two upstream variants used to fall through to the generic fallback. Each now says which
+    /// part of sign-in to look at.
+    fn previously_unclassified_variants_say_where_to_look() {
+        let parse = rootcause::report!(isideload::SideloadError::PlistParseError(
+            "SECRET_BODY".into()
+        ))
+        .into_dynamic();
+        assert!(isideload::redacted_auth_error(&parse).contains("property list"));
+        assert!(!isideload::redacted_auth_error(&parse).contains("SECRET"));
+
+        let anisette =
+            rootcause::report!(isideload::SideloadError::AnisetteNotProvisioned).into_dynamic();
+        assert!(isideload::redacted_auth_error(&anisette).contains("Local macOS"));
+    }
+
+    #[test]
+    /// The diagnostic reproduces this crate's own source literals, because they describe Orbiter's
+    /// code, and reduces everything that could quote Apple to a fixed label.
+    fn a_diagnostic_keeps_source_literals_and_withholds_everything_else() {
+        let error = rootcause::report!(isideload::SideloadError::AuthWithMessage(
+            -22320,
+            "SECRET_SERVER_TEXT".into()
+        ))
+        .context("Failed to parse initial login response")
+        .attach("SECRET_ATTACHMENT")
+        .into_dynamic();
+        let diagnostic = isideload::auth_diagnostic(&error);
+        // The literal is Orbiter's own wording about its own code, so it is shown whole.
+        assert!(diagnostic.contains("Failed to parse initial login response"));
+        // Apple's numeric code is traceable; the text it came with is not read at all.
+        assert!(diagnostic.contains("AuthWithMessage(-22320)"));
+        assert!(!diagnostic.contains("SECRET"));
+
+        // An interpolated context could carry anything, so only its presence is reported.
+        let interpolated = rootcause::report!(format!(
+            "Unsupported SRP protocol selected: {}",
+            "SECRET_PROTO"
+        ))
+        .into_dynamic();
+        let withheld = isideload::auth_diagnostic(&interpolated);
+        assert!(withheld.contains("interpolated detail withheld"));
+        assert!(!withheld.contains("SECRET"));
+    }
+
+    #[test]
+    /// A diagnostic stays something a person can paste into a message, however deep the chain.
+    fn a_diagnostic_is_bounded() {
+        let mut error: rootcause::Report =
+            rootcause::report!("Failed to parse initial login response").into_dynamic();
+        for _ in 0..200 {
+            error = error
+                .context("Failed to parse initial login response")
+                .into_dynamic();
+        }
+        let diagnostic = isideload::auth_diagnostic(&error);
+        assert!(diagnostic.len() <= 601, "{}", diagnostic.len());
+    }
+
     #[test]
     /// While a throttle hold is in force, further attempts are refused locally rather than sent —
     /// sending them is what extends the throttling.

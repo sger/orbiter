@@ -68,6 +68,17 @@ pub fn init() -> Result<(), Report> {
     Ok(())
 }
 
+/// An additional-sign-in-step name, if it is safe to repeat.
+///
+/// Apple sends this as a short token naming a step (`trustedDeviceSecondaryAuth`, `repair`). It is
+/// still server-provided, so it is repeated only when its shape leaves no room to carry anything
+/// else: letters only, and short. Anything else is withheld, which loses a little traceability and
+/// risks nothing.
+fn safe_step_token(step: &str) -> Option<&str> {
+    (!step.is_empty() && step.len() <= 40 && step.chars().all(|c| c.is_ascii_alphabetic()))
+        .then_some(step)
+}
+
 /// Orbiter diagnostic: expose only error categories and numeric service/status codes.
 /// Never format a report, its attachments, URLs, or server-provided messages.
 pub fn redacted_auth_error(report: &Report) -> String {
@@ -77,7 +88,9 @@ pub fn redacted_auth_error(report: &Report) -> String {
             .or_else(|| cause.downcast_current_context::<String>().map(String::as_str));
         match context {
             Some("Failed to send initial login request" | "GrandSlam error during initial login request") => Some("Initial Apple login"),
+            Some("Failed to parse initial login response") => Some("Initial Apple login"),
             Some("Failed to send proof login request" | "GrandSlam error during proof login request") => Some("Apple password verification"),
+            Some("Failed to parse proof login response") => Some("Apple password verification"),
             Some("Failed to complete trusted device 2FA") => Some("Trusted-device verification request"),
             Some("Failed to verify trusted device 2FA") => Some("Trusted-device code verification"),
             Some("Failed to complete SMS 2FA") => Some("SMS verification request"),
@@ -103,6 +116,12 @@ fn redacted_auth_error_detail(report: &Report) -> String {
             Some("Local authentication support unavailable.") => fallback = "Local macOS authentication support failed.",
             Some("Apple's sign-in response failed verification.") => fallback = "Apple's sign-in response failed verification. Orbiter stopped instead of trusting it.",
             Some("Apple's sign-in response could not be read.") => fallback = "Apple's sign-in response could not be read by this adapter.",
+            // Apple answered the SRP init request without the fields a password check needs. An
+            // account that signs in through an organisation's identity provider has no Apple
+            // password to verify and produces exactly this shape, so it is named as the likely
+            // reason — likely, because this response alone does not prove it.
+            Some("Failed to parse initial login response") => fallback = "Apple's sign-in response did not carry the password-verification fields this step needs. An account that signs in through an organisation's identity provider — a federated Managed Apple ID — has no Apple password to verify and answers exactly like this. Use a personal Apple ID for this step.",
+            Some("Failed to parse proof login response") => fallback = "Apple's answer to the password check was not in the shape this adapter expects.",
             _ => {}
         }
         if let Some(error) = cause.downcast_current_context::<SideloadError>() {
@@ -120,8 +139,18 @@ fn redacted_auth_error_detail(report: &Report) -> String {
                     };
                     return format!("Apple returned HTTP 429 (too many requests) with {shape}.{wait} Apple is throttling sign-ins from this Mac or account; this response does not establish whether the password or two-factor verification is valid.");
                 }
-                SideloadError::UnsupportedStep(_) => return "Apple requires an additional sign-in step that Orbiter does not support. Accounts that sign in through an organization's identity provider, or that must be repaired or updated at appleid.apple.com, cannot complete this flow yet.".into(),
+                SideloadError::UnsupportedStep(step) => {
+                    let named = match safe_step_token(step) {
+                        Some(step) => format!(" Apple named the step \"{step}\"."),
+                        None => String::new(),
+                    };
+                    return format!("Apple requires an additional sign-in step that Orbiter does not support.{named} Accounts that sign in through an organization's identity provider, or that must be repaired or updated at appleid.apple.com, cannot complete this flow yet.");
+                }
                 SideloadError::DeveloperError(code, _) => return format!("Apple developer error {code}."),
+                // Both previously fell through to the generic fallback, which said nothing about
+                // where to look.
+                SideloadError::PlistParseError(_) => return "Apple's response was not the property list this adapter expects.".into(),
+                SideloadError::AnisetteNotProvisioned => return "Local macOS authentication support is not provisioned on this Mac.".into(),
                 _ => {}
             }
         }
@@ -139,6 +168,98 @@ fn redacted_auth_error_detail(report: &Report) -> String {
         }
     }
     fallback.into()
+}
+
+/// How many links of a failure chain a diagnostic keeps. Enough to show where a sign-in stopped
+/// and what it was doing, bounded so one report cannot become an unbounded string.
+const MAX_DIAGNOSTIC_LINKS: usize = 12;
+/// Upper bound on a whole diagnostic, so it stays something a person can paste into a message.
+const MAX_DIAGNOSTIC_BYTES: usize = 600;
+
+/// Orbiter diagnostic: a redacted summary of the *whole* failure chain, for someone to copy and
+/// send when a sign-in fails in a way Orbiter does not recognise.
+///
+/// [`redacted_auth_error`] answers "what should I do about this" and deliberately says nothing
+/// when the failure is unclassified. This answers "what happened", which is what makes an
+/// unclassified failure fixable instead of invisible.
+///
+/// # What may appear, and why that is safe
+///
+/// * A context that downcasts to `&'static str` is a literal written in this crate's own source,
+///   such as `.context("Failed to parse initial login response")`. It describes Orbiter's code
+///   rather than Apple's answer, so it is reproduced verbatim.
+/// * A context that downcasts to [`String`] was built by interpolation and may therefore carry
+///   server-provided text, so only a fixed label is emitted in its place.
+/// * A [`SideloadError`] contributes its variant name and, where Apple sent one, the numeric
+///   code. The message payload — which can carry account state — is never read.
+/// * A [`reqwest::Error`] contributes its kind and HTTP status. The URL and body are never read.
+///
+/// Any other context type contributes a fixed label, so a type this function does not know about
+/// cannot disclose anything by default. Attachments are never walked at all.
+pub fn auth_diagnostic(report: &Report) -> String {
+    let mut links: Vec<String> = Vec::new();
+    for cause in report.iter_reports() {
+        if links.len() == MAX_DIAGNOSTIC_LINKS {
+            links.push("…".into());
+            break;
+        }
+        // A source literal is this crate's own words about its own code.
+        if let Some(literal) = cause.downcast_current_context::<&str>().copied() {
+            links.push(literal.to_string());
+        } else if cause.downcast_current_context::<String>().is_some() {
+            // Built with interpolation, so it may quote Apple. Its presence is the whole report.
+            links.push("interpolated detail withheld".into());
+        } else if let Some(error) = cause.downcast_current_context::<SideloadError>() {
+            links.push(match error {
+                SideloadError::AuthWithMessage(code, _) => format!("AuthWithMessage({code})"),
+                SideloadError::DeveloperError(code, _) => format!("DeveloperError({code})"),
+                SideloadError::RateLimited(Some(seconds), shape) => {
+                    format!("RateLimited(retry after {seconds}s, {shape})")
+                }
+                SideloadError::RateLimited(None, shape) => {
+                    format!("RateLimited(no Retry-After, {shape})")
+                }
+                SideloadError::UnsupportedStep(step) => match safe_step_token(step) {
+                    Some(step) => format!("UnsupportedStep({step})"),
+                    None => "UnsupportedStep".into(),
+                },
+                SideloadError::PlistParseError(_) => "PlistParseError".into(),
+                SideloadError::AnisetteNotProvisioned => "AnisetteNotProvisioned".into(),
+                SideloadError::InvalidBundle(_) => "InvalidBundle".into(),
+                SideloadError::IdeviceError(_) => "IdeviceError".into(),
+            });
+        } else if let Some(error) = cause.downcast_current_context::<reqwest::Error>() {
+            let kind = if error.is_timeout() {
+                "timeout"
+            } else if error.is_connect() {
+                "connect"
+            } else if error.is_body() || error.is_decode() {
+                "body"
+            } else {
+                "request"
+            };
+            links.push(match error.status() {
+                Some(status) => format!("reqwest {kind} (HTTP {})", status.as_u16()),
+                None => format!("reqwest {kind}"),
+            });
+        } else {
+            links.push("unrecognised error type".into());
+        }
+    }
+    if links.is_empty() {
+        return "no diagnostic available".into();
+    }
+    let mut joined = links.join(" ← ");
+    if joined.len() > MAX_DIAGNOSTIC_BYTES {
+        // Truncate on a character boundary: a diagnostic is text a person reads, not bytes.
+        let cut = (0..=MAX_DIAGNOSTIC_BYTES)
+            .rev()
+            .find(|at| joined.is_char_boundary(*at))
+            .unwrap_or(0);
+        joined.truncate(cut);
+        joined.push('…');
+    }
+    joined
 }
 
 /// Apple throttling (HTTP 429) detector. Returns the wait to honour before retrying: Apple's own
