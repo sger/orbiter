@@ -13,7 +13,7 @@ An open-source desktop app for managing IPAs and installing apps on your iPhone.
 - Review installation history and known profile expiration dates.
 - Keep your library locally, with light and dark themes.
 
-Requires an Apple Silicon Mac on macOS 11 or later. Windows support is unverified.
+Requires an Apple Silicon Mac on macOS 11 or later. See [Platform support](#platform-support) for what does and does not work elsewhere.
 
 ## Install
 
@@ -39,6 +39,21 @@ npm run tauri build -- --bundles app
 ```
 
 Copy `target/release/bundle/macos/Orbiter.app` into Applications and open it. A build made on your own Mac opens without the step above.
+
+## Platform support
+
+macOS on Apple Silicon is the supported platform. Releases are built there, and it is the only platform where the whole flow works.
+
+Orbiter also compiles and runs on Windows. The app library — importing IPAs, keeping versions, searching, reading what is stored locally — has no macOS-only parts, but has not been exercised there. Everything that needs Apple does not work, and reports that rather than failing quietly:
+
+- Signing in with an Apple account is macOS-only. Local authentication uses the macOS system frameworks, and there is no remote fallback.
+- Re-signing therefore cannot run at all, because it needs a certificate obtained through that sign-in.
+- Signing keys cannot be stored, because storage is the macOS login Keychain.
+- Apple-optimised app icons do not render, because the converter is a macOS system tool.
+
+Installing an already-signed IPA over USB is untested on Windows, and would also need Apple Mobile Device Support present for the device connection.
+
+To build on Windows, install the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows) in place of the macOS ones; `npm run tauri dev` then builds and launches. The `--bundles app` option above is macOS-only.
 
 ## Install an app on your iPhone
 
