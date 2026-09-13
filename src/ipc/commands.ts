@@ -94,7 +94,7 @@ export const renewalStatus = (
 ) => invoke<Renewal | null>("renewal_status", { teamId, identifier });
 export const renewalForget = () => invoke("renewal_forget");
 
-// Installation over USB.
+// Installation over a cable or Wi-Fi, whichever the chosen iPhone is reachable on.
 export const prepareInstall = (path: string, deviceId: number) =>
   invoke<Review>("prepare_install", { path, deviceId });
 export const discardInstall = (token: string) =>

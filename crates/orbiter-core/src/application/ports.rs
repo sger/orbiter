@@ -112,7 +112,8 @@ impl Reviewer for DeviceReviewer {
     }
 }
 
-/// The real installer: transfer over USB and ask iOS to install.
+/// The real installer: transfer to the phone over whichever connection it is on, and ask iOS to
+/// install.
 pub struct DeviceInstaller;
 
 impl Installer for DeviceInstaller {

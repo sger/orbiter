@@ -800,7 +800,10 @@ export function GuidedWorkspace({
                   {flow.job.device_percent === null
                     ? "."
                     : ` · ${flow.job.device_percent}%`}
-                  . Keep the iPhone connected.
+                  .{" "}
+                  {connection === "network"
+                    ? "Keep the iPhone awake and on this network."
+                    : "Keep the iPhone connected."}
                 </p>
               )}
               {flow.busy &&

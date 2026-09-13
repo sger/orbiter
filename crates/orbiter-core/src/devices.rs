@@ -93,7 +93,7 @@ pub(crate) fn address() -> UsbmuxdAddr {
 /// The underlying error is classified and then discarded rather than formatted: it can carry
 /// pairing material and addresses, and "unlock the phone and tap Trust" is the whole of what is
 /// useful.
-fn failure(error: &IdeviceError) -> (DeviceState, &'static str) {
+fn failure(error: &IdeviceError, connection: Transport) -> (DeviceState, &'static str) {
     match error {
         IdeviceError::DeviceLocked => (
             DeviceState::Locked,
@@ -102,6 +102,12 @@ fn failure(error: &IdeviceError) -> (DeviceState, &'static str) {
         IdeviceError::InvalidHostID => (
             DeviceState::TrustRequired,
             "Unlock the iPhone and establish trust in Finder (macOS) or Apple's device app (Windows), then refresh.",
+        ),
+        // The advice differs by connection, and only by connection: telling someone to check a
+        // cable that is not plugged in sends them to fix the wrong thing.
+        _ if connection == Transport::Network => (
+            DeviceState::Unavailable,
+            "Device communication failed. Wake and unlock the iPhone, check it is on the same network as this Mac, and refresh. Trust may need to be established in Apple's device app.",
         ),
         _ => (
             DeviceState::Unavailable,
@@ -177,7 +183,7 @@ pub async fn discover() -> Discovery {
                 devices: vec![],
                 service_available: false,
                 message: Some(
-                    "Apple device service is unavailable or timed out. On macOS, reconnect the iPhone and check Finder. On Windows, check Apple Mobile Device services and USB drivers.",
+                    "Apple device service is unavailable or timed out. On macOS, reconnect the iPhone and check Finder — an iPhone on Wi-Fi is reached through the same service. On Windows, check Apple Mobile Device services and USB drivers.",
                 ),
             };
         }
@@ -214,7 +220,7 @@ pub async fn discover() -> Discovery {
         match timeout(Duration::from_secs(3), probe(raw, &mut device)).await {
             Ok(Ok(())) => (),
             Ok(Err(e)) => {
-                (device.state, device.message) = failure(&e);
+                (device.state, device.message) = failure(&e, connection);
             }
             Err(_) => (),
         }
@@ -283,19 +289,37 @@ mod tests {
     /// Every state a device can be reported in comes with a sentence saying what to do about it,
     /// rather than only naming the problem.
     fn actionable_states() {
-        assert_eq!(failure(&IdeviceError::DeviceLocked).0, DeviceState::Locked);
-        assert_eq!(
-            failure(&IdeviceError::InvalidHostID).0,
-            DeviceState::TrustRequired
+        for connection in [Transport::Usb, Transport::Network, Transport::Unknown] {
+            assert_eq!(
+                failure(&IdeviceError::DeviceLocked, connection).0,
+                DeviceState::Locked
+            );
+            assert_eq!(
+                failure(&IdeviceError::InvalidHostID, connection).0,
+                DeviceState::TrustRequired
+            );
+        }
+        // An unreachable phone is told how to fix the connection it is actually using.
+        let (_, cable) = failure(
+            &IdeviceError::UnexpectedResponse("x".into()),
+            Transport::Usb,
         );
+        assert!(cable.contains("cable"));
+        let (_, wifi) = failure(
+            &IdeviceError::UnexpectedResponse("x".into()),
+            Transport::Network,
+        );
+        assert!(!wifi.contains("cable"));
+        assert!(wifi.contains("same network"));
     }
     #[test]
     /// A transport error never reaches the report: the classified state and its fixed sentence do,
     /// so pairing detail cannot leak into something a person pastes into an issue.
     fn errors_are_redacted() {
-        let (_, msg) = failure(&IdeviceError::UnexpectedResponse(
-            "secret-device-identifier".into(),
-        ));
+        let (_, msg) = failure(
+            &IdeviceError::UnexpectedResponse("secret-device-identifier".into()),
+            Transport::Usb,
+        );
         assert!(!msg.contains("secret-device-identifier"));
     }
     #[test]

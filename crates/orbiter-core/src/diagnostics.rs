@@ -104,7 +104,7 @@ fn address() -> UsbmuxdAddr {
 /// The underlying error is deliberately discarded rather than formatted: it can carry pairing and
 /// address detail, and none of it helps someone whose phone is locked.
 fn connection_error(_: IdeviceError) -> String {
-    "Cannot read the iPhone's log. Unlock it, check trust and the USB cable, and try again.".into()
+    "Cannot read the iPhone's log. Unlock it, check trust and the connection, and try again.".into()
 }
 
 /// Open a connection to one attached phone for log streaming.

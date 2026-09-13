@@ -126,7 +126,7 @@ enum Locate<'a> {
 /// The underlying error is discarded rather than formatted: it can carry pairing and address
 /// detail, and none of it helps someone whose phone is locked.
 fn connection_error(_: IdeviceError) -> String {
-    "Cannot communicate with the selected iPhone. Unlock it, check trust and the USB cable, and review again.".into()
+    "Cannot communicate with the selected iPhone. Unlock it, check trust and the connection, and review again.".into()
 }
 /// Verified iPhone identity for an in-crate caller: its UDID and display name. The UDID is
 /// deliberately not part of any type that crosses the IPC boundary.
@@ -551,7 +551,7 @@ fn transport_error(e: IdeviceError) -> RunError {
     } else if text.contains("DeveloperMode") {
         "Check Developer Mode on the iPhone before trying again."
     } else {
-        "Device communication or installation failed. Check the iPhone, cable, signing, and available storage."
+        "Device communication or installation failed. Check the iPhone, its connection, signing, and available storage."
     };
     let definite = matches!(
         e,
@@ -593,6 +593,18 @@ fn operation_deadline(connection: Transport) -> Duration {
         // An unmodelled transport is given the same room as Wi-Fi: it may well be a slow one, and
         // aborting early would be guessing against it.
         Transport::Network | Transport::Unknown => NETWORK_OPERATION,
+    }
+}
+/// What to say while iOS installs, for the connection it is being reached over.
+///
+/// "Keep it connected" means something different with no cable in it: what has to hold is that the
+/// phone stays awake and in range.
+fn installing_message(connection: Transport) -> &'static str {
+    match connection {
+        Transport::Network => {
+            "iOS is installing. Cancellation is no longer available; keep the iPhone awake and on this network."
+        }
+        _ => "iOS is installing. Cancellation is no longer available; keep the iPhone connected.",
     }
 }
 /// What to say when iOS stops reporting progress during an installation.
@@ -974,8 +986,7 @@ async fn run(
         return Err("Invalid job transition.".to_string().into());
     }
     status.stage = Stage::Installing;
-    status.message =
-        "iOS is installing. Cancellation is no longer available; keep the iPhone connected.".into();
+    status.message = installing_message(target.connection).into();
     // If persistence fails before dispatch, the result is a definite local failure.
     publish(status, journal, notify).map_err(|mut e| {
         e.definite = true;
@@ -1051,6 +1062,15 @@ mod tests {
         assert!(!wifi.contains("cable"));
         assert!(wifi.contains("network"));
         assert!(!unresponsive(Transport::Unknown).contains("cable"));
+        // "Keep it connected" means something else with no cable in it.
+        assert!(installing_message(Transport::Usb).contains("keep the iPhone connected"));
+        let wifi = installing_message(Transport::Network);
+        assert!(wifi.contains("awake") && wifi.contains("network"));
+        // Whatever the connection, the one thing that must not be lost is that it is too late
+        // to cancel.
+        for connection in [Transport::Usb, Transport::Network, Transport::Unknown] {
+            assert!(installing_message(connection).contains("Cancellation is no longer available"));
+        }
     }
 
     #[test]

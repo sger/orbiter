@@ -174,8 +174,8 @@ export function InstallSigned({
       <div className="install-body">
         <p>
           {signed
-            ? "Install the build Orbiter just signed on the selected USB iPhone. The review below checks it the same way as any other IPA, including whether this iPhone is in its profile."
-            : "Install the selected IPA unchanged on the selected USB iPhone. No Apple account is needed. The build must already be provisioned for this device."}
+            ? "Install the build Orbiter just signed on the selected iPhone. The review below checks it the same way as any other IPA, including whether this iPhone is in its profile."
+            : "Install the selected IPA unchanged on the selected iPhone. No Apple account is needed. The build must already be provisioned for this device."}
         </p>
         <button
           className="review-button"
