@@ -129,6 +129,11 @@ pub struct View {
     pub selected_team: Option<String>,
     pub challenge: Option<Challenge>,
     pub message: String,
+    /// A redacted technical summary of the last failure, for someone to copy and send when the
+    /// message alone does not say enough. Present only after a failure Orbiter could classify no
+    /// further; cleared whenever a new attempt starts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(tag = "action", content = "value", rename_all = "snake_case")]
@@ -154,6 +159,10 @@ pub struct Preparation {
 struct Failure {
     message: String,
     retry_after: Option<Duration>,
+    /// The redacted shape of the upstream report. Kept because the classified `message` says
+    /// nothing at all when the failure is one Orbiter does not recognise, and an unrecognised
+    /// failure that leaves no trace cannot be fixed.
+    diagnostic: Option<String>,
 }
 impl Failure {
     /// Classify an authentication failure and keep only what is safe to show.
@@ -162,8 +171,14 @@ impl Failure {
     /// carry account state and server payloads, and a person needs to know which step to take
     /// rather than what the service said.
     fn new(message: String, error: &rootcause::Report) -> Self {
+        let diagnostic = isideload::auth_diagnostic(error);
+        // Logged as well as carried: a person who never presses the copy button still leaves a
+        // trace behind for whoever looks at the terminal. The target is named explicitly so this
+        // passes the filter the application installs, which selects on `orbiter`.
+        tracing::warn!(target: "orbiter", operation = "sign-in", detail = %diagnostic);
         Self {
             retry_after: isideload::auth_throttle_delay(error),
+            diagnostic: Some(diagnostic),
             message,
         }
     }
@@ -172,6 +187,7 @@ impl Failure {
         Self {
             message,
             retry_after: None,
+            diagnostic: None,
         }
     }
 }
@@ -366,12 +382,16 @@ impl Accounts {
                 Ok(Ok((account, session, teams))) => {
                     manager.finish(&generation, account, session, teams)
                 }
-                Ok(Err(failure)) => {
-                    manager.fail(&generation, &failure.message, failure.retry_after)
-                }
+                Ok(Err(failure)) => manager.fail(
+                    &generation,
+                    &failure.message,
+                    failure.retry_after,
+                    failure.diagnostic,
+                ),
                 Err(_) => manager.fail(
                     &generation,
                     "Sign-in timed out. Check your connection and start again.",
+                    None,
                     None,
                 ),
             }
@@ -583,7 +603,13 @@ impl Accounts {
     ///
     /// Ignored if the account generation has moved on. `message` is already redacted; nothing from
     /// Apple's own response reaches it.
-    fn fail(&self, generation: &str, message: &str, retry_after: Option<Duration>) {
+    fn fail(
+        &self,
+        generation: &str,
+        message: &str,
+        retry_after: Option<Duration>,
+        diagnostic: Option<String>,
+    ) {
         if let Ok(mut inner) = self.0.lock() {
             if inner.generation != generation || inner.task.is_none() {
                 return;
@@ -598,6 +624,7 @@ impl Accounts {
             inner.view = View {
                 stage: Stage::Failed,
                 message: message.into(),
+                diagnostic,
                 ..View::default()
             };
         }
@@ -703,6 +730,7 @@ impl Drop for WorkerGuard {
         self.0.fail(
             &self.1,
             "Authentication worker stopped. Start sign-in again.",
+            None,
             None,
         );
     }
@@ -987,6 +1015,32 @@ mod tests {
     }
 
     #[test]
+    /// A failure carries its diagnostic to the window, and signing out takes it away again — a
+    /// diagnostic outliving the failure it describes would be attached to the wrong attempt.
+    fn a_diagnostic_reaches_the_view_and_does_not_outlive_its_failure() {
+        let manager = Accounts::default();
+        manager.0.lock().unwrap().generation = "current".into();
+        manager.0.lock().unwrap().task = Some(
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(async { tokio::spawn(std::future::pending::<()>()).abort_handle() }),
+        );
+        manager.fail(
+            "current",
+            "Apple account authentication failed.",
+            None,
+            Some("Failed to parse initial login response".into()),
+        );
+        let view = manager.0.lock().unwrap().view.clone();
+        assert!(view.stage == Stage::Failed);
+        assert_eq!(
+            view.diagnostic.as_deref(),
+            Some("Failed to parse initial login response")
+        );
+        assert!(manager.sign_out().unwrap().diagnostic.is_none());
+    }
+
+    #[test]
     /// While a throttle hold is in force, further attempts are refused locally rather than sent —
     /// sending them is what extends the throttling.
     fn apple_throttling_blocks_further_attempts_until_it_lapses() {
@@ -1001,6 +1055,7 @@ mod tests {
             "current",
             "Apple returned HTTP 429.",
             Some(Duration::from_secs(600)),
+            None,
         );
         let view = manager
             .start("test@example.invalid".into(), "synthetic".into(), true)
@@ -1257,7 +1312,7 @@ mod tests {
         assert!(view.selected_team.is_none());
         assert!(view.account.is_none());
         assert!(manager.select_team("OLDTEAM".into()).is_err());
-        manager.fail("current", "Stale error must not reappear", None);
+        manager.fail("current", "Stale error must not reappear", None, None);
         assert!(manager.status().unwrap().stage == Stage::SignedOut);
     }
     #[tokio::test]
