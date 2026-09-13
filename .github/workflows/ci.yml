@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch supersedes the first: the older run is answering a question
+# nobody is asking any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    # macOS is the supported platform, and the core links Objective-C shims against Foundation
+    # and Security, so there is no meaningful Linux run to add.
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - run: npm ci
+
+      # Formatting first: it is the cheapest thing that can be wrong, and a failure here makes
+      # every later diff noisier to read.
+      - name: Formatting
+        run: |
+          cargo fmt --all --check
+          npx prettier --check src tests docs/app-library.md
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Documentation audit
+        run: cargo run --locked -p doc-audit
+
+      - name: Rust tests
+        run: cargo test --locked --workspace
+
+      - name: Types and bundle
+        run: npm run build
+
+      # The suite pins `channel: "chrome"`, so the real browser has to be present rather than
+      # Playwright's bundled Chromium.
+      - name: Install Chrome for Playwright
+        run: npx playwright install chrome
+
+      - name: Browser tests
+        run: npm test
+
+      - name: Upload failed browser test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-output
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

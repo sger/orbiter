@@ -11,9 +11,21 @@ An open-source desktop app for managing IPAs and installing apps on your iPhone.
 - Review installation history and known profile expiration dates.
 - Keep your library locally, with light and dark themes.
 
-macOS is the supported development platform. Windows support is unverified.
+Requires an Apple Silicon Mac on macOS 11 or later. Windows support is unverified.
 
-## Install from source (macOS)
+## Install
+
+Download the latest DMG from [Releases](https://github.com/sger/orbiter/releases), open it, and drag Orbiter to Applications.
+
+Orbiter is not signed with an Apple Developer ID, so macOS blocks the first launch and says it cannot check the app for malicious software. To allow it:
+
+1. Open Orbiter and dismiss the warning.
+2. Go to **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway** beside the message about Orbiter.
+3. Open Orbiter again and confirm.
+
+Only the first launch needs this. Each release ships a `.sha256` file if you want to check the download.
+
+## Build from source
 
 Install [Rust](https://www.rust-lang.org/tools/install), Node.js 22.12 or later, and the [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/#macos).
 
@@ -24,7 +36,7 @@ npm ci
 npm run tauri build -- --bundles app
 ```
 
-Copy `target/release/bundle/macos/Orbiter.app` into Applications and open it. This creates a local build, not a notarized release.
+Copy `target/release/bundle/macos/Orbiter.app` into Applications and open it. A build made on your own Mac opens without the step above.
 
 ## Install an app on your iPhone
 
@@ -55,4 +67,4 @@ Issues and pull requests are welcome.
 
 ## Documentation
 
-[Installation flow](docs/guided-installation.md) · [App library](docs/app-library.md) · [Architecture](docs/architecture.md) · [Data handling](docs/local-authentication.md) · [Validation status](docs/validation.md)
+[Installation flow](docs/guided-installation.md) · [App library](docs/app-library.md) · [Architecture](docs/architecture.md) · [Data handling](docs/local-authentication.md) · [Validation status](docs/validation.md) · [Releasing](docs/release.md)

@@ -26,6 +26,12 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Manage IPAs and install apps on your iPhone",
+    "longDescription": "Import IPAs, keep multiple versions in a local library, install an already-signed build or re-sign a copy with your own Apple account, and see when a build stops launching.",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
