@@ -120,7 +120,7 @@ fn redacted_auth_error_detail(report: &Report) -> String {
             // account that signs in through an organisation's identity provider has no Apple
             // password to verify and produces exactly this shape, so it is named as the likely
             // reason — likely, because this response alone does not prove it.
-            Some("Failed to parse initial login response") => fallback = "Apple's sign-in response did not carry the password-verification fields this step needs. An account that signs in through an organisation's identity provider — a federated Managed Apple ID — has no Apple password to verify and answers exactly like this. Use a personal Apple ID for this step.",
+            Some("Failed to parse initial login response") => fallback = "Apple accepted the request but answered without the password-verification fields this step needs, and reported no error of its own. An account that signs in through an organisation's identity provider — a federated Managed Apple ID — has no Apple password for Orbiter to verify and answers exactly like this. Use a personal Apple ID for this step.",
             Some("Failed to parse proof login response") => fallback = "Apple's answer to the password check was not in the shape this adapter expects.",
             _ => {}
         }
@@ -227,6 +227,15 @@ pub fn auth_diagnostic(report: &Report) -> String {
                 SideloadError::AnisetteNotProvisioned => "AnisetteNotProvisioned".into(),
                 SideloadError::InvalidBundle(_) => "InvalidBundle".into(),
                 SideloadError::IdeviceError(_) => "IdeviceError".into(),
+            });
+        } else if let Some(missing) =
+            cause.downcast_current_context::<crate::util::plist::MissingPlistValue>()
+        {
+            // The key is a constant this crate chose at the call site, so naming it says which
+            // field Apple omitted without repeating anything Apple sent.
+            links.push(match safe_step_token(&missing.key) {
+                Some(key) => format!("missing {} '{key}'", missing.kind),
+                None => format!("missing {}", missing.kind),
             });
         } else if let Some(error) = cause.downcast_current_context::<reqwest::Error>() {
             let kind = if error.is_timeout() {

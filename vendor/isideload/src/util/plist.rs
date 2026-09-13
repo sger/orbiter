@@ -51,6 +51,20 @@ impl std::fmt::Debug for SensitivePlistAttachment {
     }
 }
 
+/// A value this adapter expected in one of Apple's property lists and did not find.
+///
+/// Orbiter: the key is a constant chosen by *this* crate at the call site, never anything Apple
+/// sent, so naming it discloses nothing about the account while saying exactly which field was
+/// absent. The list itself stays in the sensitive attachment, which is never formatted.
+#[derive(Debug, thiserror::Error)]
+#[error("plist missing {kind} for key '{key}'")]
+pub struct MissingPlistValue {
+    /// The key that was looked up.
+    pub key: String,
+    /// What kind of value was expected there, for the sentence.
+    pub kind: &'static str,
+}
+
 pub trait PlistDataExtract {
     fn get_data(&self, key: &str) -> Result<&[u8], Report>;
     fn get_str(&self, key: &str) -> Result<&str, Report>;
@@ -64,15 +78,23 @@ pub trait PlistDataExtract {
 impl PlistDataExtract for Dictionary {
     fn get_data(&self, key: &str) -> Result<&[u8], Report> {
         self.get(key).and_then(|v| v.as_data()).ok_or_else(|| {
-            report!("Plist missing data for key '{}'", key)
+            report!(MissingPlistValue {
+                    key: key.to_string(),
+                    kind: "data",
+                })
                 .attach(SensitivePlistAttachment::new(self.clone()))
+                .into_dynamic()
         })
     }
 
     fn get_str(&self, key: &str) -> Result<&str, Report> {
         self.get(key).and_then(|v| v.as_string()).ok_or_else(|| {
-            report!("Plist missing string for key '{}'", key)
+            report!(MissingPlistValue {
+                    key: key.to_string(),
+                    kind: "string",
+                })
                 .attach(SensitivePlistAttachment::new(self.clone()))
+                .into_dynamic()
         })
     }
 
@@ -81,8 +103,12 @@ impl PlistDataExtract for Dictionary {
             .and_then(|v| v.as_string())
             .map(|s| s.to_string())
             .ok_or_else(|| {
-                report!("Plist missing string for key '{}'", key)
+                report!(MissingPlistValue {
+                    key: key.to_string(),
+                    kind: "string",
+                })
                     .attach(SensitivePlistAttachment::new(self.clone()))
+            .into_dynamic()
             })
     }
 
@@ -90,8 +116,12 @@ impl PlistDataExtract for Dictionary {
         self.get(key)
             .and_then(|v| v.as_signed_integer())
             .ok_or_else(|| {
-                report!("Plist missing signed integer for key '{}'", key)
+                report!(MissingPlistValue {
+                    key: key.to_string(),
+                    kind: "signed integer",
+                })
                     .attach(SensitivePlistAttachment::new(self.clone()))
+            .into_dynamic()
             })
     }
 
@@ -99,16 +129,24 @@ impl PlistDataExtract for Dictionary {
         self.get(key)
             .and_then(|v| v.as_dictionary())
             .ok_or_else(|| {
-                report!("Plist missing dictionary for key '{}'", key)
+                report!(MissingPlistValue {
+                    key: key.to_string(),
+                    kind: "dictionary",
+                })
                     .attach(SensitivePlistAttachment::new(self.clone()))
+            .into_dynamic()
             })
     }
 
     fn get_struct<T: DeserializeOwned>(&self, key: &str) -> Result<T, Report> {
         let dict = self.get(key);
         let dict = dict.ok_or_else(|| {
-            report!("Plist missing dictionary for key '{}'", key)
+            report!(MissingPlistValue {
+                    key: key.to_string(),
+                    kind: "dictionary",
+                })
                 .attach(SensitivePlistAttachment::new(self.clone()))
+                .into_dynamic()
         })?;
         let struct_data: T = plist::from_value(dict).map_err(|e| {
             report!(
@@ -125,8 +163,12 @@ impl PlistDataExtract for Dictionary {
 
     fn get_bool(&self, key: &str) -> Result<bool, Report> {
         self.get(key).and_then(|v| v.as_boolean()).ok_or_else(|| {
-            report!("Plist missing boolean for key '{}'", key)
+            report!(MissingPlistValue {
+                    key: key.to_string(),
+                    kind: "boolean",
+                })
                 .attach(SensitivePlistAttachment::new(self.clone()))
+                .into_dynamic()
         })
     }
 }

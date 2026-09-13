@@ -1001,6 +1001,31 @@ mod tests {
     }
 
     #[test]
+    /// A field Apple left out is named. The key is a constant Orbiter chose when it looked the
+    /// field up, so it says which field was absent without repeating anything Apple sent — and
+    /// the list Apple actually returned stays in an attachment that is never formatted.
+    fn the_field_apple_left_out_is_named_and_its_response_is_not() {
+        use isideload::util::plist::PlistDataExtract;
+        let mut answered = plist::Dictionary::new();
+        answered.insert("SECRET_KEY".into(), plist::Value::String("SECRET".into()));
+        let error = answered
+            .get_data("s")
+            .expect_err("a response without the salt cannot be parsed")
+            .context("Failed to parse initial login response")
+            .into_dynamic();
+
+        let diagnostic = isideload::auth_diagnostic(&error);
+        assert!(diagnostic.contains("missing data 's'"));
+        assert!(diagnostic.contains("Failed to parse initial login response"));
+        assert!(!diagnostic.contains("SECRET"));
+        // And the sentence a person reads still names the likely reason, not the field.
+        let message = isideload::redacted_auth_error(&error);
+        assert!(message.starts_with("Initial Apple login:"));
+        assert!(message.contains("identity provider"));
+        assert!(!message.contains("SECRET"));
+    }
+
+    #[test]
     /// A diagnostic stays something a person can paste into a message, however deep the chain.
     fn a_diagnostic_is_bounded() {
         let mut error: rootcause::Report =
