@@ -10,7 +10,7 @@ These values stay in Rust and native memory and are used only in the Apple authe
 
 A timed-out native call cannot be forcibly stopped. It keeps the permit, so repeated checks cannot spawn unlimited native calls; restart Orbiter if the framework stays blocked.
 
-Selector reference: [SideStore/MacAnisette](https://github.com/SideStore/MacAnisette) (MIT, © 2025 nythepegasus), license kept in [licenses/MacAnisette-MIT.txt](licenses/MacAnisette-MIT.txt). Orbiter has its own bounded bridge. It does not redistribute Apple's frameworks, copy Sideloadly binaries, modify other apps, inject libraries, install Mail plug-ins, or weaken system protection. These private APIs may break in later macOS versions.
+Selector reference: [SideStore/MacAnisette](https://github.com/SideStore/MacAnisette) (MIT, © 2025 nythepegasus), license kept in [licenses/MacAnisette-MIT.txt](../licenses/MacAnisette-MIT.txt). Orbiter has its own bounded bridge. It does not redistribute Apple's frameworks, copy Sideloadly binaries, modify other apps, inject libraries, install Mail plug-ins, or weaken system protection. These private APIs may break in later macOS versions.
 
 ## Direct Apple requests
 
