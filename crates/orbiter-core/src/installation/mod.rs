@@ -55,6 +55,10 @@ struct Phone {
     version: String,
     provider: UsbmuxdProvider,
 }
+/// Replace a transport error with one sentence about what to do.
+///
+/// The underlying error is discarded rather than formatted: it can carry pairing and address
+/// detail, and none of it helps someone whose phone is locked.
 fn connection_error(_: IdeviceError) -> String {
     "Cannot communicate with the selected iPhone. Unlock it, check trust and the USB cable, and review again.".into()
 }
@@ -64,6 +68,15 @@ pub(crate) async fn verified_identity(id: u32) -> Result<(String, String), Strin
     let phone = phone(id).await?;
     Ok((phone.raw.udid, phone.name))
 }
+/// Find one attached phone and read the properties an installation needs.
+///
+/// Uses the existing pairing record and never creates one, so preparing a review cannot cause a
+/// Trust prompt on someone's device.
+///
+/// # Errors
+///
+/// Returns an actionable sentence if the device daemon is unreachable, no attached device has that
+/// number, or the phone is locked or untrusted. The transport's own error never appears.
 async fn phone(id: u32) -> Result<Phone, String> {
     timeout(Duration::from_secs(10), async {
         let mut mux = address().connect(0).await.map_err(connection_error)?;
@@ -122,6 +135,14 @@ async fn phone(id: u32) -> Result<Phone, String> {
     .await
     .map_err(|_| "iPhone connection timed out. Unlock it and review again.".to_string())?
 }
+/// What is already installed under this bundle identifier, if anything.
+///
+/// Used to tell a person they are replacing an app rather than adding one.
+///
+/// # Errors
+///
+/// Returns a message if the phone's installation service cannot be reached. `Ok(None)` means
+/// nothing is installed, which is an ordinary answer rather than a failure.
 async fn existing(provider: &UsbmuxdProvider, bundle: &str) -> Result<Option<ExistingApp>, String> {
     timeout(Duration::from_secs(10), async {
         let mut proxy = InstallationProxyClient::connect(provider)
@@ -147,6 +168,17 @@ async fn existing(provider: &UsbmuxdProvider, bundle: &str) -> Result<Option<Exi
     .await
     .map_err(|_| "Installed-app lookup timed out. No install was attempted.".to_string())?
 }
+/// Copy the chosen IPA into a private directory, inspect the copy, and fingerprint it.
+///
+/// The snapshot is what gets installed. Binding a review to a copy rather than to a path is what
+/// makes "only the reviewed artifact may be installed" enforceable: the original can be replaced
+/// afterwards and the installation is unaffected. The returned directory owns the copy and removes
+/// it when dropped.
+///
+/// # Errors
+///
+/// Returns a message if the source cannot be read or copied, exceeds the size limit, or is not a
+/// valid IPA.
 fn snapshot(path: &Path) -> Result<(tempfile::TempDir, Report, String), String> {
     let mut source = std::fs::File::open(path).map_err(|_| "Cannot open the selected IPA.")?;
     let metadata = source
@@ -185,6 +217,11 @@ fn snapshot(path: &Path) -> Result<(tempfile::TempDir, Report, String), String> 
         crate::inspect(&target, &AtomicBool::new(false), |_| {}).map_err(|e| e.to_string())?;
     Ok((dir, report, format!("{:x}", hasher.finalize())))
 }
+/// Parse an iOS version into three numeric components, or `None` if it is not one.
+///
+/// Compared numerically rather than as text, because `"10.0"` sorts before `"9.0"` as a string and
+/// that would refuse installs on newer phones. `None` is treated as unverified rather than as
+/// satisfied.
 fn version(s: &str) -> Option<[u32; 3]> {
     let parts: Vec<_> = s.split('.').collect();
     if parts.is_empty() || parts.len() > 3 {
@@ -196,6 +233,10 @@ fn version(s: &str) -> Option<[u32; 3]> {
     }
     Some(out)
 }
+/// Whether an embedded profile authorises this exact phone.
+///
+/// Membership of the device allowlist, or a profile that explicitly provisions all devices.
+/// Anything looser would let a build install where it was never authorised to run.
 fn authorize(d: &plist::Dictionary, udid: &str) -> bool {
     d.get("ProvisionsAllDevices")
         .and_then(plist::Value::as_boolean)
@@ -204,6 +245,14 @@ fn authorize(d: &plist::Dictionary, udid: &str) -> bool {
             .and_then(plist::Value::as_array)
             .is_some_and(|a| a.iter().any(|v| v.as_string() == Some(udid)))
 }
+/// What would stop this build installing on this phone, and what is worth saying about it anyway.
+///
+/// Returns blockers and notes separately: a blocker refuses the installation, a note is something
+/// a person should know before agreeing to one. Covers encryption, minimum OS, device family,
+/// profile expiry and whether the profile authorises this device at all.
+///
+/// Anything unverified is treated as a blocker rather than as satisfied: the absence of evidence
+/// that a build will run is not evidence that it will.
 fn package_blockers(
     report: &Report,
     path: &Path,
@@ -284,6 +333,18 @@ fn package_blockers(
     }
     Ok(blockers)
 }
+/// Review installing one IPA on one phone, binding a token to both.
+///
+/// Snapshots the bytes privately, verifies the phone, and checks everything that would stop the
+/// installation. The returned plan holds the snapshot, the device's verified identity and an
+/// expiry; none of that is serialised, so the binding exists only in this process's memory.
+///
+/// Preparing writes nothing to the phone and contacts no Apple service.
+///
+/// # Errors
+///
+/// Returns a message if the file cannot be read or inspected, or if the phone is absent, locked or
+/// untrusted.
 pub async fn prepare(path: PathBuf, device_id: u32) -> Result<PreparedInstall, String> {
     let phone = phone(device_id).await?;
     let (dir, report, hash) = tokio::task::spawn_blocking(move || snapshot(&path))
@@ -334,6 +395,10 @@ struct RunError {
     definite: bool,
 }
 impl From<String> for RunError {
+    /// Treat a plain message as a failure whose effect on the device is not established.
+    ///
+    /// The conservative default: an error that has not said whether it reached the phone is
+    /// assumed not to have proved anything either way.
     fn from(message: String) -> Self {
         Self {
             message,
@@ -341,6 +406,11 @@ impl From<String> for RunError {
         }
     }
 }
+/// Classify a device error by whether it settles what happened on the phone.
+///
+/// The distinction that matters: an error raised before the install command was sent means nothing
+/// was installed, while one raised after means the outcome is unknown. Reporting the second as a
+/// failure would tell a person the app is not there when it may well be.
 fn transport_error(e: IdeviceError) -> RunError {
     // Classify locally; never return arbitrary device responses (which may contain identifiers).
     let text = e.to_string();
@@ -366,6 +436,12 @@ fn transport_error(e: IdeviceError) -> RunError {
         definite,
     }
 }
+/// Bound one device operation in time, so a phone that stops answering does not hang the install.
+///
+/// # Errors
+///
+/// Returns the operation's own failure, or a timeout classified the same way — by whether the
+/// install command had already been sent.
 async fn limited<T>(
     future: impl std::future::Future<Output = Result<T, IdeviceError>>,
 ) -> Result<T, RunError> {
@@ -379,6 +455,15 @@ async fn limited<T>(
         })?
         .map_err(transport_error)
 }
+/// Journal a status, then announce it.
+///
+/// Durable before visible, always: a person must never see a stage the journal does not have, or a
+/// crash immediately afterwards would recover to an earlier state than the one they were shown.
+///
+/// # Errors
+///
+/// Returns a failure if the journal cannot be written; the installation stops rather than
+/// continuing without a durable record.
 fn publish(
     status: &JobStatus,
     journal: &Path,
@@ -388,6 +473,14 @@ fn publish(
     notify(status.clone());
     Ok(())
 }
+/// Stop here if cancellation was requested and is still honourable.
+///
+/// Called between steps up to the commit boundary. After the install command is sent there is
+/// nothing to check: the outcome belongs to the device.
+///
+/// # Errors
+///
+/// Returns a cancellation failure when a stop has been asked for.
 fn cancel_check(control: &Control) -> Result<(), RunError> {
     if control.cancelled() {
         Err("Transfer cancelled before installation was requested."
@@ -398,10 +491,25 @@ fn cancel_check(control: &Control) -> Result<(), RunError> {
     }
 }
 impl PreparedInstall {
+    /// Whether this review is too old to authorise an installation.
+    ///
+    /// A review binds bytes and a device that were verified at a moment in time; after ten minutes
+    /// the phone may have been unplugged or the file replaced, so it must be taken again.
     pub fn expired(&self) -> bool {
         self.created.elapsed() > Duration::from_secs(600)
     }
 }
+/// Transfer and install the reviewed build, reporting every stage.
+///
+/// Returns the terminal status rather than a `Result`: the outcome *is* the answer, and `Failed`,
+/// `Cancelled` and `Unknown` are each distinct facts a caller must be able to tell apart.
+///
+/// The whole run is bounded in time. A failure to journal the final status appends to its message
+/// instead of changing it — what the device did is not altered by Orbiter's bookkeeping.
+///
+/// # Cancellation
+///
+/// Honoured up to the moment iOS is asked to install, and refused afterwards.
 pub async fn execute(
     plan: PreparedInstall,
     control: Arc<Control>,
@@ -484,6 +592,19 @@ pub async fn execute(
     notify(status.clone());
     status
 }
+/// Do the work of one installation: connect, transfer, verify, install.
+///
+/// Every stage change is journalled before being announced. The transferred bytes are hashed as
+/// they are written and compared against the reviewed fingerprint before the install command is
+/// sent, so a snapshot that changed under the operation is caught rather than installed.
+///
+/// Cleanup intent is journalled *before* any package bytes reach the phone, so an interrupted run
+/// is known to have possibly left a staging file behind.
+///
+/// # Errors
+///
+/// Returns a failure carrying whether the install command had already been sent, which is what
+/// decides between `Failed` and `Unknown`.
 async fn run(
     plan: &PreparedInstall,
     control: &Control,
@@ -636,15 +757,19 @@ async fn run(
     Ok(())
 }
 #[cfg(test)]
+/// Checks the comparisons and classifications a review depends on.
 mod tests {
     use super::*;
     #[test]
+    /// iOS versions compare numerically, so 10.0 is newer than 9.0 rather than sorting before it.
     fn version_comparison_is_numeric() {
         assert!(version("18.10") > version("18.9"));
         assert_eq!(version("15"), version("15.0.0"));
         assert!(version("garbage").is_none());
     }
     #[test]
+    /// A profile authorises a phone only if that phone is actually in its allowlist; a near match
+    /// is not a match.
     fn membership_requires_actual_device() {
         let mut d = plist::Dictionary::new();
         d.insert(
@@ -656,12 +781,16 @@ mod tests {
         assert!(!authorize(&plist::Dictionary::new(), "synthetic-device"));
     }
     #[test]
+    /// A profile that explicitly provisions all devices authorises any phone, without needing an
+    /// allowlist entry.
     fn explicit_all_devices_profile_is_recognized() {
         let mut d = plist::Dictionary::new();
         d.insert("ProvisionsAllDevices".into(), true.into());
         assert!(authorize(&d, "synthetic-device"));
     }
     #[test]
+    /// A transport error never reaches a message: the fixed, actionable sentence does, so pairing
+    /// detail cannot leak into something a person pastes into an issue.
     fn raw_device_failures_are_not_exposed() {
         let e = transport_error(IdeviceError::UnknownErrorType(
             "ApplicationVerificationFailed secret-udid".into(),
@@ -673,6 +802,7 @@ mod tests {
 }
 
 #[cfg(test)]
+/// Checks review binding and cancellation against synthetic IPAs, with no device involved.
 mod fixture_tests {
     use super::*;
     use cms::{
@@ -680,6 +810,7 @@ mod fixture_tests {
         signed_data::{EncapsulatedContentInfo, SignedData, SignerInfos},
     };
     use der::{Any, Encode, asn1::OctetString};
+    /// A minimal, valid IPA that passes inspection.
     fn fixture() -> tempfile::NamedTempFile {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         let info=br#"<plist><dict><key>CFBundleIdentifier</key><string>test.synthetic</string><key>CFBundleExecutable</key><string>App</string><key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array><key>UIDeviceFamily</key><array><integer>1</integer></array><key>MinimumOSVersion</key><string>15.0</string></dict></plist>"#;
@@ -722,6 +853,8 @@ mod fixture_tests {
         f
     }
     #[test]
+    /// Replacing the chosen file after a review does not change what would be installed: the
+    /// review is bound to a private snapshot, not to a path.
     fn reviewed_snapshot_survives_original_changes() {
         let f = fixture();
         let before = std::fs::read(f.path()).unwrap();
@@ -743,6 +876,8 @@ mod fixture_tests {
         );
     }
     #[test]
+    /// A build for another device family, or one needing a newer iOS than the phone runs, blocks
+    /// the installation rather than being attempted and failing on the device.
     fn mismatched_device_and_old_os_block_installation() {
         let f = fixture();
         let (dir, r, _) = snapshot(f.path()).unwrap();
@@ -758,6 +893,8 @@ mod fixture_tests {
         assert!(!blockers.join(" ").contains("different-device"));
     }
     #[tokio::test]
+    /// A job cancelled before it starts never connects to the phone and transfers nothing, ending
+    /// as `Cancelled` with no cleanup pending — there is nothing on the device to clean up.
     async fn cancelled_job_never_connects_or_transfers() {
         let f = fixture();
         let (dir, r, hash) = snapshot(f.path()).unwrap();
@@ -794,6 +931,20 @@ mod fixture_tests {
 }
 
 impl PreparedInstall {
+    /// Record this installation in the library's history before it begins.
+    ///
+    /// Re-checks that the artifact's recorded hash still matches the reviewed bytes, so a review
+    /// and a library record that have drifted apart are caught here rather than producing history
+    /// attributed to the wrong build.
+    ///
+    /// Does nothing for a plan with no library artifact, which is how a path-based install with no
+    /// saved version behaves.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the bytes no longer match, or if the library cannot record the attempt
+    /// — including when this review was already used, which would mean installing twice on one
+    /// authorisation.
     pub fn record_library_attempt(&self, library: &crate::library::Library) -> Result<(), String> {
         if let Some(artifact) = &self.library_artifact {
             if artifact.sha256 != self.review.sha256 {
