@@ -20,6 +20,10 @@ struct Material {
     darwin: String,
 }
 impl Drop for Material {
+    /// Wipe the authentication material before the memory is released.
+    ///
+    /// This is one-time-use data derived from the machine; leaving it in freed memory would leave
+    /// something replayable behind for no benefit.
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.otp.zeroize();
@@ -38,6 +42,15 @@ pub struct Status {
 unsafe extern "C" {
     fn orbiter_local_anisette(buffer: *mut u8, capacity: usize, written: *mut usize) -> i32;
 }
+/// Ask macOS's own authentication support for one set of anisette values.
+///
+/// Runs entirely on this Mac: no proxy and no remote anisette server. The material is one-time and
+/// is wiped when dropped.
+///
+/// # Errors
+///
+/// Returns a message if the system frameworks are unavailable or return nothing usable. It never
+/// echoes what they returned.
 async fn read() -> Result<Material, String> {
     #[cfg(not(target_os = "macos"))]
     return Err("Local authentication is currently implemented for macOS only. Remote fallback is disabled.".into());
@@ -71,6 +84,10 @@ async fn read() -> Result<Material, String> {
     }
 }
 
+/// Whether this machine can authenticate with Apple locally, and why not if it cannot.
+///
+/// Called before a sign-in is offered, so a machine that cannot do it says so up front instead of
+/// failing with a credential error that suggests the password was wrong.
 pub async fn check() -> Status {
     match read().await {
         Ok(_) => Status { available: true, message: "Local macOS authentication support is available. Apple account sign-in has not yet been verified.".into() },
@@ -85,6 +102,10 @@ pub async fn check() -> Status {
 // process (`<com.apple.AuthKit/1 (com.orbiter.desktop/0.1.0)>`). Appending ours to that produced a
 // two-client-segment X-Mme-Client-Info that no Apple client sends, so drop the process segment and
 // keep only the machine and OS description.
+/// Build the client identification sent with an authentication request.
+///
+/// Reports this Mac's real OS and networking versions so Apple's service sees an accurate client,
+/// and nothing about the person using it — no account, no machine name, no hardware identifier.
 fn client_info(description: &str, cfnetwork: &str, darwin: &str) -> AnisetteClientInfo {
     let machine = match description.find("<com.apple.AuthKit") {
         Some(segment) => description[..segment].trim_end(),
@@ -118,6 +139,11 @@ fn client_info(description: &str, cfnetwork: &str, darwin: &str) -> AnisetteClie
 pub struct LocalProvider;
 #[async_trait::async_trait]
 impl AnisetteProvider for LocalProvider {
+    /// Provide one set of anisette values from this Mac's own frameworks.
+    ///
+    /// # Errors
+    ///
+    /// Fails if local authentication support is unavailable — on any non-macOS platform, always.
     async fn get_anisette_data(&self) -> Result<AnisetteData, Report> {
         let data = read()
             .await
@@ -130,6 +156,11 @@ impl AnisetteProvider for LocalProvider {
             data.local_user.clone(),
         ))
     }
+    /// This Mac's client identification. See [`client_info`].
+    ///
+    /// # Errors
+    ///
+    /// Fails if the system version cannot be read.
     async fn get_client_info(&self) -> Result<AnisetteClientInfo, Report> {
         // Resolve local material before AppleAccount::build can make its first request.
         let data = read()
@@ -141,9 +172,19 @@ impl AnisetteProvider for LocalProvider {
             &data.darwin,
         ))
     }
+    /// Always `false`: local anisette has no registration step, unlike a remote provider.
+    ///
+    /// # Errors
+    ///
+    /// Never fails; the signature is the trait's.
     fn needs_provisioning(&self) -> Result<bool, Report> {
         Ok(false)
     }
+    /// Nothing to do — there is no remote provider to register with.
+    ///
+    /// # Errors
+    ///
+    /// Never fails; the signature is the trait's.
     async fn provision(&mut self, _: Arc<GrandSlam>) -> Result<(), Report> {
         Err(rootcause::report!(
             "Remote provisioning is disabled; macOS manages local authentication support."
@@ -152,9 +193,12 @@ impl AnisetteProvider for LocalProvider {
 }
 
 #[cfg(test)]
+/// Checks that authentication happens locally, reaches only Apple, and leaks nothing.
 mod tests {
     use super::*;
     #[test]
+    /// The client identifies itself the way Apple's service expects, so authentication is not
+    /// refused for a reason that has nothing to do with the credentials.
     fn authentication_client_uses_compatible_daemon_identifier() {
         // AKDevice returns the calling process in a trailing AuthKit segment; only one such
         // segment may reach Apple.
@@ -179,6 +223,8 @@ mod tests {
     }
 
     #[test]
+    /// The client string carries this Mac's real OS version, and an unusable value is refused
+    /// rather than sent as an empty or invented one.
     fn user_agent_reports_live_os_versions_and_rejects_unusable_values() {
         // The stale hardcoded CFNetwork build is gone; only plausible version text is accepted.
         let live = client_info("<TestMac> <macOS;26.5;test>", "4000.1.2", "26.0.0");
@@ -200,6 +246,8 @@ mod tests {
     }
 
     #[test]
+    /// The request crossing into the system frameworks keeps its property-list types intact: a
+    /// value silently coerced to the wrong type is refused by Apple with nothing useful to say.
     fn local_authentication_request_preserves_plist_types_and_metadata() {
         let data = AnisetteData::from_local(
             "machine".into(),
@@ -238,6 +286,8 @@ mod tests {
     }
 
     #[test]
+    /// Two requests produce different material. Reusing one would be a replay, and the values are
+    /// one-time by design.
     fn locally_generated_authentication_material_is_never_replayed() {
         // Apple answered HTTP 429 on the proof request while accepting the init request that
         // carried the same one-time password. Local material must be regenerated per request.
@@ -251,6 +301,8 @@ mod tests {
         assert!(data.needs_refresh());
     }
     #[test]
+    /// Only Apple's own authentication hosts over HTTPS are accepted. This is the check that makes
+    /// "Orbiter talks to Apple directly" true rather than merely intended.
     fn only_direct_apple_https_destinations_are_allowed() {
         use isideload::auth::grandslam::validate_apple_url;
         for url in [
@@ -272,6 +324,8 @@ mod tests {
         }
     }
     #[test]
+    /// An unfamiliar entry in Apple's own service directory does not block the endpoints that are
+    /// valid: being strict must not mean being broken by Apple changing something unrelated.
     fn unused_directory_entries_do_not_block_valid_apple_endpoints() {
         use isideload::auth::grandslam::apple_url_from_directory;
         let mut urls = plist::Dictionary::new();
@@ -285,11 +339,15 @@ mod tests {
         assert!(apple_url_from_directory(&urls, "missing").is_err());
     }
     #[test]
+    /// TLS is configured explicitly at startup, so the first authentication request cannot fail
+    /// for want of a provider.
     fn authentication_initialization_configures_the_tls_provider() {
         crate::accounts::initialize();
         assert!(GrandSlam::build_reqwest_client(false, None).is_ok());
     }
     #[test]
+    /// A proxy setting or relaxed certificate verification is refused: either would put a
+    /// password somewhere a person did not choose.
     fn proxy_and_insecure_tls_configuration_are_rejected() {
         assert!(
             GrandSlam::build_reqwest_client(false, Some("https://proxy.invalid".into())).is_err()
@@ -297,6 +355,8 @@ mod tests {
         assert!(GrandSlam::build_reqwest_client(true, None).is_err());
     }
     #[tokio::test]
+    /// An account cannot be built without naming the local provider explicitly, so no default
+    /// remote anisette server can slip in unnoticed.
     async fn account_builder_requires_an_explicit_local_provider() {
         assert!(
             isideload::auth::apple_account::AppleAccount::builder("test@example.invalid")
@@ -308,6 +368,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     #[ignore = "Direct Apple directory connectivity only; no account login or credentials"]
+    /// Apple's service directory is reachable and lists the endpoints authentication needs.
+    ///
+    /// Ignored by default: it makes a real network request to Apple.
     async fn native_apple_directory_connectivity() {
         crate::accounts::initialize();
         let result =
@@ -322,6 +385,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     #[ignore = "Reads local macOS authentication support; emits no material and sends no account credentials"]
+    /// This Mac's own authentication frameworks return usable material.
+    ///
+    /// Ignored by default: it depends on the machine it runs on, and there is nothing to fake.
     async fn native_local_authentication_support() {
         assert!(
             check().await.available,
