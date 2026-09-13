@@ -123,9 +123,6 @@ async fn provider(device_id: u32) -> Result<UsbmuxdProvider, String> {
         .into_iter()
         .find(|device| device.device_id == device_id)
         .ok_or("Selected iPhone disconnected. Select it again.")?;
-    if raw.connection_type != idevice::usbmuxd::Connection::Usb {
-        return Err("Log capture supports USB only. Connect the iPhone by cable.".into());
-    }
     Ok(raw.to_provider(address(), "Orbiter"))
 }
 

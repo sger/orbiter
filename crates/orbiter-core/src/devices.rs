@@ -40,7 +40,7 @@ impl Transport {
     /// A cable is faster and does not stop working when someone walks out of range, so it is
     /// always chosen over Wi-Fi. An unmodelled transport is last: it may work, and it is not
     /// something to select on a phone's behalf.
-    fn rank(self) -> u8 {
+    pub(crate) fn rank(self) -> u8 {
         match self {
             Self::Usb => 0,
             Self::Network => 1,
@@ -115,7 +115,7 @@ const MAX_TRANSPORTS: usize = 32;
 const MAX_PHONES: usize = 16;
 
 /// Name the transport the daemon reported.
-fn transport(connection: &Connection) -> Transport {
+pub(crate) fn transport(connection: &Connection) -> Transport {
     match connection {
         Connection::Usb => Transport::Usb,
         Connection::Network(_) => Transport::Network,

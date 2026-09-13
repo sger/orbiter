@@ -1,13 +1,16 @@
 //! Install an unchanged, already-signed IPA after a read-only review.
 pub mod job;
-use crate::{Report, devices::address};
+use crate::{
+    Report,
+    devices::{Transport, address, transport},
+};
 use idevice::{
     IdeviceError, IdeviceService,
     afc::{AfcClient, opcode::AfcFopenMode},
     installation_proxy::InstallationProxyClient,
     lockdown::LockdownClient,
     provider::{IdeviceProvider, UsbmuxdProvider},
-    usbmuxd::{Connection, UsbmuxdDevice},
+    usbmuxd::UsbmuxdDevice,
 };
 use job::{Control, JobStatus, Stage};
 use serde::Serialize;
@@ -86,7 +89,9 @@ pub struct PreparedInstall {
     pub library_artifact: Option<crate::library::Artifact>,
     pub library_lease: Option<crate::library::Lease>,
     snapshot: tempfile::TempDir,
-    device_id: u32,
+    /// How the phone was reached when the review was made. Kept so a move between the cable and
+    /// Wi-Fi can be mentioned rather than silently changing how long the transfer takes.
+    connection: Transport,
     udid: String,
     created: Instant,
 }
@@ -95,6 +100,26 @@ struct Phone {
     name: String,
     version: String,
     provider: UsbmuxdProvider,
+    /// How this Mac is reaching the phone right now. Not fixed for the life of an operation: a
+    /// cable can be pulled while the phone stays on Wi-Fi, and the work carries on over Wi-Fi.
+    connection: Transport,
+}
+/// How long resolving one phone may take, covering several lockdown round-trips plus a TLS
+/// handshake. It is a ceiling rather than a delay, so allowing for Wi-Fi costs a cable nothing —
+/// and the previous ten seconds, sized for a cable, is where a Wi-Fi phone would first give up.
+const RESOLVE_DEADLINE: Duration = Duration::from_secs(25);
+/// How to find a phone among the transports the device daemon reports.
+///
+/// The distinction matters because the two are not equally durable. A transport number belongs to
+/// one connection and changes when a phone moves between the cable and Wi-Fi; the phone's own
+/// identity does not. So the number is used only for first contact — it is all the window has for
+/// a phone nobody has identified yet — and everything afterwards looks the phone up by identity,
+/// which is what makes an operation survive the cable being pulled.
+enum Locate<'a> {
+    /// The transport number the window offered.
+    Number(u32),
+    /// The phone itself, by the identifier read from it during the review.
+    Identity(&'a str),
 }
 /// Replace a transport error with one sentence about what to do.
 ///
@@ -103,11 +128,19 @@ struct Phone {
 fn connection_error(_: IdeviceError) -> String {
     "Cannot communicate with the selected iPhone. Unlock it, check trust and the USB cable, and review again.".into()
 }
-/// Verified USB iPhone identity for an in-crate caller: its UDID and display name. The UDID is
+/// Verified iPhone identity for an in-crate caller: its UDID and display name. The UDID is
 /// deliberately not part of any type that crosses the IPC boundary.
 pub(crate) async fn verified_identity(id: u32) -> Result<(String, String), String> {
-    let phone = phone(id).await?;
+    let phone = phone(Locate::Number(id)).await?;
     Ok((phone.raw.udid, phone.name))
+}
+/// Confirm the phone a review was prepared for is still reachable, by either transport.
+///
+/// # Errors
+///
+/// Returns an actionable sentence if it cannot be reached, is locked, or is untrusted.
+pub(crate) async fn confirm_identity(udid: &str) -> Result<(), String> {
+    phone(Locate::Identity(udid)).await.map(|_| ())
 }
 /// Find one attached phone and read the properties an installation needs.
 ///
@@ -118,21 +151,29 @@ pub(crate) async fn verified_identity(id: u32) -> Result<(String, String), Strin
 ///
 /// Returns an actionable sentence if the device daemon is unreachable, no attached device has that
 /// number, or the phone is locked or untrusted. The transport's own error never appears.
-async fn phone(id: u32) -> Result<Phone, String> {
-    timeout(Duration::from_secs(10), async {
+async fn phone(locate: Locate<'_>) -> Result<Phone, String> {
+    timeout(RESOLVE_DEADLINE, async {
         let mut mux = address().connect(0).await.map_err(connection_error)?;
-        let raw = mux
+        let mut matches: Vec<UsbmuxdDevice> = mux
             .get_devices()
             .await
             .map_err(connection_error)?
             .into_iter()
-            .find(|d| d.device_id == id)
-            .ok_or("Selected iPhone disconnected. Select it again.")?;
-        if raw.connection_type != Connection::Usb {
-            return Err(
-                "This installation preview supports USB only. Connect the iPhone by cable.".into(),
-            );
-        }
+            .filter(|d| match locate {
+                Locate::Number(id) => d.device_id == id,
+                Locate::Identity(udid) => d.udid == udid,
+            })
+            .collect();
+        // One phone can answer on two transports. Prefer the cable, as discovery does, so an
+        // operation does not quietly move to the slower connection while both are available.
+        matches.sort_by_key(|d| transport(&d.connection_type).rank());
+        let raw = matches.into_iter().next().ok_or(match locate {
+            Locate::Number(_) => "Selected iPhone disconnected. Select it again.",
+            Locate::Identity(_) => {
+                "The iPhone this was reviewed for is no longer reachable, over either a cable or Wi-Fi. Reconnect it and review again."
+            }
+        })?;
+        let connection = transport(&raw.connection_type);
         let provider = raw.to_provider(address(), "Orbiter");
         let mut client = LockdownClient::connect(&provider)
             .await
@@ -171,6 +212,7 @@ async fn phone(id: u32) -> Result<Phone, String> {
             name,
             version,
             provider,
+            connection,
         })
     })
     .await
@@ -430,7 +472,7 @@ fn package_blockers(
 /// Returns a message if the file cannot be read or inspected, or if the phone is absent, locked or
 /// untrusted.
 pub async fn prepare(path: PathBuf, device_id: u32) -> Result<PreparedInstall, String> {
-    let phone = phone(device_id).await?;
+    let phone = phone(Locate::Number(device_id)).await?;
     let (dir, report, hash) = tokio::task::spawn_blocking(move || snapshot(&path))
         .await
         .map_err(|_| "Snapshot worker stopped.")??;
@@ -471,7 +513,7 @@ pub async fn prepare(path: PathBuf, device_id: u32) -> Result<PreparedInstall, S
             notes,
         },
         snapshot: dir,
-        device_id,
+        connection: phone.connection,
         udid: phone.raw.udid,
         created: Instant::now(),
     })
@@ -609,7 +651,7 @@ impl PreparedInstall {
             library_artifact: artifact,
             library_lease: lease,
             snapshot: tempfile::tempdir().expect("a temporary snapshot directory"),
-            device_id,
+            connection: Transport::Usb,
             udid: format!("synthetic-udid-{device_id}"),
             created: Instant::now(),
         }
@@ -693,10 +735,9 @@ pub async fn execute(
     // Unknown outcomes may still be consuming the IPA. Never remove their staging package here.
     if status.cleanup_pending && status.stage != Stage::Unknown {
         status.cleanup_pending = timeout(Duration::from_secs(10), async {
-            let target = phone(plan.device_id).await?;
-            if target.raw.udid != plan.udid {
-                return Err("Device changed.".to_string());
-            }
+            // Also by identity. Resolving by number meant cleanup always failed after a phone
+            // moved between the cable and Wi-Fi, leaving the staging copy behind for no reason.
+            let target = phone(Locate::Identity(&plan.udid)).await?;
             let mut afc = AfcClient::connect(&target.provider)
                 .await
                 .map_err(connection_error)?;
@@ -715,6 +756,29 @@ pub async fn execute(
     }
     notify(status.clone());
     status
+}
+/// What to say as a transfer starts, given how the phone was reached at review and how it is
+/// being reached now.
+///
+/// A phone found by identity is the same phone however it is connected, so a changed connection
+/// is not a reason to refuse. It is a reason to *say so*: moving to Wi-Fi changes how long the
+/// transfer takes, and someone watching a progress bar that has slowed down deserves to know it
+/// is the connection rather than the phone.
+fn transfer_message(reviewed: Transport, now: Transport) -> &'static str {
+    if reviewed == now {
+        return "Transferring the unchanged IPA to the iPhone. Cancellation is available.";
+    }
+    match now {
+        Transport::Network => {
+            "The iPhone is now on Wi-Fi rather than a cable. Transferring the unchanged IPA, which will take longer. Cancellation is available."
+        }
+        Transport::Usb => {
+            "The iPhone is now on a cable rather than Wi-Fi. Transferring the unchanged IPA. Cancellation is available."
+        }
+        Transport::Unknown => {
+            "The iPhone is reachable a different way than when it was reviewed. Transferring the unchanged IPA. Cancellation is available."
+        }
+    }
 }
 /// Do the work of one installation: connect, transfer, verify, install.
 ///
@@ -748,14 +812,10 @@ async fn run(
             .into());
     }
     cancel_check(control)?;
-    let target = phone(plan.device_id).await?;
-    if target.raw.udid != plan.udid {
-        return Err(
-            "The connected device changed. Review again for the intended iPhone."
-                .to_string()
-                .into(),
-        );
-    }
+    // Located by identity, not by the number the review was prepared with: unplugging the cable
+    // changes that number, and a review belongs to a phone rather than to a connection. The
+    // identity is the same thing the old equality check proved, now enforced by the lookup.
+    let target = phone(Locate::Identity(&plan.udid)).await?;
     if existing(&target.provider, &plan.review.bundle_id).await? != plan.review.existing_app {
         return Err(
             "The installed app changed since review. Review again before replacing it."
@@ -790,8 +850,7 @@ async fn run(
         return Err("Invalid job transition.".to_string().into());
     }
     status.stage = Stage::Transferring;
-    status.message =
-        "Transferring the unchanged IPA to the iPhone. Cancellation is available.".into();
+    status.message = transfer_message(plan.connection, target.connection).into();
     publish(status, journal, notify)?;
     cancel_check(control)?;
     if limited(afc.get_file_info("PublicStaging")).await.is_err() {
@@ -884,6 +943,35 @@ async fn run(
 /// Checks the comparisons and classifications a review depends on.
 mod tests {
     use super::*;
+    #[test]
+    /// A phone reached the same way it was reviewed produces no remark; a phone that has moved
+    /// between a cable and Wi-Fi is still installed to, and is said to have moved.
+    ///
+    /// It must never be refused: the review is bound to the phone, and the phone has not changed.
+    fn a_changed_connection_is_mentioned_rather_than_refused() {
+        for same in [Transport::Usb, Transport::Network, Transport::Unknown] {
+            let plain = transfer_message(same, same);
+            assert!(plain.starts_with("Transferring the unchanged IPA"));
+            assert!(!plain.contains("now on"));
+        }
+        // Moving to Wi-Fi is the one that changes what a person should expect.
+        let slower = transfer_message(Transport::Usb, Transport::Network);
+        assert!(slower.contains("now on Wi-Fi"));
+        assert!(slower.contains("take longer"));
+        // And back again, without claiming it will take longer.
+        let faster = transfer_message(Transport::Network, Transport::Usb);
+        assert!(faster.contains("now on a cable"));
+        assert!(!faster.contains("take longer"));
+        // Every wording keeps the two things that are true whatever the connection.
+        for message in [
+            slower,
+            faster,
+            transfer_message(Transport::Usb, Transport::Unknown),
+        ] {
+            assert!(message.contains("unchanged IPA"));
+            assert!(message.contains("Cancellation is available"));
+        }
+    }
     #[test]
     /// Profile issues may require signing, but any unsupported package issue prevents that route.
     fn guided_readiness_does_not_treat_all_blockers_as_signable() {
@@ -1057,7 +1145,7 @@ mod fixture_tests {
                 notes: vec![],
             },
             snapshot: dir,
-            device_id: u32::MAX,
+            connection: Transport::Usb,
             udid: "never-connect".into(),
             created: Instant::now(),
         };

@@ -282,10 +282,10 @@ impl SigningService {
         let result = async {
             let (generation, target) = self.accounts.signing_context()?;
             pending.validate_context(&generation, &target.team_id)?;
-            let (udid, _) = crate::installation::verified_identity(pending.device_id).await?;
-            if udid != pending.udid {
-                return Err(stale());
-            }
+            // By identity rather than by the number the review was prepared with: that number
+            // changes when the phone moves between a cable and Wi-Fi, and the phone has not.
+            crate::installation::confirm_identity(&pending.udid).await?;
+            let udid = pending.udid.clone();
             // Re-hash before any portal mutation, retaining the original lease throughout.
             let (_, _, _verified) = self.source(&pending.review.artifact_id).await?;
             let (registration, certificate) = self.accounts.signing_resources(&udid).await?;
