@@ -230,6 +230,19 @@
   border-radius: 9px;
   overflow-wrap: anywhere;
 }
+/* What to do about an iPhone that stopped answering. Shares the error block's shape because it
+   belongs to the same failure, and carries its own action because the failure has one. */
+.guided-recovery {
+  margin: 12px 0 0;
+  padding: 16px;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  background: var(--color-surface-soft);
+}
+.guided-recovery > p {
+  margin: 6px 0 12px;
+  color: var(--color-ink-soft);
+}
 .guided-flow .accounts {
   border: 0;
   padding: 0;

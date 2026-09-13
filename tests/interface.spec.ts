@@ -475,6 +475,106 @@ test("a locked iPhone cannot advance and provides focused help", async ({
   ).toBeDisabled();
 });
 
+test("an iPhone on Wi-Fi can be used, and says what that costs", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await page.evaluate(() => {
+    (window as any).__devices = [
+      {
+        id: 4,
+        name: "Wireless phone",
+        ios_version: "18.0",
+        connection: "network",
+        state: "paired",
+        message: "Pairing session verified.",
+      },
+    ];
+  });
+  await page.getByRole("link", { name: "Open version", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+
+  // Called what people call it, not what the device daemon calls it.
+  await expect(
+    page.locator(".device-status").getByText("Wi-Fi · Pairing verified"),
+  ).toBeVisible();
+  await expect(page.getByText("Network")).toHaveCount(0);
+  // The cost is stated and the choice is left open.
+  await expect(page.getByText("takes longer than a cable")).toBeVisible();
+  // And it can actually be used — this is exactly what silently failed before.
+  await expect(
+    page.getByRole("button", { name: "Check app & iPhone" }),
+  ).toBeEnabled();
+  await expect(page.getByText("iPhone selected · Wi-Fi")).toBeVisible();
+});
+
+test("a phone reachable two ways is offered once and says so", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  // The backend collapses the two transports into one entry; the window explains it.
+  await page.evaluate(() => {
+    (window as any).__devices = [
+      {
+        id: 1,
+        name: "My iPhone",
+        ios_version: "18.0",
+        connection: "usb",
+        alternate: "network",
+        state: "paired",
+        message: "Pairing session verified.",
+      },
+    ];
+  });
+  await page.getByRole("link", { name: "Open version", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await expect(page.getByText("Also reachable over Wi-Fi")).toBeVisible();
+  // The cable is in use, so the Wi-Fi cost note does not apply and must not appear.
+  await expect(page.getByText("takes longer than a cable")).toHaveCount(0);
+  await expect(page.getByText("iPhone selected · USB")).toBeVisible();
+});
+
+test("an unreachable iPhone offers to check the connection rather than starting over", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await page.evaluate(() => {
+    (window as any).__devices = [
+      {
+        id: 4,
+        name: "Wireless phone",
+        connection: "network",
+        state: "paired",
+        message: "Pairing session verified.",
+      },
+    ];
+    (window as any).__checkError = {
+      code: "device_unavailable",
+      message: "The iPhone could not be reached.",
+    };
+  });
+  await page.getByRole("link", { name: "Open version", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await page.getByRole("button", { name: "Check app & iPhone" }).click();
+
+  await expect(page.getByText("The iPhone could not be reached.")).toBeVisible();
+  // The advice matches the connection in use: no cable is mentioned for a Wi-Fi phone.
+  await expect(page.getByText("on the same network as this Mac")).toBeVisible();
+  await expect(page.getByText("check the cable")).toHaveCount(0);
+
+  // Checking again succeeds once the phone answers, without re-choosing anything.
+  await page.evaluate(() => delete (window as any).__checkError);
+  await page
+    .getByRole("button", { name: "Check connection again" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Check connection again" }),
+  ).toHaveCount(0);
+});
+
 test("an included Watch app needs an explicit decision before preparation", async ({
   page,
 }) => {

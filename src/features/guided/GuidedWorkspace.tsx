@@ -16,7 +16,12 @@ import { Devices } from "../device/Devices";
 import { AppIcon } from "../library/AppIcon";
 import { useLibraryDrop } from "../library/useLibraryDrop";
 import type { Opened } from "../library/types";
-import type { AccountView, TeamStatus, WatchChoice } from "../../types";
+import type {
+  AccountView,
+  TeamStatus,
+  Transport,
+  WatchChoice,
+} from "../../types";
 import {
   isTauri,
   libraryChanged,
@@ -38,6 +43,12 @@ const noConsent: Consents = {
 };
 const ignore = () => {};
 
+/// What each transport is called where a person reads it, matching the device picker.
+const transports: Record<Transport, string> = {
+  usb: "USB",
+  network: "Wi-Fi",
+  unknown: "Unknown connection",
+};
 export function GuidedWorkspace({
   selected,
   visible,
@@ -54,6 +65,7 @@ export function GuidedWorkspace({
   onOpen: (value: Opened) => void;
 }) {
   const [deviceId, setDeviceId] = useState<number | null>(null);
+  const [connection, setConnection] = useState<Transport | null>(null);
   const [accountView, setAccountView] = useState<AccountView | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -307,6 +319,7 @@ export function GuidedWorkspace({
           <div hidden={flow.stage !== "choose"} className="guided-section">
             <Devices
               onSelect={setDeviceId}
+              onConnection={setConnection}
               paused={locked || flow.stage !== "choose"}
             />
           </div>
@@ -852,6 +865,29 @@ export function GuidedWorkspace({
               {flow.error}
             </p>
           )}
+          {/* The one failure a person can usually fix where they stand. It is shown as its own
+              block rather than only a sentence because the fix differs by connection, and
+              because the thing to do next is check again — not start over. */}
+          {flow.errorCode === "device_unavailable" && !flow.busy && (
+            <div className="guided-recovery">
+              <strong>The iPhone could not be reached</strong>
+              {connection === "network" ? (
+                <p>
+                  Wake the iPhone and unlock it, and check it is on the same
+                  network as this Mac. An iPhone that has gone to sleep or left
+                  the network stops answering until it comes back.
+                </p>
+              ) : (
+                <p>
+                  Unlock the iPhone and check the cable. If it was disconnected,
+                  reconnect it and check again.
+                </p>
+              )}
+              <button className="secondary" onClick={() => void flow.check()}>
+                Check connection again
+              </button>
+            </div>
+          )}
         </section>
         <aside className="guided-context" aria-label="Installation context">
           <div className="guided-app">
@@ -874,6 +910,8 @@ export function GuidedWorkspace({
               <code>{app.identifier}</code>
             </p>
           )}
+          {/* Visible at every stage, so it is where the connection stays answerable after the
+              device step is behind you — including while a transfer is running. */}
           <div className="guided-phone">
             <Smartphone size={20} />
             <span>
@@ -881,7 +919,8 @@ export function GuidedWorkspace({
                 flow.preparation?.device_name ??
                 (deviceId === null
                   ? "Choose a connected iPhone"
-                  : "USB iPhone selected")}
+                  : "iPhone selected")}
+              {deviceId !== null && connection ? ` · ${transports[connection]}` : ""}
             </span>
           </div>
           <p className="hint">

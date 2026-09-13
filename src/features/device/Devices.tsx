@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { discoverDevices, isTauri } from "../../ipc/commands";
-import type { Discovery } from "../../types";
+import type { Discovery, Transport } from "../../types";
 import { RefreshCw, Smartphone } from "lucide-react";
 import { Select } from "../../components/ui/Select";
 /// What each transport is called where a person reads it. "Wi-Fi" is the word people use for it;
@@ -19,9 +19,13 @@ const labels = {
 };
 export function Devices({
   onSelect,
+  onConnection,
   paused = false,
 }: {
   onSelect?: (id: number | null) => void;
+  /// How the selected phone is being reached, for screens that keep saying so after this one.
+  /// Reported separately from the id, and as a plain value, so it cannot churn on every poll.
+  onConnection?: (connection: Transport | null) => void;
   paused?: boolean;
 }) {
   const [result, setResult] = useState<Discovery | null>(null);
@@ -51,7 +55,7 @@ export function Devices({
           devices: [],
           service_available: false,
           message:
-            "Device discovery failed. Check the cable and Apple device service, then refresh.",
+            "Device discovery failed. Check the connection and the Apple device service, then refresh.",
         });
         setSelected("");
       }
@@ -72,11 +76,10 @@ export function Devices({
   const device = result?.devices.find((d) => String(d.id) === selected);
   useEffect(() => {
     onSelect?.(
-      device?.state === "paired" && device.connection === "usb"
-        ? device.id
-        : null,
+      device?.state === "paired" ? device.id : null,
     );
-  }, [device?.id, device?.state, device?.connection, onSelect]);
+    onConnection?.(device?.state === "paired" ? device.connection : null);
+  }, [device?.id, device?.state, device?.connection, onSelect, onConnection]);
   return (
     <div className="devices" tabIndex={-1} data-stage="device">
       <div className="device-label">
@@ -121,16 +124,32 @@ export function Devices({
         {device ? (
           <>
             <strong>
-              {labels[device.state]}
+              {transports[device.connection]} · {labels[device.state]}
               {device.ios_version ? ` · iOS ${device.ios_version}` : ""}
             </strong>
             <p>{device.message}</p>
+            {/* The same phone, reachable two ways. Said rather than listed twice: a list where
+                every phone appears once per cable is a list nobody can read. */}
+            {device.alternate && (
+              <p className="hint">
+                Also reachable over {transports[device.alternate]}. Orbiter uses{" "}
+                {transports[device.connection]} because it is faster and does not
+                depend on staying in range.
+              </p>
+            )}
+            {device.connection === "network" && device.state === "paired" && (
+              <p className="hint">
+                Installing over Wi-Fi works and takes longer than a cable. If the
+                connection drops part-way, the transfer starts again — Orbiter
+                never repeats it on its own.
+              </p>
+            )}
           </>
         ) : (
           <p>
             {result?.message ??
               (desktop && result
-                ? "Connect an iPhone by USB, unlock it, and check Finder or Apple's device app if it isn't listed."
+                ? "Connect an iPhone by cable and unlock it. To use one over Wi-Fi, connect it by cable once, trust this Mac, and turn on “Show this iPhone when on Wi-Fi” in Finder — an iPhone that has never been trusted here cannot be reached over Wi-Fi at all."
                 : "Connect an iPhone to inspect its connection and pairing state.")}
           </p>
         )}
