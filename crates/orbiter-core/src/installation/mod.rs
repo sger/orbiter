@@ -491,6 +491,42 @@ fn cancel_check(control: &Control) -> Result<(), RunError> {
     }
 }
 impl PreparedInstall {
+    /// Build a review bound to nothing, for testing the rules around it.
+    ///
+    /// The snapshot directory is real but empty and the device identity is synthetic, so this can
+    /// never be handed to the real installer and made to touch a phone. It exists so the rules an
+    /// installation service enforces — expiry, token matching, acknowledgement, cancellation — can
+    /// be exercised without one.
+    #[cfg(test)]
+    pub(crate) fn synthetic(
+        token: crate::domain::identifiers::ReviewToken,
+        sha256: String,
+        device_id: u32,
+        artifact: Option<crate::library::Artifact>,
+        lease: Option<crate::library::Lease>,
+    ) -> Self {
+        Self {
+            review: Review {
+                token,
+                app_name: "Synthetic".into(),
+                bundle_id: "test.library".into(),
+                version: Some("1.0".into()),
+                device_name: "Tester phone".into(),
+                size_bytes: 1,
+                sha256,
+                existing_app: None,
+                blockers: vec![],
+                notes: vec![],
+            },
+            library_artifact: artifact,
+            library_lease: lease,
+            snapshot: tempfile::tempdir().expect("a temporary snapshot directory"),
+            device_id,
+            udid: format!("synthetic-udid-{device_id}"),
+            created: Instant::now(),
+        }
+    }
+
     /// Whether this review is too old to authorise an installation.
     ///
     /// A review binds bytes and a device that were verified at a moment in time; after ten minutes

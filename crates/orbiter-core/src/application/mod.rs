@@ -10,6 +10,7 @@
 //! channel; a test collects it into a vector.
 
 pub mod installation;
+pub mod ports;
 pub mod runtime;
 pub mod signing;
 

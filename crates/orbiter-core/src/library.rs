@@ -265,6 +265,14 @@ pub struct Library {
     shared: Arc<Shared>,
 }
 impl Library {
+    /// The directory this library owns.
+    ///
+    /// Exposed so a caller can report where storage lives, and so a test can make writes to it
+    /// fail on purpose. Nothing outside this module should read or write inside it directly.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// Take the metadata lock for the duration of one read-modify-write.
     ///
     /// # Errors
