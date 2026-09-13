@@ -1,5 +1,9 @@
-//! Local managed IPAs and an append-only history of installation attempts.
-//! Only opaque device tags leave Rust; artifacts are resolved by ID, never caller paths.
+//! Local managed IPAs and a bounded history of installation attempts.
+//!
+//! A phone is identified by a tag — a salted hash of its UDID — and the raw identifier is never
+//! written here. Its name is, because a line about a tester's build has to say which phone it is
+//! about; so this file knows "Spiros's iPhone" and not which device that is. Artifacts are
+//! resolved by ID, never by a caller-supplied path.
 use crate::{
     Report,
     installation::job::{JobStatus, Stage},

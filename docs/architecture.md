@@ -55,6 +55,8 @@ The desktop tracing filter admits only Orbiter's structured events, excluding de
 
 ## Existing-signature installation
 
+App icons are read from the archive in process. An Apple-optimised (CgBI) PNG cannot be decoded here, so on macOS `app_icon` writes that one image to a temporary directory and asks the system image converter to re-encode it, with bounded dimensions, a bounded output and a three-second timeout — the only subprocess inspection starts, and the only file it writes. An icon that cannot be read is absent; it never fails the inspection.
+
 `installation::prepare` binds an opaque review token to a private local IPA snapshot and the selected phone's UDID, held only in Rust memory. A SHA-256 fingerprint identifies the reviewed bytes. The review expires in ten minutes. Only one prepared review and one review/install operation are admitted per desktop process. The UI pauses discovery/selection while preparing or executing; the backend independently validates the token and acknowledgement and consumes the review once.
 
 Preflight rejects missing/expired profiles, incomplete/encrypted executable inspection, unverified iPhone platform/architecture/OS metadata, and profiles that do not authorize the selected phone (unless `ProvisionsAllDevices` explicitly authorizes all devices). Nested iPhone bundles receive membership checks; Watch bundles stay included, with Watch-device authorization explicitly unverified. No identifier, entitlement, profile, or signature is modified. Installed-app lookup is limited to the main bundle ID. The review shows potential replacement, and execution repeats the lookup and rejects a changed installed version/build.
@@ -119,13 +121,17 @@ Provisioning runs the plan first and writes nothing at all when the plan has blo
 
 ## The seven days
 
-`renewal.rs` is the memory of an expiry. A free team's profile lasts seven days and the installed app then refuses to launch, telling the tester nothing; Orbiter used to state this once, during signing, and never again.
+A free team's profile lasts seven days and the installed app then refuses to launch, telling the tester nothing. Orbiter used to state this once, during signing, and never again.
 
-A record is written when an install reports success, not when signing finishes: the seven days only matter once a build is on a phone, and installing is a separate click that may never come. Signing therefore leaves a record waiting in the account session, and `execute_install` takes it by identifier and commits it. A failed or cancelled install leaves the waiting record alone.
+The library is the memory of it. A countdown exists only for an attempt that reached `Installed` and whose expiry is actually known: a saved file is a fact about this Mac, and counting down from an import would be Orbiter claiming an installation it never performed. Unknown is not zero either — a record written before the library kept epoch seconds has no countdown rather than a fabricated one.
 
-The file is `renewal.json` in the app-data directory, guarded like the install journal — bounded, and a damaged or oversized file answers "nothing is known" rather than failing. It holds the app's name, the rewritten identifier, the Watch choice that was made, the expiry, and the install time. It does not hold the IPA's path, the device UDID, the Apple ID, or the team identifier: a personal team is named after its owner, so teams are matched by a tag derived from the identifier rather than by the identifier, and the file is not a readable list of whose Apple accounts have been used on this Mac. Up to 32 records are kept so signing for several testers does not lose the earlier ones.
+Expiry travels as seconds since the epoch from the moment it is read, alongside the display string, and both are taken from one chosen profile so the date shown and the date counted can never describe different bundles. `profile::Profile`, `provisioning::ProfileOutcome`, `signer::Signed`, `library::Artifact` and `library::Attempt` all carry the pair. Nothing parses a date back out of a display string.
 
-`standing` is integer arithmetic against the clock on twenty-four-hour boundaries, rounded down — six and a half days left is six, because a person planning around the number must never be told they have longer than they do. `bearing` says whether the record is about the build on screen; anything else shows no countdown, because a reassuring "5 days left" about a different app is worse than silence. The sentence itself is built in Rust so the window, a screenshot of it, and the log agree on the wording.
+`renewal.rs` owns the arithmetic and the wording. `standing_at` is integer division on twenty-four-hour boundaries, rounded down — six and a half days left is six, because a person planning around the number must never be told they have longer than they do. `line` is the only place the sentence exists, so the library page, the workspace banner and a screenshot of either cannot word the same fact differently, and `urgent` is the single rule for what a person must act on.
+
+`Library::snapshot` reports every qualifying install, longest-lived first within each app. Longest-lived rather than most recent: the same app can be on two testers' phones, and a re-sign installed on one does not revive the copy on the other, so a screen leads with the copy that still launches while every attempt stays visible against its own device. `Library::expiry` answers for one artifact — the workspace is opened from one, so "is this about what I am looking at?" is settled by construction, and a signed build made from an original counts as that original's. Only the team can still differ, and a build signed for another team gets no countdown at all: a reassuring "5 days left" about somebody else's build is worse than silence.
+
+`renewal.json` is no longer written. It is still read, and shown as the labelled legacy record it is, with the one control that can clear it.
 
 Nothing here contacts Apple, re-signs, or schedules anything. The banner offers the same signing call the main control makes, and only when that control would accept it.
 

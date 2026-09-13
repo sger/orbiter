@@ -217,7 +217,14 @@ fn read<R: Read + Seek>(
     }
     Ok(bytes)
 }
-/// Pure local inspection. No extracted files, subprocesses, network, or credential access.
+/// Local inspection: no network and no credential access, and the chosen IPA is only ever read.
+///
+/// The archive itself is read entirely in process, with nothing extracted to disk. The one
+/// exception is the app icon: an Apple-optimised PNG cannot be decoded here, so on macOS
+/// `app_icon` writes that single image to a temporary directory and asks the system converter to
+/// re-encode it, bounded and with a timeout. Nothing else leaves this process, and an icon that
+/// cannot be read is simply absent.
+///
 /// Progress describes completed boundaries, not a fabricated percentage.
 pub fn inspect(
     path: &Path,
@@ -523,7 +530,14 @@ fn icon<R: Read + Seek>(
             if !names.contains(&name) {
                 continue;
             }
-            let bytes = read(z, &name, 2 * 1024 * 1024, cancel, budget)?;
+            // An icon is decoration. A member too large to read, or one this decoder does not
+            // understand, moves on to the next candidate — it does not fail the inspection and
+            // take the whole import with it. Only cancellation still stops everything.
+            let bytes = match read(z, &name, 2 * 1024 * 1024, cancel, budget) {
+                Ok(bytes) => bytes,
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                Err(_) => continue,
+            };
             if let Some(bytes) = app_icon::normalize(bytes) {
                 return Ok(Some(format!(
                     "data:image/png;base64,{}",

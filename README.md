@@ -4,7 +4,7 @@ A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2,
 
 It exists for one problem: a company team's 100-device allowance is full, so testers outside it cannot install the company build. Orbiter re-signs that build with a tester's own free Apple ID and installs it on their iPhone.
 
-The existing signing/install path has previously been run end to end on a physical device: Apple sign-in, device registration, a development certificate whose key stays in this Mac's Keychain, App ID and profile registration, re-signing, installation, and the app launching. **Re-signing on a schedule is not implemented, by design** — a free team's profile expires after seven days, and Orbiter tracks when an installed build runs out and says so, but re-signing is always a click. Nothing here contacts Apple on its own. Federated company accounts are not supported. Windows is unverified.
+The existing signing/install path has previously been run end to end on a physical device: Apple sign-in, device registration, a development certificate whose key stays in this Mac's Keychain, App ID and profile registration, re-signing, installation, and the app launching. **Re-signing on a schedule is not implemented, by design** — a free team's profile expires after seven days, and the library counts down from the installs it actually performed and announces a build that has run out, but re-signing is always a click. Nothing here contacts Apple on its own. Federated company accounts are not supported. Windows is unverified.
 
 ## Run
 
@@ -81,7 +81,7 @@ cargo run --locked -p orbiter-core --bin orbiter-install-review -- /path/to/comp
 
 Replace `1` with the ephemeral transport ID from `orbiter-devices`. The CLI discards its snapshot on exit. Review output includes app/device display information; handle it as private company information.
 
-The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory, and what an installed build's expiry line needs in `renewal.json` beside it — app name, identifier, expiry, and a tag derived from the team, never the team identifier, the IPA's location, the phone, or the Apple ID. Both files are bounded and refused when damaged rather than trusted. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time.
+The desktop keeps only the latest job's stage and redacted status in `last-install.json` under its app-data directory, and the library's own records beside it (see [library architecture](docs/app-library.md)). `renewal.json`, written by earlier versions, is still read and shown as a labelled legacy record but is never written again. Every one of these files is bounded and refused when damaged rather than trusted. After an interrupted install, check the phone before making a new review. There is no automatic retry, resumable upload, or background refresh. Normal completion/cancellation attempts to remove only its UUID-named staging IPA. Disconnections or process termination may leave that staging file or a local temporary snapshot behind; automatic orphan cleanup is not implemented. Run one Orbiter instance at a time.
 
 ## Re-sign for a tester's Apple ID (macOS)
 
@@ -104,4 +104,4 @@ After signing, **Device log → Capture while you reproduce it** streams the con
 
 ## Persistent app library
 
-The library retains originals and successfully signed outputs in local application storage. History belongs to the reviewed artifact and verified device; it is not a complete inventory of a phone. Removing saved files never uninstalls apps. See [library architecture and verification](docs/app-library.md) for storage, recovery, privacy, and removal behavior. The new import → sign → install → restart → reopen library flow has not yet been validated on a physical device.
+The library retains originals and successfully signed outputs in local application storage, and counts down the seven days from the installs it performed — quietly while a build still launches, and as an announcement once it has stopped. History belongs to the reviewed artifact and verified device; it is not a complete inventory of a phone. Removing saved files never uninstalls apps. See [library architecture and verification](docs/app-library.md) for storage, recovery, privacy, and removal behavior. The new import → sign → install → restart → reopen library flow has not yet been validated on a physical device.

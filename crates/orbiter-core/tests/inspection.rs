@@ -248,3 +248,26 @@ fn rejects_duplicate_central_directory_names() {
         Err(Error::UnsafeArchive)
     ));
 }
+
+#[test]
+fn an_icon_too_large_to_read_is_absent_rather_than_fatal() {
+    // A declared icon over the 2 MiB member limit used to fail the whole inspection, so an IPA
+    // with a large icon could not be inspected or imported at all.
+    let huge = vec![0x41u8; 3 * 1024 * 1024];
+    let report = inspect(
+        fixture(vec![
+            (
+                "Payload/A.app/Info.plist",
+                br#"<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>test.icon</string><key>CFBundleName</key><string>Icon Test</string><key>CFBundleExecutable</key><string>App</string><key>CFBundleIconFiles</key><array><string>Icon</string></array></dict></plist>"#.to_vec(),
+            ),
+            ("Payload/A.app/App", macho(0)),
+            ("Payload/A.app/Icon.png", huge),
+        ])
+        .path(),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .expect("an unreadable icon is not a reason to refuse the archive");
+    assert_eq!(report.icon_data_url, None);
+    assert_eq!(report.bundles.len(), 1);
+}
