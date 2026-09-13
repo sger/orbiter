@@ -21,6 +21,8 @@ import type { Preparation, TeamStatus, WatchChoice } from "../../types";
 
 import { useAccounts } from "./useAccounts";
 export function Accounts({
+  authenticationOnly = false,
+  onView,
   artifactId,
   onBusy,
   paused,
@@ -31,6 +33,8 @@ export function Accounts({
   onStatus,
   onHelp,
 }: {
+  authenticationOnly?: boolean;
+  onView?: (view: import("../../types").AccountView) => void;
   artifactId?: string;
   onBusy?: (value: boolean) => void;
   paused: boolean;
@@ -100,6 +104,9 @@ export function Accounts({
   useEffect(() => {
     onBusy?.(busy || registering || certBusy || provBusy);
   }, [busy, registering, certBusy, provBusy, onBusy]);
+  useEffect(() => {
+    onView?.(view);
+  }, [view, onView]);
   // Emphasize the earliest unfinished action that can actually run now.
   // This changes presentation only; acknowledgement and backend gates stay intact.
   const nextAction =
@@ -355,7 +362,7 @@ export function Accounts({
               Refresh teams
             </button>
           </Stage>
-          {view.selected_team && (
+          {!authenticationOnly && view.selected_team && (
             <div className="register-device">
               <Stage
                 id="registration"
@@ -709,7 +716,7 @@ export function Accounts({
           )}
         </>
       )}
-      {!signedIn && (
+      {!authenticationOnly && !signedIn && (
         <>
           <label htmlFor="team">Signing team</label>
           <Select id="team" icon={<Users size={16} />} value="" disabled>

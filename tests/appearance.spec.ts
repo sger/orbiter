@@ -20,7 +20,7 @@ test("appearance defaults to system, reacts to OS changes, and persists an expli
   await expect(root).toHaveAttribute("data-theme", "dark");
   await page.goto("/#/ipas/workspace");
   await expect(root).toHaveAttribute("data-theme", "dark");
-  await expect(page.locator(".card.source")).toHaveCSS(
+  await expect(page.locator(".guided-card")).toHaveCSS(
     "background-color",
     "rgb(34, 34, 34)",
   );
@@ -42,7 +42,7 @@ for (const mode of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: mode });
     await page.goto("/#/ipas/workspace");
     const colors = await page
-      .locator(".sidebar, .card.source, .text-field input, .select-control")
+      .locator(".sidebar, .guided-card, .text-field input, .select-control")
       .evaluateAll((elements) =>
         elements.map((element) => {
           const color = getComputedStyle(element).backgroundColor;

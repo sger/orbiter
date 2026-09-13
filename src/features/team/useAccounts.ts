@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { accountStatus, isTauri } from "../../ipc/commands";
+import { accountStatus, accountSelectTeam, isTauri } from "../../ipc/commands";
 import type {
   AccountView,
   Certificate,
@@ -63,7 +63,12 @@ export function useAccounts({
   // Backend messages are curated and allowlisted, and they name the actual cause — an account
   // limit, a refusal, what to check. Showing a generic sentence instead hides all of it.
   function reason(error: unknown, fallback: string) {
-    const text = typeof error === "string" ? error.trim() : "";
+    const text =
+      typeof error === "string"
+        ? error.trim()
+        : error && typeof error === "object" && "message" in error
+          ? String(error.message)
+          : "";
     return text ? text.slice(0, 600) : fallback;
   }
   useEffect(() => {
@@ -172,6 +177,17 @@ export function useAccounts({
       if (mounted.current) setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!signedIn || view.selected_team || disabled) return;
+    const supported = view.teams.filter(
+      (team) =>
+        team.free !== null &&
+        !team.membership?.toLowerCase().includes("enterprise"),
+    );
+    if (view.teams.length === 1 && supported.length === 1) {
+      void command(() => accountSelectTeam(supported[0].id));
+    }
+  }, [signedIn, view.selected_team, view.teams, paused]);
   /// A step collapses to its result once it is done, and stays open until then.
   ///
   /// It does not impose an order beyond the real one. Apple does not require a registered device

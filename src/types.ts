@@ -150,6 +150,8 @@ export type Preparation = {
 };
 
 export type Review = {
+  readiness: "direct" | "needs_signing" | "blocked";
+  issues: { code: string; message: string; signing_may_resolve: boolean }[];
   token: string;
   app_name: string;
   bundle_id: string;
@@ -236,6 +238,7 @@ export type ErrorCode =
   | "acknowledgement_required"
   | "device_unavailable"
   | "authentication_required"
+  | "certificate_conflict"
   | "storage_read"
   | "storage_write"
   | "storage_corrupt"

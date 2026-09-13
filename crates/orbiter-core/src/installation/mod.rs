@@ -25,6 +25,45 @@ pub struct ExistingApp {
     pub version: Option<String>,
     pub build: Option<String>,
 }
+/// The next safe action established by local package and device checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Readiness {
+    Direct,
+    NeedsSigning,
+    Blocked,
+}
+
+/// A machine-readable package issue; messages are for display only.
+#[derive(Clone, Debug, Serialize)]
+pub struct InstallIssue {
+    pub code: &'static str,
+    pub message: String,
+    pub signing_may_resolve: bool,
+}
+
+impl InstallIssue {
+    /// Construct an issue without inferring its classification from prose.
+    fn new(code: &'static str, message: impl Into<String>, signing_may_resolve: bool) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            signing_may_resolve,
+        }
+    }
+}
+
+/// Classify checks conservatively: any non-signing issue blocks the guided path.
+pub fn readiness(issues: &[InstallIssue]) -> Readiness {
+    if issues.is_empty() {
+        Readiness::Direct
+    } else if issues.iter().all(|issue| issue.signing_may_resolve) {
+        Readiness::NeedsSigning
+    } else {
+        Readiness::Blocked
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct Review {
     /// Authorises installing exactly these bytes on exactly this phone, until it expires.
@@ -37,6 +76,8 @@ pub struct Review {
     pub sha256: String,
     pub existing_app: Option<ExistingApp>,
     pub blockers: Vec<String>,
+    pub issues: Vec<InstallIssue>,
+    pub readiness: Readiness,
     pub notes: Vec<String>,
 }
 /// Sensitive binding stays only in Rust memory; no Debug or serialization implementation.
@@ -253,12 +294,12 @@ fn authorize(d: &plist::Dictionary, udid: &str) -> bool {
 ///
 /// Anything unverified is treated as a blocker rather than as satisfied: the absence of evidence
 /// that a build will run is not evidence that it will.
-fn package_blockers(
+fn package_issues(
     report: &Report,
     path: &Path,
     udid: &str,
     ios: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<InstallIssue>, String> {
     let main = report
         .bundles
         .iter()
@@ -266,48 +307,77 @@ fn package_blockers(
         .ok_or("Main app was not found.")?;
     let mut blockers = Vec::new();
     if !main.supported_platforms.iter().any(|p| p == "iPhoneOS") {
-        blockers.push("The main bundle does not declare iPhoneOS support.".into())
+        blockers.push(InstallIssue::new(
+            "platform",
+            "The main bundle does not declare iPhoneOS support.",
+            false,
+        ))
     }
     if !main.device_families.contains(&1) {
-        blockers.push("The main bundle does not declare iPhone support.".into())
+        blockers.push(InstallIssue::new(
+            "device_family",
+            "The main bundle does not declare iPhone support.",
+            false,
+        ))
     }
     if !main
         .slices
         .iter()
         .any(|s| s.architecture == "arm64" || s.architecture == "arm64e")
     {
-        blockers.push("No supported arm64 iPhone executable was found.".into())
+        blockers.push(InstallIssue::new(
+            "architecture",
+            "No supported arm64 iPhone executable was found.",
+            false,
+        ))
     }
     match (main.minimum_os.as_deref().and_then(version), version(ios)) {
         (Some(min), Some(current)) if current >= min => (),
-        _ => blockers.push("The iPhone does not meet a verified minimum iOS requirement.".into()),
+        _ => blockers.push(InstallIssue::new(
+            "minimum_os",
+            "The iPhone does not meet a verified minimum iOS requirement.",
+            false,
+        )),
     }
     let file = std::fs::File::open(path).map_err(|_| "Cannot read snapshot.")?;
     let mut archive = zip::ZipArchive::new(file).map_err(|_| "Cannot read snapshot archive.")?;
     for b in &report.bundles {
         if !b.issues.is_empty() || b.slices.is_empty() {
-            blockers.push(format!(
-                "{}: bundle inspection is incomplete.",
-                b.identifier
+            blockers.push(InstallIssue::new(
+                "inspection",
+                format!("{}: bundle inspection is incomplete.", b.identifier),
+                false,
             ));
         }
         if b.slices.iter().any(|s| s.encrypted) {
-            blockers.push(format!(
-                "{}: encrypted executable; obtain a company development or Ad Hoc build.",
-                b.identifier
+            blockers.push(InstallIssue::new(
+                "encryption",
+                format!(
+                    "{}: encrypted executable; obtain an unencrypted development or Ad Hoc build.",
+                    b.identifier
+                ),
+                false,
             ));
         }
         if b.kind == "Framework" {
             continue;
         }
         let Some(p) = &b.profile else {
-            blockers.push(format!("{}: missing provisioning profile.", b.identifier));
+            blockers.push(InstallIssue::new(
+                "profile_missing",
+                format!("{}: missing provisioning profile.", b.identifier),
+                true,
+            ));
             continue;
         };
         if p.expired != Some(false) {
-            blockers.push(format!(
-                "{}: profile expired or expiration is unknown.",
-                b.identifier
+            blockers.push(InstallIssue::new(
+                "profile_expiry",
+                format!(
+                    "{}: profile expired or expiration is unknown.",
+                    b.identifier
+                ),
+                true,
             ));
         }
         // Watch profiles target the Watch, not the phone. iOS validates all nested code during installation.
@@ -328,11 +398,25 @@ fn package_blockers(
         let d =
             crate::profile::dictionary(&bytes).map_err(|_| "Cannot decode embedded profile.")?;
         if !authorize(&d, udid) {
-            blockers.push(format!("{}: the embedded profile does not authorize this iPhone. Obtain a build provisioned for this device; changing Apple accounts alone will not fix it.",b.identifier));
+            blockers.push(InstallIssue::new("profile_device", format!("{}: the embedded profile does not authorize this iPhone. Signing must obtain a profile for this device.", b.identifier), true));
         }
     }
     Ok(blockers)
 }
+/// Keep the execution gate and older callers on the same checks as the guided review.
+/// Returns display messages, or an inspection/read failure; performs no mutations.
+fn package_blockers(
+    report: &Report,
+    path: &Path,
+    udid: &str,
+    ios: &str,
+) -> Result<Vec<String>, String> {
+    Ok(package_issues(report, path, udid, ios)?
+        .into_iter()
+        .map(|issue| issue.message)
+        .collect())
+}
+
 /// Review installing one IPA on one phone, binding a token to both.
 ///
 /// Snapshots the bytes privately, verifies the phone, and checks everything that would stop the
@@ -353,8 +437,8 @@ pub async fn prepare(path: PathBuf, device_id: u32) -> Result<PreparedInstall, S
     let udid = phone.raw.udid.clone();
     let ios = phone.version.clone();
     let snap_path = dir.path().join("artifact.ipa");
-    let (report, blockers) = tokio::task::spawn_blocking(move || {
-        let b = package_blockers(&report, &snap_path, &udid, &ios)?;
+    let (report, issues) = tokio::task::spawn_blocking(move || {
+        let b = package_issues(&report, &snap_path, &udid, &ios)?;
         Ok::<_, String>((report, b))
     })
     .await
@@ -381,7 +465,9 @@ pub async fn prepare(path: PathBuf, device_id: u32) -> Result<PreparedInstall, S
             size_bytes: report.size_bytes,
             sha256: hash,
             existing_app: installed,
-            blockers,
+            readiness: readiness(&issues),
+            blockers: issues.iter().map(|issue| issue.message.clone()).collect(),
+            issues,
             notes,
         },
         snapshot: dir,
@@ -516,6 +602,8 @@ impl PreparedInstall {
                 sha256,
                 existing_app: None,
                 blockers: vec![],
+                issues: vec![],
+                readiness: Readiness::Direct,
                 notes: vec![],
             },
             library_artifact: artifact,
@@ -797,6 +885,21 @@ async fn run(
 mod tests {
     use super::*;
     #[test]
+    /// Profile issues may require signing, but any unsupported package issue prevents that route.
+    fn guided_readiness_does_not_treat_all_blockers_as_signable() {
+        assert_eq!(readiness(&[]), Readiness::Direct);
+        let profile = InstallIssue::new("profile_missing", "No profile", true);
+        assert_eq!(
+            readiness(std::slice::from_ref(&profile)),
+            Readiness::NeedsSigning
+        );
+        assert_eq!(
+            readiness(&[profile, InstallIssue::new("encryption", "Encrypted", false)]),
+            Readiness::Blocked
+        );
+    }
+
+    #[test]
     /// iOS versions compare numerically, so 10.0 is newer than 9.0 rather than sorting before it.
     fn version_comparison_is_numeric() {
         assert!(version("18.10") > version("18.9"));
@@ -949,6 +1052,8 @@ mod fixture_tests {
                 sha256: hash,
                 existing_app: None,
                 blockers: vec![],
+                issues: vec![],
+                readiness: Readiness::Direct,
                 notes: vec![],
             },
             snapshot: dir,

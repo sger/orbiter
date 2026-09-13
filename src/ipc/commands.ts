@@ -171,3 +171,34 @@ export const librarySign = (
     marker,
     progress,
   });
+
+import type {
+  PreparationReview,
+  Consents,
+  PreparationStatus,
+} from "../features/guided/types";
+export const reviewPreparation = (
+  artifactId: string,
+  deviceId: number,
+  watch: WatchChoice,
+  marker: string,
+) =>
+  invoke<PreparationReview>("library_review_preparation", {
+    artifactId,
+    deviceId,
+    watch,
+    marker,
+  });
+export const executePreparation = (
+  token: string,
+  consents: Consents,
+  progress: Channel<PreparationStatus>,
+) =>
+  invoke<{ signed: Signed; artifact: Artifact }>(
+    "library_execute_preparation",
+    { token, consents, progress },
+  );
+export const discardPreparation = (token: string) =>
+  invoke<void>("library_discard_preparation", { token });
+export const preparationStatus = () =>
+  invoke<PreparationStatus>("library_preparation_status");

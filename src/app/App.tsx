@@ -4,10 +4,10 @@ import { isTauri, libraryOpen, libraryChanged } from "../ipc/commands";
 import { useAppearance } from "./appearance";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { useEffect, useRef, useState } from "react";
-import { Workspace } from "../features/workspace/Workspace";
+import { GuidedWorkspace } from "../features/guided/GuidedWorkspace";
 import { HelpPage } from "../features/help/HelpPage";
 import { AppShell } from "./AppShell";
-import { useAppRoute } from "./navigation";
+import { useAppRoute, type AppRoute } from "./navigation";
 import { message } from "../ipc/failure";
 
 export function App() {
@@ -16,6 +16,7 @@ export function App() {
   const [account, setAccount] = useState<string | null>(null);
   const [selected, setSelected] = useState<Opened | null>(null);
   const [busy, setBusy] = useState(false);
+  const [operation, setOperation] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const parts = route.split("/");
@@ -27,7 +28,7 @@ export function App() {
       setError("");
       return;
     }
-    if (busy) {
+    if (busy && selected) {
       setOpening(false);
       setError(
         "An operation is in progress. Finish it before opening another version.",
@@ -65,7 +66,21 @@ export function App() {
       ?.focus();
   }, [route, selected, opening]);
   return (
-    <AppShell route={route} account={account}>
+    <AppShell
+      route={route}
+      account={account}
+      busy={busy}
+      activeOperation={
+        operation
+          ? {
+              label: operation,
+              route: selected
+                ? (`ipas/${selected.artifact.app_id}/workspace/${selected.artifact.id}` as AppRoute)
+                : "ipas/workspace",
+            }
+          : undefined
+      }
+    >
       <div ref={content}>
         {/* Keep native operations and form state alive while reading Help. */}
         {error && (
@@ -74,7 +89,8 @@ export function App() {
           </p>
         )}
         {opening && <p role="status">Verifying saved IPA…</p>}
-        {selected &&
+        {!operation &&
+          selected &&
           (!workspace ||
             (!!requested && requested !== selected.artifact.id)) && (
             <p className="notice">
@@ -101,18 +117,16 @@ export function App() {
           >
             Back to library
           </a>
-          <Workspace
+          <GuidedWorkspace
             onAccount={setAccount}
             selected={selected}
             visible={workspace && !opening}
             onBusy={setBusy}
-            onChoose={
-              selected
-                ? () => {
-                    window.location.hash = "/ipas";
-                  }
-                : undefined
-            }
+            onOperation={setOperation}
+            onOpen={(opened) => {
+              setSelected(opened);
+              window.location.hash = `/ipas/${opened.artifact.app_id}/workspace/${opened.artifact.id}`;
+            }}
           />
         </div>
         <div
@@ -124,6 +138,11 @@ export function App() {
             appId={workspace ? undefined : parts[1]}
             busy={busy || opening}
             selectedId={selected?.artifact.id}
+            onInstall={() => {
+              if (busy || opening) return;
+              setSelected(null);
+              window.location.hash = "/ipas/workspace";
+            }}
             onRemoved={(ids) => {
               if (selected && ids.includes(selected.artifact.id))
                 setSelected(null);

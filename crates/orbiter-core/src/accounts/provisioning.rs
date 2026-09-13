@@ -40,6 +40,17 @@ impl Accounts {
         let _gate = self.1.try_lock().map_err(|_| {
             OperationError::operation_in_progress("Another account operation is already running.")
         })?;
+        self.register_device_under_gate(device_id, acknowledged)
+            .await
+    }
+
+    /// Run the operation while the caller holds the shared account gate.
+    /// Preserves the public operation’s validation, side effects, and errors.
+    pub(crate) async fn register_device_under_gate(
+        &self,
+        device_id: u32,
+        acknowledged: bool,
+    ) -> OperationResult<crate::provisioning::Outcome> {
         let (generation, mut developer, team, free) = {
             let mut inner = self
                 .0
@@ -102,6 +113,18 @@ impl Accounts {
         let _gate = self.1.try_lock().map_err(|_| {
             OperationError::operation_in_progress("Another account operation is already running.")
         })?;
+        self.prepare_provisioning_under_gate(path, acknowledged, watch)
+            .await
+    }
+
+    /// Run the operation while the caller holds the shared account gate.
+    /// Preserves the public operation’s validation, side effects, and errors.
+    pub(crate) async fn prepare_provisioning_under_gate(
+        &self,
+        path: std::path::PathBuf,
+        acknowledged: bool,
+        watch: crate::plan::WatchChoice,
+    ) -> OperationResult<Preparation> {
         let (generation, mut developer, team_id, free) = {
             let mut inner = self
                 .0
@@ -240,6 +263,22 @@ impl Accounts {
         let _gate = self.1.try_lock().map_err(|_| {
             OperationError::operation_in_progress("Another account operation is already running.")
         })?;
+        self.sign_ipa_under_gate(path, out_dir, watch, marker, cancel, progress)
+            .await
+    }
+
+    /// Run the operation while the caller holds the shared account gate.
+    /// Preserves the public operation’s validation, side effects, and errors.
+    pub(crate) async fn sign_ipa_under_gate(
+        &self,
+        path: std::path::PathBuf,
+        out_dir: std::path::PathBuf,
+        watch: crate::plan::WatchChoice,
+        // Already cleaned by `signer::marker`; `None` leaves every display name alone.
+        marker: Option<String>,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        progress: impl FnMut(crate::signer::Progress) + Send + 'static,
+    ) -> Result<crate::signer::Signed, String> {
         let (team_id, free, identity, profiles) = {
             let mut inner = self
                 .0
@@ -314,6 +353,15 @@ impl Accounts {
         let _gate = self.1.try_lock().map_err(|_| {
             OperationError::operation_in_progress("Another account operation is already running.")
         })?;
+        self.request_certificate_under_gate(acknowledged).await
+    }
+
+    /// Run the operation while the caller holds the shared account gate.
+    /// Preserves the public operation’s validation, side effects, and errors.
+    pub(crate) async fn request_certificate_under_gate(
+        &self,
+        acknowledged: bool,
+    ) -> OperationResult<crate::certificates::Outcome> {
         let (generation, mut developer, team, existing, stored) = {
             let mut inner = self
                 .0
@@ -391,6 +439,9 @@ impl Accounts {
     }
     /// Remove this account and team's stored signing key from this Mac's Keychain.
     pub async fn forget_signing_key(&self) -> OperationResult<String> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Wait for account preparation to finish.")
+        })?;
         let stored = {
             let mut inner = self
                 .0

@@ -6,6 +6,7 @@ export function useLibraryDrop(
   enabled: boolean,
   onDrop: (paths: string[]) => void,
   onError: (error: string) => void,
+  workspace = false,
 ) {
   const [dragging, setDragging] = useState(false);
   const handlers = useRef({ onDrop, onError });
@@ -28,7 +29,11 @@ export function useLibraryDrop(
             !hash ||
             hash === "#/ipas" ||
             /^#\/ipas\/(?!workspace$)[^/]+$/.test(hash);
-          if (disposed || !libraryRoute) return;
+          if (
+            disposed ||
+            !(workspace ? hash.includes("/workspace") : libraryRoute)
+          )
+            return;
           setDragging(
             event.payload.type === "enter" || event.payload.type === "over",
           );
@@ -52,6 +57,6 @@ export function useLibraryDrop(
       window.removeEventListener("dragover", prevent);
       window.removeEventListener("drop", prevent);
     };
-  }, [enabled]);
+  }, [enabled, workspace]);
   return dragging;
 }

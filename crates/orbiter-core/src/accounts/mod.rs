@@ -20,6 +20,7 @@
 //! Nothing in this file mutates a certificate, a profile, a device registration or an app
 //! identifier; those all live in [`provisioning`].
 
+mod guided;
 pub mod provisioning;
 
 use crate::domain::errors::{ErrorCode, OperationError, OperationResult};
@@ -242,6 +243,9 @@ impl Inner {
     fn retarget(&mut self, team: String) {
         if self.view.selected_team.as_deref() != Some(team.as_str()) {
             self.profiles.clear();
+            if let Some(session) = self.session.as_mut() {
+                session.identity = None;
+            }
         }
         self.view.selected_team = Some(team);
     }
@@ -285,6 +289,9 @@ impl Accounts {
     ///
     /// Fails only on lock poisoning.
     pub fn sign_out(&self) -> OperationResult<View> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Wait for account preparation to finish.")
+        })?;
         let mut inner = self
             .0
             .lock()
@@ -305,6 +312,9 @@ impl Accounts {
     /// Fails without consent, with empty input, while a sign-in is already running, or while
     /// Apple's throttling of this machine is still in force.
     pub fn start(&self, email: String, password: String, consent: bool) -> OperationResult<View> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Wait for account preparation to finish.")
+        })?;
         initialize();
         let password = zeroize::Zeroizing::new(password);
         if !consent {
@@ -602,6 +612,9 @@ impl Accounts {
     ///
     /// Fails without a session, or if the identifier names no team this account belongs to.
     pub fn select_team(&self, id: String) -> OperationResult<View> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Wait for account preparation to finish.")
+        })?;
         let mut inner = self
             .0
             .lock()

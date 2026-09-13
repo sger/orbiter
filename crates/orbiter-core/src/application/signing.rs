@@ -50,10 +50,11 @@ pub struct Retained {
 /// Cheap to clone; clones share the same library and the same account session.
 #[derive(Clone)]
 pub struct SigningService {
-    library: Library,
-    accounts: Accounts,
+    pub(super) library: Library,
+    pub(super) accounts: Accounts,
     /// Where a run writes its output before the library takes a copy.
     staging: PathBuf,
+    pub(super) guided: Arc<super::guided::State>,
 }
 
 impl SigningService {
@@ -63,6 +64,7 @@ impl SigningService {
             library,
             accounts,
             staging,
+            guided: Arc::default(),
         }
     }
 
@@ -76,7 +78,7 @@ impl SigningService {
     /// - [`ErrorCode::ArtifactMissing`] or [`ErrorCode::ArtifactChanged`] from the library.
     /// - [`ErrorCode::InvalidRequest`] when the artifact is a signed build: re-signing one would
     ///   stack signatures and identifier rewrites on top of each other.
-    async fn source(
+    pub(super) async fn source(
         &self,
         artifact_id: &ArtifactId,
     ) -> OperationResult<(Artifact, PathBuf, crate::library::Lease)> {
@@ -156,13 +158,27 @@ impl SigningService {
         marker: &str,
         progress: Arc<dyn ProgressSink<Progress>>,
     ) -> OperationResult<Retained> {
+        let _gate = self.accounts.operation()?;
+        self.sign_under_gate(artifact_id, watch, marker, progress)
+            .await
+    }
+
+    /// Sign and retain while the caller reserves the account for the whole sequence.
+    /// Uses the same validation and durable retention as the public signing operation.
+    pub(super) async fn sign_under_gate(
+        &self,
+        artifact_id: &ArtifactId,
+        watch: WatchChoice,
+        marker: &str,
+        progress: Arc<dyn ProgressSink<Progress>>,
+    ) -> OperationResult<Retained> {
         let (_source, path, lease) = self.source(artifact_id).await?;
         let cleaned = crate::signer::marker(marker);
 
         tracing::info!(operation = "signing", stage = "started");
         let signed = self
             .accounts
-            .sign_ipa(
+            .sign_ipa_under_gate(
                 path,
                 self.staging.clone(),
                 watch,

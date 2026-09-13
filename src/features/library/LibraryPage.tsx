@@ -5,7 +5,7 @@ import { RenewalBanner } from "../renew/RenewalBanner";
 import { ExpiryLine } from "../renew/ExpiryLine";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Box, Plus, Search, ArrowLeft, Trash2 } from "lucide-react";
+import { Box, Plus, Search, ArrowLeft, ArrowRight, Trash2 } from "lucide-react";
 import {
   isTauri,
   libraryList,
@@ -41,14 +41,19 @@ export function LibraryPage({
   busy,
   selectedId,
   onRemoved,
+  onInstall,
 }: {
   appId?: string;
   visible?: boolean;
   busy: boolean;
   selectedId?: string;
   onRemoved: (ids: string[]) => void;
+  onInstall: () => void;
 }) {
-  const { renewal: legacyRenewal, forget: forgetLegacy } = useRenewal(null, null);
+  const { renewal: legacyRenewal, forget: forgetLegacy } = useRenewal(
+    null,
+    null,
+  );
   const [data, setData] = useState(empty);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -280,7 +285,7 @@ export function LibraryPage({
             {app && <AppIcon sha={app.icon_sha} name={app.name} />}
             <div>
               <h1 className="page-title" tabIndex={-1} title={app?.name}>
-                {app?.name ?? (appId ? "App details" : "IPAs")}
+                {app?.name ?? (appId ? "App details" : "App Library")}
               </h1>
               <p className="hint library-wrap">
                 {app
@@ -290,13 +295,22 @@ export function LibraryPage({
             </div>
           </div>
         </div>
-        <button
-          className="primary"
-          onClick={() => void importFiles()}
-          disabled={importing || !isTauri()}
-        >
-          <Plus size={17} /> Import IPA
-        </button>
+        <div className="library-heading-actions">
+          <button
+            className="text-button"
+            onClick={() => void importFiles()}
+            disabled={importing || !isTauri()}
+          >
+            <Plus size={17} /> Import IPA
+          </button>
+          <button
+            className="primary"
+            onClick={onInstall}
+            disabled={busy || importing}
+          >
+            Install an app <ArrowRight size={17} />
+          </button>
+        </div>
       </div>
       <div className="library-drop-zone" role="status">
         {dragging
@@ -368,7 +382,7 @@ export function LibraryPage({
               ))}
             </nav>
             <ExpiryLine expiry={headline(app.id)} variant="banner" />
-          {tab === "Versions" && (
+            {tab === "Versions" && (
               <div className="card library-card">
                 <p className="hint">
                   Originals are ordered by import time. Signed builds stay with

@@ -49,6 +49,8 @@ pub enum ErrorCode {
     /// One code for all three because they lead to the same place — back to the account step —
     /// and the message says which of them it is.
     AuthenticationRequired,
+    /// Apple refused a certificate because all available slots are occupied.
+    CertificateConflict,
     /// Reading the library's own storage failed.
     StorageRead,
     /// Writing the library's own storage failed.
@@ -81,6 +83,7 @@ impl ErrorCode {
             Self::AcknowledgementRequired => "acknowledgement_required",
             Self::DeviceUnavailable => "device_unavailable",
             Self::AuthenticationRequired => "authentication_required",
+            Self::CertificateConflict => "certificate_conflict",
             Self::StorageRead => "storage_read",
             Self::StorageWrite => "storage_write",
             Self::StorageCorrupt => "storage_corrupt",

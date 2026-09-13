@@ -4,10 +4,14 @@ import type { AppRoute } from "./navigation";
 import { Rail } from "./Rail";
 
 export function AppShell({
+  busy = false,
+  activeOperation,
   route,
   account,
   children,
 }: {
+  busy?: boolean;
+  activeOperation?: { route: AppRoute; label: string };
   route: AppRoute;
   account: string | null;
   children: ReactNode;
@@ -27,6 +31,7 @@ export function AppShell({
     <div className="shell" data-expanded={expanded}>
       <Rail
         route={route}
+        activeOperation={activeOperation}
         expanded={expanded}
         onToggle={() => setPreference(!expanded)}
       />
@@ -40,6 +45,7 @@ export function AppShell({
               </span>
               <button
                 className="text-button"
+                disabled={busy}
                 onClick={() => void accountSignOut().catch(() => {})}
               >
                 Sign out

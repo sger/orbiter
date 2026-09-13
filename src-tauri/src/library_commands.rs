@@ -252,3 +252,70 @@ pub async fn library_sign(
         .await
         .map_err(Into::into)
 }
+
+/// Read-only preparation assessment. The token binds all displayed actions to these inputs.
+/// Returns structured failures without registering devices, creating certificates or identifiers.
+#[tauri::command]
+pub async fn library_review_preparation(
+    artifact_id: String,
+    device_id: u32,
+    watch: String,
+    marker: String,
+    app: tauri::AppHandle,
+) -> Result<orbiter_core::application::guided::PreparationReview, Failure> {
+    runtime(&app)?
+        .signing()
+        .review_preparation(
+            &ArtifactId::parse(&artifact_id)?,
+            device_id,
+            WatchChoice::parse(&watch),
+            &marker,
+        )
+        .await
+        .map_err(Into::into)
+}
+
+/// Execute an explicitly acknowledged preparation, independent of the subscribing page.
+/// The spawned task owns the work; a lost IPC response never triggers an automatic retry.
+#[tauri::command]
+pub async fn library_execute_preparation(
+    token: String,
+    consents: orbiter_core::application::guided::Consents,
+    progress: Channel<orbiter_core::application::guided::PreparationStatus>,
+    app: tauri::AppHandle,
+) -> Result<Retained, Failure> {
+    let service = runtime(&app)?.signing();
+    let sink = Arc::new(move |step| {
+        let _ = progress.send(step);
+    });
+    tauri::async_runtime::spawn(
+        async move { service.execute_preparation(&token, consents, sink).await },
+    )
+    .await
+    .map_err(|_| {
+        crate::failure::internal(
+            "Preparation worker stopped. Check Apple account resources before retrying.",
+        )
+    })?
+    .map_err(Into::into)
+}
+
+/// Release a reviewed preparation without mutating Apple or the phone.
+#[tauri::command]
+pub fn library_discard_preparation(token: String, app: tauri::AppHandle) -> Result<(), Failure> {
+    runtime(&app)?
+        .signing()
+        .discard_preparation(Some(&token))
+        .map_err(Into::into)
+}
+
+/// Read preparation progress after navigating away or reconnecting a window.
+#[tauri::command]
+pub fn library_preparation_status(
+    app: tauri::AppHandle,
+) -> Result<orbiter_core::application::guided::PreparationStatus, Failure> {
+    runtime(&app)?
+        .signing()
+        .preparation_status()
+        .map_err(Into::into)
+}

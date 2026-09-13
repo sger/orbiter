@@ -279,7 +279,7 @@ pub async fn ensure(
     team_id: &str,
     machine_name: &str,
     key: &RsaPrivateKey,
-) -> Result<(Identity, Outcome), String> {
+) -> crate::domain::errors::OperationResult<(Identity, Outcome)> {
     let team = team(team_id);
     let existing = tokio::time::timeout(DEADLINE, session.list_ios_certs(&team))
         .await
@@ -318,16 +318,20 @@ pub async fn ensure(
                 1 => "one active development certificate".to_string(),
                 other => format!("{other} active development certificates"),
             };
-            return Err(format!(
-                "Apple refused the request: this team already holds {held}, which is its maximum, and none of them certifies this Mac's signing key — so none can be used to sign. {} A free personal team has no certificates page at developer.apple.com, so the only way forward is to revoke it here, which invalidates every app already signed with it.",
-                describe(&existing)
+            return Err(OperationError::new(
+                ErrorCode::CertificateConflict,
+                format!(
+                    "Apple refused the request: this team already holds {held}, which is its maximum, and none of them certifies this Mac's signing key — so none can be used to sign. {} A free personal team has no certificates page at developer.apple.com, so the only way forward is to revoke it here, which invalidates every app already signed with it.",
+                    describe(&existing)
+                ),
             ));
         }
         Err(error) => {
             return Err(format!(
                 "Apple did not issue a certificate. {}",
                 isideload::redacted_auth_error(&error)
-            ));
+            )
+            .into());
         }
     };
     let issued = tokio::time::timeout(DEADLINE, session.list_ios_certs(&team))
@@ -362,9 +366,26 @@ pub async fn ensure(
             reused: false,
             expires,
             active: issued.len(),
-            message: "A development certificate was issued for this Mac's signing key. The private key stays on this Mac and is not saved: restarting Orbiter needs a new certificate.".into(),
+            message: "A development certificate was issued for this Mac's signing key. The private key stays in this Mac’s Keychain so an existing certificate can be reused after signing in again.".into(),
         },
     ))
+}
+
+/// Find an existing certificate for a local key without creating either resource.
+/// Contacts Apple's listing API only. Read failures are returned, never treated as absence.
+pub(crate) async fn lookup(
+    session: &mut DeveloperSession,
+    team_id: &str,
+    key: Option<RsaPrivateKey>,
+) -> Result<Option<Identity>, String> {
+    let existing = tokio::time::timeout(DEADLINE, session.list_ios_certs(&team(team_id)))
+        .await
+        .map_err(|_| "Listing certificates timed out.".to_string())?
+        .map_err(|_| {
+            "Could not verify the team's certificates. Refresh preparation to retry.".to_string()
+        })?;
+    Ok(key
+        .and_then(|key| matching(&key, &existing).map(|certificate| Identity { key, certificate })))
 }
 
 #[cfg(test)]

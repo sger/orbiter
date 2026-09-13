@@ -9,6 +9,7 @@
 //! Progress leaves through [`ProgressSink`], which the caller supplies. Tauri adapts it to a
 //! channel; a test collects it into a vector.
 
+pub mod guided;
 pub mod installation;
 pub mod ports;
 pub mod runtime;

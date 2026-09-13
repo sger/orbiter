@@ -1,5 +1,6 @@
 import {
   CircleHelp,
+  Smartphone,
   Settings,
   FileArchive,
   Orbit,
@@ -11,7 +12,7 @@ import { routeHref, type AppRoute } from "./navigation";
 
 export type NavigationItem = { id: AppRoute; label: string; icon: ReactNode };
 const primaryItems: NavigationItem[] = [
-  { id: "ipas", label: "IPAs", icon: <FileArchive size={19} /> },
+  { id: "ipas", label: "App Library", icon: <FileArchive size={19} /> },
 ];
 const utilityItems: NavigationItem[] = [
   { id: "settings", label: "Settings", icon: <Settings size={19} /> },
@@ -24,12 +25,14 @@ export function Rail({
   onToggle,
   items = primaryItems,
   utilities = utilityItems,
+  activeOperation,
 }: {
   route: AppRoute;
   expanded: boolean;
   onToggle: () => void;
   items?: NavigationItem[];
   utilities?: NavigationItem[];
+  activeOperation?: { route: AppRoute; label: string };
 }) {
   const link = (item: NavigationItem) => (
     <a
@@ -39,7 +42,11 @@ export function Rail({
       title={item.label}
       aria-label={item.label}
       aria-current={
-        route === item.id || (item.id === "ipas" && route.startsWith("ipas/"))
+        route === item.id ||
+        (item.id === activeOperation?.route && route.includes("/workspace")) ||
+        (item.id === "ipas" &&
+          route.startsWith("ipas/") &&
+          (!activeOperation || !route.includes("workspace")))
           ? "page"
           : undefined
       }
@@ -68,6 +75,12 @@ export function Rail({
       </button>
       <nav className="sidebar-navigation" aria-label="App navigation">
         {items.map(link)}
+        {activeOperation &&
+          link({
+            id: activeOperation.route,
+            label: activeOperation.label,
+            icon: <Smartphone size={19} />,
+          })}
       </nav>
       <nav className="sidebar-utilities" aria-label="Utilities">
         {utilities.map(link)}

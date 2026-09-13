@@ -2084,3 +2084,27 @@
     gap: 10px;
   }
 }
+
+.library-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.library-heading-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.library-heading-actions .primary {
+  padding: 11px 18px;
+  border-radius: 9px;
+}
+.sidebar-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

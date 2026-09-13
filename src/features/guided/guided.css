@@ -1,0 +1,336 @@
+.guided-flow {
+  max-width: 1120px;
+  margin-inline: auto;
+}
+.guided-flow [hidden] {
+  display: none !important;
+}
+.guided-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding: 0;
+  margin: 24px 0 32px;
+  list-style: none;
+}
+.guided-steps li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-ink-soft);
+  font-size: 14px;
+}
+.guided-steps li > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-line);
+  border-radius: 50%;
+  width: 25px;
+  height: 25px;
+}
+.guided-steps li[aria-current] {
+  color: var(--color-ink-strong);
+  font-weight: 600;
+}
+.guided-steps li[aria-current] > span {
+  background: var(--color-ink-strong);
+  color: var(--color-surface);
+}
+.guided-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  align-items: start;
+  gap: 28px;
+}
+.guided-card {
+  min-width: 0;
+  padding: 30px;
+  overflow: visible;
+}
+.guided-heading {
+  margin-bottom: 26px;
+}
+.guided-heading h2 {
+  font-size: 25px;
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+  margin: 8px 0 0;
+}
+.guided-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+.guided-section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  margin-block: 20px;
+  min-width: 0;
+}
+.guided-section p {
+  margin: 0;
+  line-height: 1.65;
+}
+.guided-section > button,
+.guided-actions > button {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 42px;
+}
+.guided-section ul {
+  padding-left: 22px;
+  margin: 0;
+}
+.guided-section li + li {
+  margin-top: 10px;
+}
+.guided-flow button.primary {
+  background: var(--color-ink-strong);
+  color: var(--color-surface);
+  padding: 11px 18px;
+  border-radius: 9px;
+  font-weight: 600;
+}
+.guided-flow button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.guided-drop {
+  width: 100%;
+  padding: 28px 18px;
+  border: 1px dashed var(--color-line);
+  border-radius: 12px;
+  display: flex !important;
+  flex-direction: column;
+  background: var(--color-surface);
+}
+.guided-drop span {
+  color: var(--color-ink-soft);
+  font-size: 13px;
+}
+.guided-drop.drag {
+  border-color: var(--color-ink);
+  background: var(--color-surface);
+}
+.guided-app {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.guided-app > div:last-child {
+  min-width: 0;
+}
+.guided-app strong {
+  display: block;
+  font-size: 17px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.guided-app p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+}
+.guided-app .app-icon {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  border-radius: 13px;
+}
+.guided-context {
+  padding-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+.guided-context .guided-app {
+  align-items: flex-start;
+}
+.guided-context .guided-app strong {
+  font-size: 16px;
+}
+.guided-context p {
+  margin: 0;
+}
+.guided-phone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-block: 20px;
+  border-block: 1px solid var(--color-line);
+  font-size: 14px;
+}
+.guided-phone svg {
+  flex: none;
+}
+.guided-flow code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 12px;
+}
+.guided-flow details {
+  padding-block: 15px;
+  border-block: 1px solid var(--color-line);
+}
+.guided-flow details > :not(summary) {
+  margin-top: 16px;
+}
+.guided-flow summary {
+  font-size: 14px;
+  cursor: pointer;
+}
+.guided-option {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.guided-facts {
+  margin: 0;
+  display: grid;
+  gap: 16px;
+}
+.guided-facts > div {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 14px;
+}
+.guided-facts dt {
+  color: var(--color-ink-soft);
+}
+.guided-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.guided-progress {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+}
+.guided-progress li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+.guided-error {
+  margin: 24px 0 0;
+  padding: 16px;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+}
+.guided-flow .accounts {
+  border: 0;
+  padding: 0;
+}
+.guided-flow .account-title {
+  display: none;
+}
+.guided-flow .accounts form > .hint {
+  margin-top: 0;
+}
+.guided-flow .accounts .auth-fields {
+  grid-template-columns: 1fr;
+}
+.guided-flow .accounts .stage {
+  border: 0;
+}
+.guided-flow progress {
+  width: 100%;
+  accent-color: var(--color-ink-strong);
+}
+@media (max-width: 1050px) {
+  .guided-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .guided-context {
+    grid-row: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 16px;
+    border: 1px solid var(--color-line);
+    border-radius: 12px;
+    gap: 14px 24px;
+  }
+  .guided-context .guided-app {
+    flex: 1 1 220px;
+    align-items: center;
+  }
+  .guided-context > .hint {
+    display: none;
+  }
+  .guided-context .guided-phone {
+    padding: 0;
+    border: 0;
+  }
+  .guided-context > a {
+    font-size: 13px;
+  }
+}
+@media (max-width: 800px) {
+  .guided-card {
+    padding: 22px;
+  }
+  .guided-steps {
+    gap: 10px 15px;
+  }
+  .guided-steps li {
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .guided-flow button {
+    transition:
+      background-color 140ms ease,
+      border-color 140ms ease,
+      transform 140ms ease;
+  }
+  .guided-flow button:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+  .guided-heading {
+    animation: guided-enter 160ms ease-out;
+  }
+  @keyframes guided-enter {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+.guided-section .devices {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.guided-import-status {
+  margin: 22px 0 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.guided-flow button.secondary {
+  background: var(--color-surface-soft);
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  padding: 10px 16px;
+  color: var(--color-ink);
+  font-weight: 600;
+}
