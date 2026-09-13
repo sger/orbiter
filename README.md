@@ -6,6 +6,8 @@
 
 An open-source desktop app for managing IPAs and installing apps on your iPhone. Built with Rust, Tauri, and React.
 
+![The Orbiter app library, empty, with its import area and search field](assets/screenshots/app-library.png)
+
 - Import IPAs with drag and drop and keep multiple versions in your app library.
 - Install an already-signed IPA or re-sign a copy with your Apple account.
 - Review installation history and known profile expiration dates.
@@ -64,6 +66,12 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 ```
 
 Issues and pull requests are welcome.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Orbiter vendors a patched copy of [isideload](vendor/isideload) (MIT) and follows the selector reference in [SideStore/MacAnisette](https://github.com/SideStore/MacAnisette) (MIT), whose license is kept in [licenses/MacAnisette-MIT.txt](licenses/MacAnisette-MIT.txt). Apple's frameworks are loaded from the system, never redistributed.
 
 ## Documentation
 
