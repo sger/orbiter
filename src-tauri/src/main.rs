@@ -145,7 +145,6 @@ async fn execute_install(
     progress: Channel<JobStatus>,
     app: tauri::AppHandle,
     state: State<'_, Installations>,
-    accounts: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<JobStatus, String> {
     if !acknowledged {
         return Err("Review and acknowledge the installation consequences first.".into());
@@ -171,13 +170,8 @@ async fn execute_install(
         }
         saved.take().ok_or("Installation review is unavailable.")?
     };
-    // Captured before the plan moves into the worker: what was actually put on the phone, for
-    // the renewal record written only if the install reports success.
     let library = storage(&app)?;
-    let library_backed = plan.library_artifact.is_some();
     plan.record_library_attempt(&library)?;
-    let identifier = plan.review.bundle_id.clone();
-    let app_name = plan.review.app_name.clone();
     let location = journal(&app)?;
     let owned = state.inner().clone();
     let _end = EndInstall(owned.clone());
@@ -216,31 +210,10 @@ async fn execute_install(
     })
     .await;
     match result {
-        Ok(mut status) => {
-            if let Err(error) = library.update(&status) {
-                status.message.push_str(&format!(
-                    " Installation history could not be saved: {error}"
-                ));
-            }
-            // The moment the seven days start mattering: the build is on a phone. A failed or
-            // cancelled install leaves the waiting record untouched, so a later attempt still has
-            // it, and a build that never installed is never counted down.
-            if !library_backed
-                && status.stage == job::Stage::Installed
-                && let Some(mut record) = accounts.take_pending_renewal(&identifier)
-            {
-                record.app_name = app_name.clone();
-                record.installed_unix =
-                    orbiter_core::renewal::now_unix(std::time::SystemTime::now());
-                if let Err(error) = renewal_file(&app)
-                    .and_then(|path| orbiter_core::renewal::remember(&path, record))
-                {
-                    // Never fail a completed install over a note about when it expires.
-                    tracing::warn!(operation = "renewal", stage = "not-recorded", detail = %error);
-                }
-            }
-            Ok(status)
-        }
+        // The library records the outcome, including when the build stops launching: the attempt
+        // row written by `record_library_attempt` is updated through the closure above, and
+        // `Library::expiry` counts down from it. Nothing writes `renewal.json` any more.
+        Ok(status) => Ok(status),
         Err(_) => {
             let recovered = job::recover(&journal(&app)?)?;
             library.recover(recovered.as_ref())?;
@@ -481,6 +454,7 @@ fn main() {
             library_open,
             library_remove,
             library_prepare_install,
+            library_expiry,
             library_prepare_provisioning,
             library_sign,
             account_status,

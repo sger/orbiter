@@ -244,3 +244,285 @@ fn pending_user_deletions_resume_after_crash_and_imported_bytes_are_not_automati
     assert!(orphan.exists());
     assert_eq!(lib.snapshot().unwrap().storage_bytes, 14);
 }
+
+const DAY: i64 = 86_400;
+const NOW: i64 = 1_800_000_000;
+
+fn at(unix: i64) -> std::time::SystemTime {
+    std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix as u64)
+}
+/// A signed build with a real expiry, which the older fixture above deliberately leaves at zero.
+fn dated(
+    f: &tempfile::NamedTempFile,
+    expires_unix: i64,
+    team_tag: &str,
+) -> orbiter_core::signer::Signed {
+    orbiter_core::signer::Signed {
+        path: f.path().to_string_lossy().into_owned(),
+        identifier: "test.library".into(),
+        expires: "2026-09-19T00:00:00Z".into(),
+        expires_unix,
+        bundles_signed: 1,
+        removed: vec![],
+        message: "signed".into(),
+        log: vec![],
+        team_tag: Some(team_tag.into()),
+    }
+}
+/// Import an original, retain a signed build from it, and install that build.
+fn installed(
+    lib: &Library,
+    content: &str,
+    job: &str,
+    udid: &str,
+    expires_unix: i64,
+) -> (String, String) {
+    let source = fixture(content);
+    let imported = lib.import(source.path()).unwrap();
+    let build = fixture(&format!("{content} signed"));
+    let artifact = lib
+        .retain_signed(
+            &imported.artifact_id,
+            &dated(&build, expires_unix, "team-one"),
+            "team-one".into(),
+            "keep".into(),
+            "test".into(),
+        )
+        .unwrap();
+    lib.begin(&artifact, job, udid, "Tester phone").unwrap();
+    lib.update(&status(job, Stage::Installed)).unwrap();
+    (imported.artifact_id, artifact.id)
+}
+
+#[test]
+fn an_import_alone_never_counts_down() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let f = fixture("one");
+    let imported = lib.import(f.path()).unwrap();
+    // A saved file is a fact about this Mac. Counting down from it would be Orbiter claiming an
+    // installation it never performed.
+    assert!(lib.snapshot_at(at(NOW)).unwrap().expiries.is_empty());
+    assert!(
+        lib.expiry_at(&imported.artifact_id, None, at(NOW))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_countdown_begins_only_when_an_install_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let source = fixture("one");
+    let imported = lib.import(source.path()).unwrap();
+    let build = fixture("one signed");
+    let artifact = lib
+        .retain_signed(
+            &imported.artifact_id,
+            &dated(&build, NOW + 5 * DAY, "team-one"),
+            "team-one".into(),
+            "keep".into(),
+            "test".into(),
+        )
+        .unwrap();
+    lib.begin(&artifact, "job", "udid", "Tester phone").unwrap();
+    for waiting in [Stage::Transferring, Stage::Installing] {
+        lib.update(&status("job", waiting)).unwrap();
+        assert!(lib.snapshot_at(at(NOW)).unwrap().expiries.is_empty());
+    }
+    lib.update(&status("job", Stage::Installed)).unwrap();
+    let expiries = lib.snapshot_at(at(NOW)).unwrap().expiries;
+    assert_eq!(expiries.len(), 1);
+    assert!(expiries[0].sentence.contains("5 days"));
+    assert_eq!(expiries[0].device_name, "Tester phone");
+    assert!(!expiries[0].urgent);
+}
+
+#[test]
+fn a_failed_or_cancelled_install_is_never_a_countdown() {
+    for outcome in [Stage::Failed, Stage::Cancelled, Stage::Unknown] {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::new(dir.path().into());
+        let source = fixture("one");
+        let imported = lib.import(source.path()).unwrap();
+        let build = fixture("one signed");
+        let artifact = lib
+            .retain_signed(
+                &imported.artifact_id,
+                &dated(&build, NOW + 5 * DAY, "team-one"),
+                "team-one".into(),
+                "keep".into(),
+                "test".into(),
+            )
+            .unwrap();
+        lib.begin(&artifact, "job", "udid", "Tester phone").unwrap();
+        lib.update(&status("job", Stage::Transferring)).unwrap();
+        lib.update(&status("job", outcome)).unwrap();
+        assert!(
+            lib.snapshot_at(at(NOW)).unwrap().expiries.is_empty(),
+            "{outcome:?} is not an installation"
+        );
+    }
+}
+
+#[test]
+fn the_librarys_countdown_rounds_down_like_every_other() {
+    use orbiter_core::renewal::Standing;
+    for (expires, expected) in [
+        (NOW + 6 * DAY + DAY / 2, Standing::Valid { days: 6 }),
+        (NOW + 7 * DAY, Standing::Valid { days: 7 }),
+        (NOW + DAY - 1, Standing::ExpiresToday),
+        (NOW, Standing::Expired { days: 0 }),
+        (NOW - 2 * DAY, Standing::Expired { days: 2 }),
+        (NOW - 40 * DAY, Standing::LongExpired),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::new(dir.path().into());
+        installed(&lib, "one", "job", "udid", expires);
+        let expiries = lib.snapshot_at(at(NOW)).unwrap().expiries;
+        assert_eq!(expiries[0].standing, expected, "expiring at {expires}");
+        // Only a build that has run out is news a person must act on.
+        assert_eq!(
+            expiries[0].urgent,
+            !matches!(expected, Standing::Valid { .. })
+        );
+    }
+}
+
+#[test]
+fn the_copy_still_working_leads_and_the_dead_one_is_still_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    installed(&lib, "one", "dead", "udid-one", NOW - 2 * DAY);
+    installed(&lib, "one", "live", "udid-two", NOW + 5 * DAY);
+    let expiries = lib.snapshot_at(at(NOW)).unwrap().expiries;
+    // A re-sign installed on one tester's phone does not revive the copy on another's, so both
+    // are reported — but the headline is the copy that still launches, because announcing
+    // "stopped launching" while a working install exists would be a false alarm.
+    assert_eq!(expiries.len(), 2);
+    assert!(expiries[0].sentence.contains("5 days"));
+    assert!(!expiries[0].urgent);
+    assert!(expiries[1].urgent);
+}
+
+#[test]
+fn a_version_that_was_never_installed_has_no_countdown_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let (original, signed) = installed(&lib, "one", "job", "udid", NOW + 5 * DAY);
+    // Opening the original that produced the installed build is exactly when its expiry matters.
+    assert!(
+        lib.expiry_at(&original, None, at(NOW))
+            .unwrap()
+            .unwrap()
+            .sentence
+            .contains("5 days")
+    );
+    assert!(
+        lib.expiry_at(&signed, None, at(NOW))
+            .unwrap()
+            .unwrap()
+            .sentence
+            .contains("5 days")
+    );
+    // A different original of the same app was never the thing that was installed.
+    let other = fixture("two");
+    let stranger = lib.import(other.path()).unwrap();
+    assert!(
+        lib.expiry_at(&stranger.artifact_id, None, at(NOW))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_build_signed_for_another_team_gets_no_countdown() {
+    use orbiter_core::renewal::Bearing;
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let (_, signed) = installed(&lib, "one", "job", "udid", NOW + 5 * DAY);
+    let mine = lib
+        .expiry_at(&signed, Some("team-one"), at(NOW))
+        .unwrap()
+        .unwrap();
+    assert_eq!(mine.bearing, Bearing::SameApp);
+    assert!(mine.sentence.contains("5 days"));
+    let theirs = lib
+        .expiry_at(&signed, Some("team-two"), at(NOW))
+        .unwrap()
+        .unwrap();
+    assert_eq!(theirs.bearing, Bearing::OtherTeam);
+    assert!(!theirs.sentence.contains("5 days"));
+    assert!(!theirs.urgent);
+}
+
+#[test]
+fn an_install_whose_expiry_was_never_recorded_is_silent_not_expired() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let f = fixture("one");
+    let imported = lib.import(f.path()).unwrap();
+    let artifact = lib.snapshot().unwrap().artifacts.pop().unwrap();
+    assert_eq!(artifact.expires_unix, None);
+    lib.begin(&artifact, "job", "udid", "Tester phone").unwrap();
+    lib.update(&status("job", Stage::Installed)).unwrap();
+    // Unknown is not zero. Reporting "expired long ago" here would invent a fact.
+    assert!(lib.snapshot_at(at(NOW)).unwrap().expiries.is_empty());
+    assert!(
+        lib.expiry_at(&imported.artifact_id, None, at(NOW))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_countdown_survives_removing_the_saved_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let (_, signed) = installed(&lib, "one", "job", "udid", NOW + 5 * DAY);
+    let app_id = lib.snapshot().unwrap().apps[0].id.clone();
+    lib.remove(&app_id, Some(&signed)).unwrap();
+    // History is kept when a saved file is tidied away, and so is what it said about expiry: the
+    // build is still on the tester's phone.
+    let expiries = lib.snapshot_at(at(NOW)).unwrap().expiries;
+    assert_eq!(expiries.len(), 1);
+    assert!(expiries[0].sentence.contains("5 days"));
+}
+
+#[test]
+fn a_library_from_an_older_orbiter_opens_and_a_newer_one_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    installed(&lib, "one", "job", "udid", NOW + 5 * DAY);
+    let path = dir.path().join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+
+    // What a version before this change left behind: schema 1, and no epoch anywhere.
+    manifest["schema"] = 1.into();
+    for list in ["artifacts", "attempts"] {
+        for entry in manifest[list].as_array_mut().unwrap() {
+            entry.as_object_mut().unwrap().remove("expires_unix");
+        }
+    }
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let snapshot = Library::new(dir.path().into())
+        .snapshot_at(at(NOW))
+        .unwrap();
+    // It opens, and says nothing it cannot know rather than guessing at a date string.
+    assert_eq!(snapshot.apps.len(), 1);
+    assert!(snapshot.expiries.is_empty());
+    // Reading normalises; the upgrade reaches disk on the next write.
+    let upgraded = Library::new(dir.path().into());
+    upgraded.device_tag("udid").unwrap();
+    upgraded.remove(&snapshot.apps[0].id.clone(), None).unwrap();
+    let after: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(after["schema"], 2);
+
+    // A manifest from a version that knows more must be refused, not loaded and silently
+    // stripped of every field this build does not understand.
+    manifest["schema"] = 3.into();
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(Library::new(dir.path().into()).snapshot().is_err());
+}

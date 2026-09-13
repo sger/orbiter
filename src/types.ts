@@ -3,6 +3,7 @@ export interface Profile {
   team_name: string | null;
   team_id: string | null;
   expires_at: string | null;
+  expires_unix: number | null;
   expired: boolean | null;
   device_count: number | null;
   distribution: string;

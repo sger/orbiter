@@ -152,11 +152,6 @@ struct Inner {
     expires_at: Option<Instant>,
     /// Apple-side sign-in throttling. Kept across sign-out and expiry: it is not Orbiter state.
     retry_at: Option<Instant>,
-    /// Builds that have been signed but not yet installed. A profile's seven days are only worth
-    /// remembering once the build is actually on a phone, so a record waits here until then.
-    /// Deliberately not cleared by `clear`: a signed IPA outlives the session that produced it and
-    /// can still be installed after signing out, and none of this is credential material.
-    pending: Vec<crate::renewal::Record>,
 }
 #[derive(Clone, Default)]
 pub struct Accounts(Arc<Mutex<Inner>>, Arc<tokio::sync::Mutex<()>>);
@@ -196,15 +191,6 @@ impl Inner {
 }
 
 impl Accounts {
-    /// Take the record for a build about to be installed, if this session signed it.
-    pub fn take_pending_renewal(&self, identifier: &str) -> Option<crate::renewal::Record> {
-        let mut inner = self.0.lock().ok()?;
-        let at = inner
-            .pending
-            .iter()
-            .position(|record| record.identifier == identifier)?;
-        Some(inner.pending.remove(at))
-    }
     pub fn status(&self) -> Result<View, String> {
         let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
         inner.expire();
@@ -691,11 +677,10 @@ impl Accounts {
                 .ok_or("Get a signing certificate before signing.")?;
             (team_id, free, identity, session.profiles.clone())
         };
-        let watch_label = watch.label().to_string();
         let team_tag = crate::renewal::tag(&team_id);
         // Signing is local and CPU-bound: it reads and writes a whole app bundle and computes
         // hashes over every file, so it never runs on the async runtime's threads.
-        let (mut signed, app_name) = tokio::task::spawn_blocking(move || {
+        let mut signed = tokio::task::spawn_blocking(move || {
             let report =
                 crate::inspect(&path, &cancel, |_| {}).map_err(|error| error.to_string())?;
             let plan = crate::plan::build(
@@ -710,12 +695,6 @@ impl Accounts {
                     watch,
                 },
             );
-            let app_name = plan
-                .bundles
-                .iter()
-                .find(|bundle| bundle.identifier == plan.main_identifier)
-                .map(|bundle| bundle.name.clone())
-                .unwrap_or_else(|| plan.new_main_identifier.clone());
             crate::signer::sign(
                 &path,
                 &out_dir,
@@ -726,29 +705,12 @@ impl Accounts {
                 &cancel,
                 progress,
             )
-            .map(|signed| (signed, app_name))
         })
         .await
         .map_err(|_| "Signing stopped unexpectedly.".to_string())??;
-        signed.team_tag = Some(team_tag.clone());
-        // Held, not written: the seven days only become worth showing once the build reaches a
-        // phone, and installing is a separate click that may never come.
-        if let Ok(mut inner) = self.0.lock() {
-            inner
-                .pending
-                .retain(|held| held.identifier != signed.identifier);
-            inner.pending.push(crate::renewal::Record {
-                team_tag,
-                identifier: signed.identifier.clone(),
-                app_name,
-                watch: watch_label,
-                expires_unix: signed.expires_unix,
-                installed_unix: 0,
-            });
-            // One waiting record per build; a session that signs repeatedly must not grow a list.
-            let excess = inner.pending.len().saturating_sub(8);
-            inner.pending.drain(..excess);
-        }
+        // The team the build was signed for, so the library can tell a countdown about this
+        // build apart from one about a build signed for somebody else.
+        signed.team_tag = Some(team_tag);
         Ok(signed)
     }
     /// Reuse or obtain this session's development certificate for the selected team.

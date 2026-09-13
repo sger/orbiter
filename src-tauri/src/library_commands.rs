@@ -1,5 +1,5 @@
 use super::*;
-use orbiter_core::library::{Artifact, Imported, Library, Opened, Snapshot};
+use orbiter_core::library::{Artifact, Expiry, Imported, Library, Opened, Snapshot};
 pub fn storage(app: &tauri::AppHandle) -> Result<Library, String> {
     Ok(Library::new(
         app.path()
@@ -21,6 +21,20 @@ pub async fn library_import(path: String, app: tauri::AppHandle) -> Result<Impor
     tokio::task::spawn_blocking(move || library.import(&PathBuf::from(path)))
         .await
         .map_err(|_| "Import worker stopped.")?
+}
+/// Where the seven days stand for one saved build. The raw team identifier is hashed here, at the
+/// boundary: the library has never seen one and must not start.
+#[tauri::command]
+pub async fn library_expiry(
+    artifact_id: String,
+    team_id: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<Option<Expiry>, String> {
+    let library = storage(&app)?;
+    let tag = team_id.as_deref().map(orbiter_core::renewal::tag);
+    tokio::task::spawn_blocking(move || library.expiry(&artifact_id, tag.as_deref()))
+        .await
+        .map_err(|_| "Library worker stopped.")?
 }
 #[tauri::command]
 pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<Opened, String> {

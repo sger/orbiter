@@ -1,6 +1,8 @@
 import { AppIcon } from "./AppIcon";
 import { useLibraryDrop } from "./useLibraryDrop";
 import { useRenewal } from "../renew/useRenewal";
+import { RenewalBanner } from "../renew/RenewalBanner";
+import { ExpiryLine } from "../renew/ExpiryLine";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Box, Plus, Search, ArrowLeft, Trash2 } from "lucide-react";
@@ -18,6 +20,7 @@ const empty: LibrarySnapshot = {
   artifacts: [],
   devices: [],
   attempts: [],
+  expiries: [],
   storage_bytes: 0,
 };
 export const bytes = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -42,7 +45,7 @@ export function LibraryPage({
   selectedId?: string;
   onRemoved: (ids: string[]) => void;
 }) {
-  const { renewal: legacyRenewal } = useRenewal(null, null);
+  const { renewal: legacyRenewal, forget: forgetLegacy } = useRenewal(null, null);
   const [data, setData] = useState(empty);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -193,6 +196,9 @@ export function LibraryPage({
     .sort((a, b) => b.started_unix - a.started_unix);
   const deviceName = (id: string) =>
     data.devices.find((d) => d.id === id)?.name ?? "Remembered device";
+  // Longest-lived first from Rust, so the first entry for an app is the copy still launching.
+  const headline = (id: string) =>
+    data.expiries.find((e) => e.app_id === id) ?? null;
   const installedExpiry = (attempt?: Attempt) =>
     attempt
       ? `${attempt.signed ? "Installed signed build" : "Installed original profile"}: ${expiry(attempt.expires)}`
@@ -344,7 +350,8 @@ export function LibraryPage({
                 </button>
               ))}
             </nav>
-            {tab === "Versions" && (
+            <ExpiryLine expiry={headline(app.id)} variant="banner" />
+          {tab === "Versions" && (
               <div className="card library-card">
                 <p className="hint">
                   Originals are ordered by import time. Signed builds stay with
@@ -391,6 +398,13 @@ export function LibraryPage({
                           ? installedExpiry(a)
                           : "No installed expiration established by this attempt."}
                       </p>
+                      <ExpiryLine
+                        expiry={
+                          data.expiries.find((e) => e.attempt_id === a.id) ??
+                          null
+                        }
+                        variant="line"
+                      />
                       <code className="library-wrap">
                         Artifact: {a.artifact_id}
                       </code>
@@ -430,6 +444,13 @@ export function LibraryPage({
                               history.find((a) => a.stage === "installed"),
                             )}
                           </p>
+                          <ExpiryLine
+                            expiry={
+                              data.expiries.find((e) => e.device_id === d.id) ??
+                              null
+                            }
+                            variant="line"
+                          />
                           <code>Device tag: {d.id.slice(0, 12)}</code>
                         </div>
                       </article>
@@ -531,6 +552,7 @@ export function LibraryPage({
                           history.find((h) => h.stage === "installed"),
                         )}
                       </p>
+                      <ExpiryLine expiry={headline(a.id)} variant="line" />
                       {!history.some((h) => h.stage === "installed") &&
                         versions.length > 0 && (
                           <p className="hint">
@@ -549,16 +571,15 @@ export function LibraryPage({
                 .toLowerCase()
                 .includes(query.toLowerCase()),
             ) && <p>No apps match “{query}”.</p>}
-          {legacyRenewal && (
-            <section className="card library-card">
-              <h2>Legacy renewal information</h2>
-              <p>{legacyRenewal.sentence}</p>
-              <p className="hint">
-                This older record has no saved artifact or device association.
-                It is not part of the library installation history.
-              </p>
-            </section>
-          )}
+          {/* The file an older Orbiter wrote. Nothing writes it any more — the library records
+              an installed build's expiry now — so this is the one place it is shown, and the one
+              place it can be cleared. */}
+          <RenewalBanner
+            renewal={legacyRenewal}
+            canResign={false}
+            onResign={() => {}}
+            onForget={forgetLegacy}
+          />
           <p className="library-storage">
             {data.apps.length} apps · {bytes(data.storage_bytes)} of managed
             IPAs

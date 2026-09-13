@@ -29,8 +29,8 @@ import { Devices } from "../device/Devices";
 import { InstallSigned } from "../install/InstallSigned";
 import { DeviceLog } from "../diagnose/DeviceLog";
 import { HelpPanel } from "../help/HelpPanel";
-import { RenewalBanner } from "../renew/RenewalBanner";
-import { useRenewal } from "../renew/useRenewal";
+import { ExpiryLine } from "../renew/ExpiryLine";
+import { useLibraryExpiry } from "../renew/useLibraryExpiry";
 import { SigningProgress } from "./SigningProgress";
 const inspectionStages = [
   "Checking archive",
@@ -134,20 +134,22 @@ export function Workspace({
   const steps = stages(pipeline);
   // The identifier the plan would produce, which is what a record is matched against. Before a
   // plan exists there is nothing to match, and the banner says so rather than guessing.
-  const {
-    renewal,
-    refresh: refreshRenewal,
-    forget: forgetRenewal,
-  } = useRenewal(team.teamId, preparation?.plan.new_main_identifier ?? null);
+  // The build on screen is an artifact, not a bundle identifier: the workspace is opened from one,
+  // so the question "is this countdown about what I am looking at?" is settled by construction and
+  // only the team can still differ. After signing it is the build just produced.
+  const { expiry, refresh: refreshExpiry } = useLibraryExpiry(
+    signedArtifactId ?? selected?.artifact.id ?? null,
+    team.teamId,
+  );
   // An install that has just finished is the moment a record appears — or, when it failed, the
   // moment it is worth confirming that nothing new is remembered.
   const installationBusy = useCallback(
     (value: boolean) => {
       installActive.current = value;
       setInstallBusy(value);
-      if (!value) refreshRenewal();
+      if (!value) refreshExpiry();
     },
-    [refreshRenewal],
+    [refreshExpiry],
   );
   const frameworks =
     report?.bundles.filter((b) => b.kind === "Framework").length ?? 0;
@@ -330,11 +332,11 @@ export function Workspace({
           </div>
         </div>
       )}
-      <RenewalBanner
-        renewal={renewal}
+      <ExpiryLine
+        expiry={expiry}
+        variant="banner"
         canResign={!signing && blocked === "" && desktop}
         onResign={() => void sign(ipaPath!, team.watch, marker)}
-        onForget={forgetRenewal}
       />
       <div hidden={!!selected?.artifact.source_id}>
         <SigningPanel

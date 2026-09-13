@@ -125,12 +125,16 @@ export const stopDeviceLog = () => invoke("stop_device_log");
 
 import type {
   LibrarySnapshot,
+  LibraryExpiry,
   Imported,
   Opened,
   Artifact,
 } from "../features/library/types";
 export const libraryChanged = () =>
   window.dispatchEvent(new Event("library-changed"));
+/// Where the seven days stand for one saved build, or null when it was never installed.
+export const libraryExpiry = (artifactId: string, teamId: string | null) =>
+  invoke<LibraryExpiry | null>("library_expiry", { artifactId, teamId });
 export const libraryList = () => invoke<LibrarySnapshot>("library_list");
 export const libraryImport = (path: string) =>
   invoke<Imported>("library_import", { path });

@@ -7,7 +7,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -16,6 +16,10 @@ use std::{
 
 static STORE: Mutex<()> = Mutex::new(());
 static PINS: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
+/// Bumped whenever the manifest gains a field. Reading an older one is fine — its new fields are
+/// simply unknown — but an older Orbiter must refuse a newer manifest rather than load it and
+/// silently drop every field it does not know on its next save.
+const SCHEMA: u32 = 2;
 const MAX_IPA: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_MANIFEST: u64 = 64 * 1024 * 1024;
 type Result<T> = std::result::Result<T, String>;
@@ -47,6 +51,10 @@ pub struct Artifact {
     pub size_bytes: u64,
     pub added_unix: i64,
     pub expires: Option<String>,
+    /// The same moment as `expires`. Both are taken from one chosen profile, never picked
+    /// separately, so the date shown and the date counted can never describe different bundles.
+    #[serde(default)]
+    pub expires_unix: Option<i64>,
     pub team_tag: Option<String>,
     pub watch: Option<String>,
     pub marker: Option<String>,
@@ -71,6 +79,13 @@ pub struct Attempt {
     pub sha256: String,
     pub signed: bool,
     pub expires: Option<String>,
+    #[serde(default)]
+    pub expires_unix: Option<i64>,
+    /// Copied from the artifact rather than joined back to it: a saved file can be removed while
+    /// its history is kept, and a countdown that vanished because someone tidied up would be the
+    /// same silent loss this whole module exists to prevent.
+    #[serde(default)]
+    pub team_tag: Option<String>,
     pub started_unix: i64,
     pub finished_unix: Option<i64>,
     pub stage: Stage,
@@ -90,7 +105,7 @@ struct Manifest {
 impl Default for Manifest {
     fn default() -> Self {
         Self {
-            schema: 1,
+            schema: SCHEMA,
             salt: id(),
             apps: vec![],
             artifacts: vec![],
@@ -103,12 +118,44 @@ impl Default for Manifest {
 #[derive(Serialize)]
 pub struct Snapshot {
     pub apps: Vec<App>,
+    /// Every successful install with a known expiry, longest-lived first within each app.
+    pub expiries: Vec<Expiry>,
     pub artifacts: Vec<Artifact>,
     pub devices: Vec<Device>,
     pub attempts: Vec<Attempt>,
     pub storage_bytes: u64,
     pub storage_warning: Option<String>,
 }
+/// One successful installation and where its seven days stand.
+///
+/// The honest moment for a countdown is an install, not an import: a saved file is a fact about
+/// this Mac, and counting down from it would be Orbiter claiming an installation it never
+/// performed. So this exists only for an attempt that reached `Installed` and whose expiry is
+/// actually known — unknown is not zero, and rendering "expired long ago" for a record written
+/// before Orbiter kept epoch seconds would invent a fact.
+///
+/// The sentence is built by `renewal::line`, the same function the legacy record uses, so the
+/// library page, the workspace and a screenshot of either cannot word the same fact differently.
+#[derive(Clone, Serialize)]
+pub struct Expiry {
+    pub app_id: String,
+    pub artifact_id: String,
+    pub attempt_id: String,
+    pub device_id: String,
+    /// Named so a person with two testers can tell which phone the line is about.
+    pub device_name: String,
+    pub app_name: String,
+    pub identifier: String,
+    pub signed: bool,
+    pub expires: Option<String>,
+    pub expires_unix: i64,
+    pub installed_unix: i64,
+    pub standing: crate::renewal::Standing,
+    pub bearing: crate::renewal::Bearing,
+    pub sentence: String,
+    pub urgent: bool,
+}
+
 #[derive(Serialize)]
 pub struct Imported {
     pub app_id: String,
@@ -178,10 +225,14 @@ impl Library {
         if bytes.len() as u64 > MAX_MANIFEST {
             return Err("Library manifest exceeds its supported size.".into());
         }
-        let m: Manifest = serde_json::from_slice(&bytes).map_err(|_| "Library storage is corrupt. Your files have not been removed; restore the manifest from a backup.")?;
-        if m.schema != 1 {
+        let mut m: Manifest = serde_json::from_slice(&bytes).map_err(|_| "Library storage is corrupt. Your files have not been removed; restore the manifest from a backup.")?;
+        if m.schema == 0 || m.schema > SCHEMA {
             return Err("This library requires a different Orbiter version.".into());
         }
+        // An older manifest opens as it is; the upgrade lands on the next save. Nothing is
+        // backfilled — an expiry Orbiter never recorded stays unknown rather than being guessed
+        // at by parsing a display date back into a number.
+        m.schema = SCHEMA;
         if uuid::Uuid::parse_str(&m.salt).is_err() {
             return Err("Invalid library device salt.".into());
         }
@@ -260,8 +311,13 @@ impl Library {
         Ok(self.root.join("artifacts").join(format!("{hash}.ipa")))
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
+        self.snapshot_at(std::time::SystemTime::now())
+    }
+    /// The clock is a parameter so a test can stand on a day boundary; nothing else passes one.
+    pub fn snapshot_at(&self, now: std::time::SystemTime) -> Result<Snapshot> {
         let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
         let m = self.read()?;
+        let expiries = expiries(&m, now);
         let mut storage_bytes = 0;
         match fs::read_dir(self.root.join("artifacts")) {
             Ok(entries) => {
@@ -281,6 +337,7 @@ impl Library {
         Ok(Snapshot {
             storage_warning: (!m.pending_removals.is_empty()).then(|| "Some requested file removals are still pending. Check disk permissions and restart Orbiter to retry cleanup.".into()),
             storage_bytes,
+            expiries,
             apps: m.apps,
             artifacts: m.artifacts,
             devices: m.devices,
@@ -410,6 +467,49 @@ impl Library {
             .or_default() += 1;
         Ok((a, path.clone(), Lease { path }))
     }
+    /// Where the seven days stand for the build on screen, if it was ever installed.
+    ///
+    /// "On screen" is an artifact, not a bundle identifier: the workspace is opened from one, so
+    /// the app half of the question is settled by construction and only the team can differ. A
+    /// signed build made from this original counts as the same build — opening the original to
+    /// re-sign it is exactly when its expiry is worth knowing — but a different original of the
+    /// same app does not, because it was never the thing that was installed.
+    pub fn expiry(&self, artifact_id: &str, team_tag: Option<&str>) -> Result<Option<Expiry>> {
+        self.expiry_at(artifact_id, team_tag, std::time::SystemTime::now())
+    }
+    pub fn expiry_at(
+        &self,
+        artifact_id: &str,
+        team_tag: Option<&str>,
+        now: std::time::SystemTime,
+    ) -> Result<Option<Expiry>> {
+        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let m = self.read()?;
+        let lineage: BTreeSet<&str> = m
+            .artifacts
+            .iter()
+            .filter(|a| a.id == artifact_id || a.source_id.as_deref() == Some(artifact_id))
+            .map(|a| a.id.as_str())
+            .collect();
+        Ok(expiries(&m, now)
+            .into_iter()
+            .find(|e| lineage.contains(e.artifact_id.as_str()))
+            .map(|mut found| {
+                // The only thing that can still be wrong is the team: it changes while the
+                // workspace is open, and a countdown about a build signed for someone else is
+                // worse than silence.
+                found.bearing = match (team_tag, attempt_team(&m, &found.attempt_id)) {
+                    (Some(asked), Some(held)) if asked != held => {
+                        crate::renewal::Bearing::OtherTeam
+                    }
+                    _ => crate::renewal::Bearing::SameApp,
+                };
+                found.sentence =
+                    crate::renewal::line(&found.app_name, found.standing, found.bearing);
+                found.urgent = crate::renewal::urgent(found.standing, found.bearing);
+                found
+            }))
+    }
     /// Compatibility for older path-based clients. Resolve a managed path back to its exact
     /// retained artifact; external paths are imported as originals before any operation.
     pub fn resolve_or_import(&self, path: &Path) -> Result<String> {
@@ -466,6 +566,7 @@ impl Library {
         let mut artifact = from_report(&report, source.app_id, hash.clone())?;
         artifact.source_id = Some(source.id);
         artifact.expires = (!signed.expires.is_empty()).then(|| signed.expires.clone());
+        artifact.expires_unix = (signed.expires_unix > 0).then_some(signed.expires_unix);
         artifact.team_tag = Some(team_tag);
         artifact.watch = Some(watch);
         artifact.marker = Some(marker);
@@ -608,6 +709,8 @@ impl Library {
             sha256: artifact.sha256.clone(),
             signed: artifact.source_id.is_some(),
             expires: artifact.expires.clone(),
+            expires_unix: artifact.expires_unix,
+            team_tag: artifact.team_tag.clone(),
             started_unix: now(),
             finished_unix: None,
             stage: Stage::Preparing,
@@ -700,6 +803,14 @@ fn from_report(report: &Report, app_id: String, hash: String) -> Result<Artifact
         .iter()
         .find(|b| b.path == report.main_path)
         .ok_or("IPA has no main app.")?;
+    // The build stops working when its first profile does, and the date shown and the seconds
+    // counted come from that one profile rather than being chosen independently.
+    let earliest = report
+        .bundles
+        .iter()
+        .filter_map(|b| b.profile.as_ref())
+        .filter_map(|p| Some((p.expires_unix?, p.expires_at.clone()?)))
+        .min_by_key(|(unix, _)| *unix);
     Ok(Artifact {
         id: id(),
         app_id,
@@ -711,14 +822,68 @@ fn from_report(report: &Report, app_id: String, hash: String) -> Result<Artifact
         build: main.build.clone(),
         size_bytes: report.size_bytes,
         added_unix: now(),
-        expires: report
-            .bundles
-            .iter()
-            .filter_map(|b| b.profile.as_ref()?.expires_at.clone())
-            .min(),
+        expires: earliest.as_ref().map(|(_, text)| text.clone()),
+        expires_unix: earliest.as_ref().map(|(unix, _)| *unix),
         team_tag: None,
         watch: None,
         marker: None,
         deleted: false,
     })
+}
+
+fn attempt_team<'a>(m: &'a Manifest, attempt_id: &str) -> Option<&'a str> {
+    m.attempts
+        .iter()
+        .find(|a| a.id == attempt_id)?
+        .team_tag
+        .as_deref()
+}
+
+/// Every install worth counting down, longest-lived first within each app.
+///
+/// Longest-lived rather than most recent: the same app can be on two testers' phones, and a
+/// re-sign installed on one does not revive the copy on the other. Leading with the copy that is
+/// still working is the truthful headline, and because every qualifying attempt is returned, the
+/// phone whose copy has already died is still there to be shown beside its own device.
+fn expiries(m: &Manifest, now: std::time::SystemTime) -> Vec<Expiry> {
+    let mut found: Vec<Expiry> = m
+        .attempts
+        .iter()
+        .filter(|a| a.stage == Stage::Installed)
+        .filter_map(|a| {
+            let expires_unix = a.expires_unix?;
+            let standing = crate::renewal::standing_at(expires_unix, now);
+            // The library page names the app in its own row, so nothing there is about another
+            // build. `expiry_at` re-decides this for the workspace, where the team can differ.
+            let bearing = crate::renewal::Bearing::SameApp;
+            Some(Expiry {
+                app_id: a.app_id.clone(),
+                artifact_id: a.artifact_id.clone(),
+                attempt_id: a.id.clone(),
+                device_id: a.device_id.clone(),
+                device_name: m
+                    .devices
+                    .iter()
+                    .find(|d| d.id == a.device_id)
+                    .map(|d| d.name.clone())
+                    .unwrap_or_default(),
+                app_name: a.app_name.clone(),
+                identifier: a.identifier.clone(),
+                signed: a.signed,
+                expires: a.expires.clone(),
+                expires_unix,
+                installed_unix: a.finished_unix.unwrap_or(a.started_unix),
+                standing,
+                bearing,
+                sentence: crate::renewal::line(&a.app_name, standing, bearing),
+                urgent: crate::renewal::urgent(standing, bearing),
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| {
+        b.expires_unix
+            .cmp(&a.expires_unix)
+            .then(b.installed_unix.cmp(&a.installed_unix))
+    });
+    found
 }

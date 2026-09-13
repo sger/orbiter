@@ -10,6 +10,9 @@ pub struct Profile {
     pub team_name: Option<String>,
     pub team_id: Option<String>,
     pub expires_at: Option<String>,
+    /// The same moment as `expires_at`, as seconds since the epoch, so nothing downstream parses a
+    /// human-readable date back out of a display string. Zero is never written: unknown is `None`.
+    pub expires_unix: Option<i64>,
     pub expired: Option<bool>,
     pub device_count: Option<usize>,
     pub distribution: String,
@@ -66,6 +69,9 @@ fn from_dictionary(d: plist::Dictionary) -> Result<Profile> {
             .and_then(plist::Value::as_string)
             .map(str::to_owned),
         expires_at: expiry.map(|d| d.to_xml_format()),
+        expires_unix: expiry
+            .map(|d| crate::renewal::now_unix(std::time::SystemTime::from(d)))
+            .filter(|unix| *unix > 0),
         expired: expiry.map(|d| std::time::SystemTime::from(d) < std::time::SystemTime::now()),
         device_count: devices,
         distribution: if all {

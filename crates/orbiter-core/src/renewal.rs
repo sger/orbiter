@@ -16,14 +16,10 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    io::Write,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-/// Enough records that a person signing for several testers does not lose the earlier ones, and
-/// few enough that the file stays a glance rather than a history.
-const MAX_RECORDS: usize = 32;
 const MAX_BYTES: u64 = 16 * 1024;
 /// Past this, a count of days is no longer information. The profile is gone, the App ID window has
 /// long since turned over, and "expired 94 days ago" tells a person nothing "expired" did not.
@@ -111,7 +107,13 @@ pub fn now_unix(now: SystemTime) -> i64 {
 }
 
 pub fn standing(record: &Record, now: SystemTime) -> Standing {
-    let remaining = record.expires_unix - now_unix(now);
+    standing_at(record.expires_unix, now)
+}
+
+/// The same arithmetic without a `Record`, so the library can ask about an expiry it holds itself.
+/// One implementation, so a countdown never rounds two different ways depending on who asked.
+pub fn standing_at(expires_unix: i64, now: SystemTime) -> Standing {
+    let remaining = expires_unix - now_unix(now);
     if remaining <= 0 {
         let days = (-remaining) / DAY;
         if days >= LONG_AGO_DAYS {
@@ -139,8 +141,10 @@ pub fn bearing(record: &Record, team_tag: Option<&str>, identifier: Option<&str>
 }
 
 /// The line the banner shows. Never a countdown about a build that is not the one on screen.
-fn sentence(record: &Record, standing: Standing, bearing: Bearing) -> String {
-    let name = &record.app_name;
+///
+/// The only place this wording exists. The library, the workspace and any log all call it, so the
+/// window, a screenshot of it and a terminal cannot disagree about what a person was told.
+pub fn line(name: &str, standing: Standing, bearing: Bearing) -> String {
     match bearing {
         Bearing::OtherTeam => {
             format!("The last build Orbiter installed, {name}, was signed for a different team.")
@@ -170,6 +174,19 @@ fn sentence(record: &Record, standing: Standing, bearing: Bearing) -> String {
     }
 }
 
+/// Whether this is news a person has to act on rather than a line they can note and move past.
+///
+/// One rule, so the library and the legacy record cannot disagree about what counts as urgent.
+pub fn urgent(standing: Standing, bearing: Bearing) -> bool {
+    matches!(
+        (bearing, standing),
+        (
+            Bearing::SameApp | Bearing::Unknown,
+            Standing::ExpiresToday | Standing::Expired { .. } | Standing::LongExpired
+        )
+    )
+}
+
 fn read(path: &Path) -> Ledger {
     // A record of when something expires must never be the reason the app will not open. Every
     // failure here is the same answer: nothing is known.
@@ -186,36 +203,6 @@ fn read(path: &Path) -> Ledger {
         return Ledger::default();
     }
     serde_json::from_slice(&bytes).unwrap_or_default()
-}
-
-fn write(path: &Path, ledger: &Ledger) -> Result<(), String> {
-    let parent = path.parent().ok_or("Invalid renewal storage location.")?;
-    std::fs::create_dir_all(parent).map_err(|_| "Cannot create private renewal storage.")?;
-    let mut temp =
-        tempfile::NamedTempFile::new_in(parent).map_err(|_| "Cannot create the renewal record.")?;
-    serde_json::to_writer(&mut temp, ledger).map_err(|_| "Cannot encode the renewal record.")?;
-    temp.flush()
-        .map_err(|_| "Cannot flush the renewal record.")?;
-    temp.as_file()
-        .sync_all()
-        .map_err(|_| "Cannot sync the renewal record.")?;
-    temp.persist(path)
-        .map_err(|_| "Cannot save the renewal record.")?;
-    Ok(())
-}
-
-/// Remember an installed build, replacing any earlier record of the same build for the same team.
-pub fn remember(path: &Path, record: Record) -> Result<(), String> {
-    let mut ledger = read(path);
-    ledger
-        .records
-        .retain(|held| held.team_tag != record.team_tag || held.identifier != record.identifier);
-    ledger.records.push(record);
-    // Newest last; drop from the front when the file would grow past a glance.
-    ledger.records.sort_by_key(|held| held.installed_unix);
-    let excess = ledger.records.len().saturating_sub(MAX_RECORDS);
-    ledger.records.drain(..excess);
-    write(path, &ledger)
 }
 
 /// Forget everything. The only way to remove a record, and it removes all of them: a partial
@@ -258,14 +245,8 @@ pub fn status(
     let standing = standing(&best, now);
     let bearing = bearing(&best, tag_ref, identifier);
     Some(Status {
-        sentence: sentence(&best, standing, bearing),
-        urgent: matches!(
-            (bearing, standing),
-            (
-                Bearing::SameApp | Bearing::Unknown,
-                Standing::ExpiresToday | Standing::Expired { .. } | Standing::LongExpired
-            )
-        ),
+        sentence: line(&best.app_name, standing, bearing),
+        urgent: urgent(standing, bearing),
         identifier: best.identifier,
         app_name: best.app_name,
         watch: best.watch,
@@ -283,6 +264,12 @@ mod tests {
 
     fn at(unix: i64) -> SystemTime {
         UNIX_EPOCH + Duration::from_secs(unix as u64)
+    }
+    /// Write a legacy file directly. Nothing in Orbiter writes this file any more — the library
+    /// records an installed build's expiry now — so the tests seed it the way an older version
+    /// left it behind.
+    fn seed(path: &Path, records: Vec<Record>) {
+        std::fs::write(path, serde_json::to_vec(&Ledger { records }).unwrap()).unwrap();
     }
     fn record(expires_unix: i64) -> Record {
         Record {
@@ -335,9 +322,11 @@ mod tests {
     fn the_record_names_no_one() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
-        remember(&path, record(2_000_000)).unwrap();
+        seed(&path, vec![record(2_000_000)]);
         let written = std::fs::read_to_string(&path).unwrap();
-        // No team identifier, no path, no address, and nothing shaped like either.
+        // No team identifier, no path, no address, and nothing shaped like either. The shape is
+        // still worth asserting even though only the library writes expiries now: this file is
+        // still read, and a reader that accepted identifying fields would invite them back.
         assert!(!written.contains(TEAM));
         assert!(!written.contains('/'));
         assert!(!written.contains('@'));
@@ -352,8 +341,8 @@ mod tests {
         assert!(status(&path, Some(TEAM), None, at(1_000_000)).is_none());
         std::fs::write(&path, vec![b'x'; (MAX_BYTES + 1) as usize]).unwrap();
         assert!(status(&path, Some(TEAM), None, at(1_000_000)).is_none());
-        // And a later record still writes over the damage rather than inheriting it.
-        remember(&path, record(2_000_000)).unwrap();
+        // And a readable file written over the damage is read rather than the damage remembered.
+        seed(&path, vec![record(2_000_000)]);
         assert!(status(&path, Some(TEAM), None, at(1_000_000)).is_some());
     }
 
@@ -361,7 +350,7 @@ mod tests {
     fn a_record_about_another_build_shows_no_countdown() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
-        remember(&path, record(1_000_000 + 5 * DAY)).unwrap();
+        seed(&path, vec![record(1_000_000 + 5 * DAY)]);
 
         let same = status(
             &path,
@@ -394,7 +383,7 @@ mod tests {
     fn only_the_build_on_screen_becomes_urgent() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
-        remember(&path, record(1_000_000 - DAY)).unwrap();
+        seed(&path, vec![record(1_000_000 - DAY)]);
         let mine = status(
             &path,
             Some(TEAM),
@@ -408,37 +397,10 @@ mod tests {
     }
 
     #[test]
-    fn re_installing_replaces_rather_than_accumulates() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("renewal.json");
-        remember(&path, record(1_000_000)).unwrap();
-        remember(&path, record(1_000_000 + 7 * DAY)).unwrap();
-        let ledger = read(&path);
-        assert_eq!(ledger.records.len(), 1);
-        assert_eq!(ledger.records[0].expires_unix, 1_000_000 + 7 * DAY);
-    }
-
-    #[test]
-    fn several_testers_do_not_evict_each_other_but_the_file_stays_small() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("renewal.json");
-        for n in 0..(MAX_RECORDS + 5) {
-            let mut held = record(2_000_000 + n as i64);
-            held.identifier = format!("com.example.App.{n}");
-            held.installed_unix = n as i64;
-            remember(&path, held).unwrap();
-        }
-        let ledger = read(&path);
-        assert_eq!(ledger.records.len(), MAX_RECORDS);
-        // The oldest installs are the ones dropped.
-        assert_eq!(ledger.records[0].identifier, "com.example.App.5");
-    }
-
-    #[test]
     fn forgetting_is_complete_and_repeatable() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
-        remember(&path, record(2_000_000)).unwrap();
+        seed(&path, vec![record(2_000_000)]);
         forget(&path).unwrap();
         forget(&path).unwrap();
         assert!(status(&path, Some(TEAM), None, at(1_000_000)).is_none());

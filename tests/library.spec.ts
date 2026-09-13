@@ -9,11 +9,22 @@ async function mock(page: Page) {
       artifacts: [],
       devices: [],
       attempts: [],
+      expiries: [],
       storage_bytes: 0,
     };
     let data = JSON.parse(
       localStorage.getItem("test-library") ?? JSON.stringify(fresh),
     );
+    // A snapshot saved before this field existed still has to open, exactly as a manifest does.
+    data.expiries ??= [];
+    const signedOut = {
+      stage: "signed_out",
+      account: null,
+      teams: [],
+      selected_team: null,
+      challenge: null,
+      message: "",
+    };
     const save = () =>
       localStorage.setItem("test-library", JSON.stringify(data));
     w.__library = data;
@@ -89,15 +100,91 @@ async function mock(page: Page) {
           listeners.delete(args.eventId);
           return;
         }
-        if (cmd === "account_status")
-          return {
-            stage: "signed_out",
-            account: null,
-            teams: [],
+        // Enough of the Apple account to reach a build that could actually be re-signed. The
+        // account flow itself is covered in interface.spec.ts; here it exists so the expiry
+        // banner's Re-sign can be driven the same way a person would.
+        if (cmd === "account_status") return w.__account ?? signedOut;
+        if (cmd === "account_sign_in")
+          return (w.__account = {
+            stage: "signed_in",
+            account: "test@example.invalid",
             selected_team: null,
             challenge: null,
-            message: "",
+            message: "Signed in. Select a team.",
+            teams: [
+              {
+                id: "TEAM2",
+                name: "Synthetic Personal",
+                kind: "Individual",
+                free: true,
+                membership: null,
+              },
+            ],
+          });
+        if (cmd === "account_select_team") {
+          w.__account.selected_team = args.id;
+          return w.__account;
+        }
+        if (cmd === "account_register_device")
+          return {
+            registration: "registered",
+            team_devices: 1,
+            message: "This iPhone is now registered on the selected team.",
           };
+        if (cmd === "account_request_certificate")
+          return {
+            reused: false,
+            expires: "2099-01-01T00:00:00Z",
+            active: 1,
+            message: "A development certificate was issued.",
+          };
+        if (cmd === "library_prepare_provisioning")
+          return {
+            plan: {
+              new_main_identifier: "test.library.signed",
+              blockers: [],
+              consequences: [],
+              app_ids_required: 1,
+              bundles: [],
+            },
+            app_ids: [
+              {
+                identifier: "test.library.signed",
+                created: true,
+                capabilities: [],
+                remaining: 9,
+              },
+            ],
+            profiles: [
+              {
+                identifier: "test.library.signed",
+                expires: "2099-01-01T00:00:00Z",
+                uuid: "synthetic-uuid",
+              },
+            ],
+          };
+        if (cmd === "library_sign") {
+          w.__signRequested = {
+            artifactId: args.artifactId,
+            watch: args.watch,
+            marker: args.marker,
+          };
+          w.__addSigned();
+          return {
+            signed: {
+              team_tag: "team-tag",
+              path: "/managed/signed-1.ipa",
+              identifier: "test.library.signed",
+              expires: "2099-01-01T00:00:00Z",
+              expires_unix: 4070908800,
+              bundles_signed: 1,
+              removed: [],
+              message: "A signed IPA was produced.",
+              log: ["Extracting the archive"],
+            },
+            artifact: data.artifacts.find((a: any) => a.id === "signed-1"),
+          };
+        }
         if (cmd === "renewal_status") return w.__legacyRenewal ?? null;
         if (cmd === "installation_status") return current;
         if (cmd === "discover_devices")
@@ -117,6 +204,20 @@ async function mock(page: Page) {
             message: null,
           };
         if (cmd === "plugin:dialog|open") return w.__files;
+        // Where the seven days stand. Rust decides every word of it, so a test sets the whole
+        // record and asserts the page renders it rather than computing anything itself.
+        if (cmd === "library_expiry") {
+          return (
+            data.expiries.find(
+              (e: any) =>
+                e.artifact_id === args.artifactId ||
+                data.artifacts.some(
+                  (a: any) =>
+                    a.id === e.artifact_id && a.source_id === args.artifactId,
+                ),
+            ) ?? null
+          );
+        }
         if (cmd === "library_list") {
           if (w.__corrupt)
             throw "Library storage is corrupt. Restore the manifest.";
@@ -642,15 +743,24 @@ test("expiration distinguishes saved profiles, successful installs, failures and
     page.locator(".library-version").filter({ hasText: "Expiration unknown" }),
   ).toHaveCount(1);
   await page.getByRole("link", { name: "All apps" }).click();
+  // The file an older Orbiter wrote is still shown, still labelled as what it is, and — unlike
+  // before — can now actually be cleared: this is the only Forget button left in the app.
   await expect(
-    page.getByRole("heading", { name: "Legacy renewal information" }),
+    page.getByText("Legacy renewal information.", { exact: false }),
   ).toBeVisible();
   await expect(
-    page.getByText(
-      "This older record has no saved artifact or device association.",
-      { exact: false },
-    ),
+    page.getByText("Older build expires in two days.", { exact: false }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Forget" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() =>
+        ((window as any).__calls as any[]).some(
+          (c) => c.cmd === "renewal_forget",
+        ),
+      ),
+    )
+    .toBe(true);
 });
 
 test("native drag and drop imports multiple files, skips invalid files, and ignores hidden library pages", async ({
@@ -805,4 +915,209 @@ test("import result opens its saved version and removal icon stays aligned with 
   await expect(
     page.getByRole("heading", { name: "Signing & installation" }),
   ).toBeVisible();
+});
+
+/// Put a standing on screen. Every word of it is decided in Rust, so a test supplies the whole
+/// record — including the sentence — and then asserts the page rendered exactly that.
+async function counting(
+  page: import("@playwright/test").Page,
+  entries: Record<string, unknown>[],
+) {
+  await page.evaluate((values) => {
+    const w = window as any;
+    w.__library.expiries = values;
+    localStorage.setItem("test-library", JSON.stringify(w.__library));
+    window.dispatchEvent(new Event("library-changed"));
+  }, entries);
+}
+const entry = (over: Record<string, unknown> = {}) => ({
+  app_id: "app-1",
+  artifact_id: "version-1",
+  attempt_id: "attempt-1",
+  device_id: "salted-device",
+  device_name: "My iPhone",
+  app_name: "Library App",
+  identifier: "test.library",
+  signed: true,
+  expires: "2099-01-01T00:00:00Z",
+  expires_unix: 4070908800,
+  installed_unix: 200,
+  standing: { state: "valid", days: 5 },
+  bearing: "same_app",
+  sentence:
+    "Library App was installed from this team and stops launching in 5 days.",
+  urgent: false,
+  ...over,
+});
+
+test("an app that was never installed counts down from nothing", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  // A saved file is a fact about this Mac. Counting down from it would claim an installation.
+  await expect(page.locator(".renewal")).toHaveCount(0);
+  await expect(page.getByText("No successful installation recorded")).toHaveCount(
+    1,
+  );
+  await page.getByRole("link", { name: "All apps" }).click();
+  await expect(page.locator(".renewal")).toHaveCount(0);
+});
+
+test("a live install counts down quietly and an expired one is announced", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await counting(page, [entry()]);
+  // The page renders the sentence Rust built; it never assembles one from the parts.
+  const quiet = page.locator(".renewal");
+  await expect(quiet).toContainText("stops launching in 5 days");
+  await expect(quiet).toContainText("My iPhone");
+  await expect(quiet).not.toHaveClass(/renewal-urgent/);
+  await expect(quiet).toHaveAttribute("data-standing", "valid");
+
+  await counting(page, [
+    entry({
+      standing: { state: "expired", days: 2 },
+      urgent: true,
+      sentence:
+        "Library App stopped launching 2 days ago. Re-sign and install it again.",
+    }),
+  ]);
+  const loud = page.locator(".renewal");
+  await expect(loud).toHaveClass(/renewal-urgent/);
+  await expect(loud).toHaveAttribute("role", "status");
+  await expect(loud).toContainText("stopped launching 2 days ago");
+});
+
+test("the copy still working leads the app row and the dead one stays visible", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await counting(page, [
+    entry({ device_name: "Second phone" }),
+    entry({
+      attempt_id: "attempt-2",
+      device_id: "device-two",
+      device_name: "First phone",
+      standing: { state: "expired", days: 2 },
+      urgent: true,
+      sentence:
+        "Library App stopped launching 2 days ago. Re-sign and install it again.",
+    }),
+  ]);
+  await page.getByRole("link", { name: "All apps" }).click();
+  // A re-sign installed on one tester's phone does not revive the copy on another's, so the row
+  // leads with the copy that still launches rather than raising a false alarm.
+  await expect(page.locator(".library-row")).toContainText(
+    "stops launching in 5 days",
+  );
+  await expect(page.locator(".library-row")).not.toContainText(
+    "stopped launching 2 days ago",
+  );
+});
+
+test("the workspace asks about the build on screen and says nothing about another", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await counting(page, [
+    entry({
+      standing: { state: "expired", days: 2 },
+      urgent: true,
+      sentence:
+        "Library App stopped launching 2 days ago. Re-sign and install it again.",
+    }),
+  ]);
+  await page.getByRole("link", { name: "Open version", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Signing & installation" }),
+  ).toBeVisible();
+  const banner = page.locator(".renewal");
+  await expect(banner).toHaveClass(/renewal-urgent/);
+  // Re-signing is blocked until an account and a team exist, so the banner must not invite it.
+  await expect(page.getByRole("button", { name: "Re-sign now" })).toHaveCount(0);
+  await expect
+    .poll(async () =>
+      page.evaluate(() =>
+        ((window as any).__calls as any[])
+          .filter((c) => c.cmd === "library_expiry")
+          .map((c) => c.args.artifactId),
+      ),
+    )
+    .toContain("version-1");
+});
+
+test("a build signed for another team shows no countdown", async ({ page }) => {
+  await mock(page);
+  await imported(page);
+  await counting(page, [
+    entry({
+      bearing: "other_team",
+      standing: { state: "valid", days: 5 },
+      urgent: false,
+      sentence:
+        "The last build Orbiter installed, Library App, was signed for a different team.",
+    }),
+  ]);
+  const banner = page.locator(".renewal");
+  await expect(banner).toHaveAttribute("data-bearing", "other_team");
+  await expect(banner).toContainText("signed for a different team");
+  await expect(banner).not.toContainText("5 days");
+  await expect(banner).not.toHaveClass(/renewal-urgent/);
+});
+
+test("the banner re-signs the build it is warning about", async ({ page }) => {
+  await mock(page);
+  await imported(page);
+  await counting(page, [
+    entry({
+      standing: { state: "expired", days: 2 },
+      urgent: true,
+      sentence:
+        "Library App stopped launching 2 days ago. Re-sign and install it again.",
+    }),
+  ]);
+  await page.getByRole("link", { name: "Open version", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Signing & installation" }),
+  ).toBeVisible();
+
+  // Nothing may be offered before re-signing is actually possible.
+  await expect(page.getByRole("button", { name: "Re-sign now" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Refresh devices" }).click();
+  await page.getByLabel("Apple account email").fill("test@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByLabel("I agree to authenticate directly with Apple", { exact: false })
+    .check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  await page.getByLabel("Signing team", { exact: true }).selectOption("TEAM2");
+  await page
+    .getByLabel("I understand this uses one of the team's", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Get development certificate" })
+    .click();
+  await page
+    .getByLabel("I understand ten identifiers per seven days", { exact: false })
+    .check();
+  await page
+    .getByRole("button", { name: "Prepare identifiers & profiles" })
+    .click();
+  await expect(page.getByRole("button", { name: "Re-sign IPA" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "Re-sign now" }).click();
+  // The banner makes the same call the main control does, on the same artifact it is warning
+  // about. It is not a second signing path that could drift from the first.
+  await expect
+    .poll(async () => page.evaluate(() => (window as any).__signRequested))
+    .toEqual({
+      artifactId: "version-1",
+      watch: "undecided",
+      marker: "test",
+    });
 });
