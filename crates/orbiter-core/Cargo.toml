@@ -17,6 +17,8 @@ tokio = { version = "=1.53.1", features = ["rt-multi-thread", "time", "macros", 
 sha2 = "=0.10.9"
 uuid = { version = "=1.26.1", features = ["v4"] }
 tempfile = "=3.27.0"
+# Structured diagnostics for workflows; the desktop shell installs the subscriber.
+tracing = "=0.1.44"
 
 isideload = { version = "=0.3.17", default-features = false, features = ["install"] }
 zeroize = "=1.9.0"

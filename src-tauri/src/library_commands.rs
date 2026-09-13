@@ -1,8 +1,9 @@
 use super::*;
 use orbiter_core::{
-    application::runtime::Runtime,
-    domain::identifiers::{AppId, ArtifactId, ArtifactId as SourceId, UsbDeviceId},
-    library::{Artifact, Expiry, Imported, Library, Opened, Snapshot},
+    application::{installation::Acknowledgement, runtime::Runtime, signing::Retained},
+    domain::identifiers::{AppId, ArtifactId, UsbDeviceId},
+    library::{Expiry, Imported, Library, Opened, Snapshot},
+    plan::WatchChoice,
 };
 /// The one library for this process.
 ///
@@ -126,35 +127,48 @@ pub async fn library_prepare_install(
         .map_err(Into::into)
 }
 
+/// Reserve app identifiers and download profiles for one saved original.
+///
+/// **Contacts Apple and mutates remote state**, so it refuses without the acknowledgement shown
+/// beside the control. A free personal team may register only ten identifiers per seven days and
+/// an identifier can never be reused by another team.
+///
+/// # Errors
+///
+/// Returns the service's structured failure: a missing acknowledgement, an artifact that is
+/// missing, changed, or already a signed build, or Apple's own refusal.
 #[tauri::command]
 pub async fn library_prepare_provisioning(
     artifact_id: String,
     acknowledged: bool,
     watch: String,
     app: tauri::AppHandle,
-    state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::Preparation, String> {
-    let library = storage(&app)?;
     let artifact_id = ArtifactId::parse(&artifact_id)?;
-    let (artifact, path, _lease) = tokio::task::spawn_blocking(move || library.pin(&artifact_id))
-        .await
-        .map_err(|_| "Library worker stopped.")??;
-    if artifact.source_id.is_some() {
-        return Err("Select an original version to sign.".into());
-    }
-    state
-        .prepare_provisioning(
-            path,
-            acknowledged,
-            orbiter_core::plan::WatchChoice::parse(&watch),
+    runtime(&app)?
+        .signing()
+        .prepare(
+            &artifact_id,
+            Acknowledgement::from_request(acknowledged),
+            WatchChoice::parse(&watch),
         )
         .await
+        .map_err(Into::into)
 }
-#[derive(serde::Serialize)]
-pub struct SavedSigned {
-    pub signed: orbiter_core::signer::Signed,
-    artifact: Artifact,
-}
+
+/// Re-sign one saved original and keep the result beside it.
+///
+/// Local only: no Apple request is made here — it uses the certificate and profiles already
+/// obtained. Streams counted progress over `progress`; a closed window does not stop the run.
+///
+/// The returned build's path points at the library's managed copy, not at the staging file, which
+/// is removed only once the library has durably retained it.
+///
+/// # Errors
+///
+/// Returns the service's structured failure: an artifact missing, changed, or already signed; no
+/// signed-in session, selected team or certificate; or a library that could not keep the output —
+/// in which case the generated build is deliberately left on disk.
 #[tauri::command]
 pub async fn library_sign(
     artifact_id: String,
@@ -162,75 +176,15 @@ pub async fn library_sign(
     marker: String,
     progress: Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
-    state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<SavedSigned, String> {
-    let library = storage(&app)?;
-    let worker_library = library.clone();
-    let artifact_id = SourceId::parse(&artifact_id)?;
-    let source_id = artifact_id.clone();
-    let (source, path, _lease) =
-        tokio::task::spawn_blocking(move || worker_library.pin(&source_id))
-            .await
-            .map_err(|_| "Library worker stopped.")??;
-    if source.source_id.is_some() {
-        return Err("Select an original version to sign.".into());
-    }
-    let out_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Cannot locate application storage.")?
-        .join("signed");
-    let cleaned_marker = orbiter_core::signer::marker(&marker);
-    tracing::info!(operation = "signing", stage = "started");
-    let signed = state
-        .sign_ipa(
-            path,
-            out_dir,
-            orbiter_core::plan::WatchChoice::parse(&watch),
-            cleaned_marker.clone(),
-            Arc::new(AtomicBool::new(false)),
-            move |step| {
-                let _ = progress.send(step);
-            },
-        )
+) -> Result<Retained, String> {
+    let artifact_id = ArtifactId::parse(&artifact_id)?;
+    let sink = Arc::new(move |step| {
+        // A dropped channel means the window went away; the run finishes regardless.
+        let _ = progress.send(step);
+    });
+    runtime(&app)?
+        .signing()
+        .sign(&artifact_id, WatchChoice::parse(&watch), &marker, sink)
         .await
-        .inspect_err(
-            |error| tracing::info!(operation = "signing", stage = "failed", detail = %error),
-        )?;
-    // The same record the interface shows, so a terminal and a screenshot agree. These lines are
-    // how a signing run is diagnosed after the fact; without them a failure is only ever "it did
-    // not work" by the time anyone asks.
-    for line in &signed.log {
-        tracing::info!(operation = "signing", detail = %line);
-    }
-    tracing::info!(
-        operation = "signing",
-        stage = "finished",
-        bundles = signed.bundles_signed,
-        removed = signed.removed.len()
-    );
-    tokio::task::spawn_blocking(move || {
-        let artifact = library.retain_signed(
-            &artifact_id,
-            &signed,
-            signed
-                .team_tag
-                .clone()
-                .ok_or("Signing team metadata unavailable.")?,
-            orbiter_core::plan::WatchChoice::parse(&watch).label().into(),
-            cleaned_marker.unwrap_or_default(),
-        ).map_err(|e| format!("Signing completed, but saving it to the library failed: {e} The generated output has been retained."))?;
-        // The library is durable before removing this operation's staging output. `pin` is what
-        // is wanted here and `open` is not: both verify the managed copy's hash, but `open` also
-        // re-inspects the whole archive, and re-reading a 200 MB IPA that was just written to
-        // learn a path it already knows is a minute of nothing.
-        let (_, path, _lease) = library.pin(&artifact.id)?;
-        let _ = std::fs::remove_file(&signed.path);
-        let mut signed = signed;
-        signed.path = path.to_string_lossy().into_owned();
-        tracing::info!(operation = "signing", stage = "retained", artifact = %artifact.id);
-        Ok(SavedSigned { signed, artifact })
-    })
-    .await
-    .map_err(|_| "Signed artifact storage worker stopped.")?
+        .map_err(Into::into)
 }

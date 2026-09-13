@@ -11,6 +11,7 @@
 
 pub mod installation;
 pub mod runtime;
+pub mod signing;
 
 /// Somewhere for a running operation to report progress.
 ///

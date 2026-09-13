@@ -1,4 +1,27 @@
-//! Apple authentication only: no certificate, profile, device, or app mutations.
+//! Apple account sign-in, two-factor challenges, the developer session and team selection.
+//!
+//! This half owns *who Orbiter is signed in as*: authentication, the challenge flow, the
+//! session's thirty-minute lifetime, which team is selected, and signing out. What that
+//! session is then used **for** — registering a device, requesting a certificate, reserving
+//! identifiers, signing — lives in [`provisioning`], because those are the operations that
+//! change something at Apple and each needs its own acknowledgement.
+//!
+//! # Secrets
+//!
+//! A password and a verification code exist only for the duration of the request that uses
+//! them and are zeroized afterwards; neither is ever stored, logged, or returned. The session
+//! itself lives only in memory and expires.
+//!
+//! # Locking
+//!
+//! A blocking mutex guards the view and session, and is never held across an `await`. A
+//! separate async gate admits one Apple-contacting operation at a time.
+//!
+//! Nothing in this file mutates a certificate, a profile, a device registration or an app
+//! identifier; those all live in [`provisioning`].
+
+pub mod provisioning;
+
 use isideload::{
     auth::apple_account::{AppleAccount, TwoFactorCallbackParams, TwoFactorCallbackResponse},
     dev::{developer_session::DeveloperSession, teams::TeamsApi},
@@ -459,357 +482,6 @@ impl Accounts {
         inner.view.selected_team = Some(id);
         Ok(inner.view.clone())
     }
-    /// Register a connected iPhone on the selected team. The first Orbiter operation that writes
-    /// to Apple: it requires an explicit acknowledgement and returns no device identifier.
-    pub async fn register_device(
-        &self,
-        device_id: u32,
-        acknowledged: bool,
-    ) -> Result<crate::provisioning::Outcome, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
-        let (generation, mut developer, team, free) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-            inner.expire();
-            let signed_in = inner.session.is_some();
-            let selected = inner.view.selected_team.clone();
-            if let Some(refusal) =
-                crate::provisioning::refusal(acknowledged, selected.is_some(), signed_in)
-            {
-                return Err(refusal.into());
-            }
-            let team =
-                selected.ok_or("Select the signing team that should register this iPhone.")?;
-            let free = inner
-                .view
-                .teams
-                .iter()
-                .find(|candidate| candidate.id == team)
-                .and_then(|candidate| candidate.free)
-                // An unestablished membership is treated as the stricter free allowance.
-                .unwrap_or(true);
-            let session = inner
-                .session
-                .as_ref()
-                .ok_or("Sign in before registering an iPhone.")?;
-            (
-                inner.generation.clone(),
-                session.developer.clone(),
-                team,
-                free,
-            )
-        };
-        // The identifier is read here and handed straight to Apple; it never reaches the view.
-        let (udid, name) = crate::installation::verified_identity(device_id).await?;
-        let outcome =
-            crate::provisioning::register(&mut developer, &team, &udid, &name, free).await;
-        let inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-        if inner.generation != generation {
-            return Err("The account session changed during registration. Check the account at developer.apple.com before retrying.".into());
-        }
-        outcome
-    }
-    /// Register the plan's identifiers on the team and fetch their provisioning profiles.
-    ///
-    /// This is where Apple, not Orbiter, answers which capabilities the team may create: the
-    /// returned App IDs report what Apple actually enabled.
-    pub async fn prepare_provisioning(
-        &self,
-        path: std::path::PathBuf,
-        acknowledged: bool,
-        watch: crate::plan::WatchChoice,
-    ) -> Result<Preparation, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
-        let (generation, mut developer, team_id, free) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-            inner.expire();
-            let signed_in = inner.session.is_some();
-            let selected = inner.view.selected_team.clone();
-            if let Some(refusal) =
-                crate::provisioning::app_id_refusal(acknowledged, selected.is_some(), signed_in)
-            {
-                return Err(refusal.into());
-            }
-            let team_id = selected.ok_or("Select the signing team to provision on.")?;
-            let free = inner
-                .view
-                .teams
-                .iter()
-                .find(|candidate| candidate.id == team_id)
-                .and_then(|candidate| candidate.free)
-                .unwrap_or(true);
-            let session = inner
-                .session
-                .as_ref()
-                .ok_or("Sign in before provisioning.")?;
-            (
-                inner.generation.clone(),
-                session.developer.clone(),
-                team_id,
-                free,
-            )
-        };
-        let report = tokio::task::spawn_blocking(move || {
-            crate::inspect(&path, &std::sync::atomic::AtomicBool::new(false), |_| {})
-        })
-        .await
-        .map_err(|_| "Reading the IPA stopped.".to_string())?
-        .map_err(|error| error.to_string())?;
-        let plan = crate::plan::build(
-            &report,
-            &crate::plan::Target {
-                team_id: team_id.clone(),
-                kind: if free {
-                    crate::plan::TeamKind::Personal
-                } else {
-                    crate::plan::TeamKind::Paid
-                },
-                watch,
-            },
-        );
-        if !plan.blockers.is_empty() {
-            // Nothing is written while the plan cannot be carried out.
-            return Ok(Preparation {
-                app_ids: vec![],
-                profiles: vec![],
-                plan,
-            });
-        }
-        let mut app_ids = Vec::new();
-        let mut profiles = Vec::new();
-        for bundle in plan.bundles.iter().filter(|bundle| bundle.consumes_app_id) {
-            let (app_id, outcome) = crate::provisioning::ensure_app_id(
-                &mut developer,
-                &team_id,
-                &bundle.new_identifier,
-                &bundle.name,
-            )
-            .await?;
-            app_ids.push(outcome);
-            profiles
-                .push(crate::provisioning::fetch_profile(&mut developer, &team_id, &app_id).await?);
-        }
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-        if inner.generation != generation {
-            return Err("The account session changed during provisioning. Check developer.apple.com before retrying.".into());
-        }
-        if let Some(session) = inner.session.as_mut() {
-            session.profiles = profiles.clone();
-        }
-        Ok(Preparation {
-            app_ids,
-            profiles,
-            plan,
-        })
-    }
-    /// Withdraw the selected team's development certificates at Apple. Explicit, acknowledged,
-    /// never automatic: every app already signed with them stops launching.
-    pub async fn withdraw_certificates(&self, acknowledged: bool) -> Result<String, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
-        let (mut developer, team_id) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-            inner.expire();
-            let team_id = inner
-                .view
-                .selected_team
-                .clone()
-                .ok_or("Select the signing team whose certificate this applies to.")?;
-            let session = inner.session.as_ref().ok_or("Sign in first.")?;
-            (session.developer.clone(), team_id)
-        };
-        let message =
-            crate::certificates::withdraw_all(&mut developer, &team_id, acknowledged).await?;
-        // This session's identity, if any, rests on a certificate that no longer exists.
-        if let Ok(mut inner) = self.0.lock()
-            && let Some(session) = inner.session.as_mut()
-        {
-            session.identity = None;
-            session.profiles.clear();
-        }
-        Ok(message)
-    }
-    /// Sign the IPA with this session's certificate and the profiles Apple returned.
-    ///
-    /// The plan is rebuilt from the same inputs rather than remembered, so the build that is
-    /// signed is the build that was reviewed: a different IPA, team, or Watch choice produces a
-    /// different plan, and a plan whose profiles were never prepared is refused.
-    pub async fn sign_ipa(
-        &self,
-        path: std::path::PathBuf,
-        out_dir: std::path::PathBuf,
-        watch: crate::plan::WatchChoice,
-        // Already cleaned by `signer::marker`; `None` leaves every display name alone.
-        marker: Option<String>,
-        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        progress: impl FnMut(crate::signer::Progress) + Send + 'static,
-    ) -> Result<crate::signer::Signed, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
-        let (team_id, free, identity, profiles) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-            inner.expire();
-            let team_id = inner
-                .view
-                .selected_team
-                .clone()
-                .ok_or("Select the signing team before signing.")?;
-            let free = inner
-                .view
-                .teams
-                .iter()
-                .find(|candidate| candidate.id == team_id)
-                .and_then(|candidate| candidate.free)
-                .unwrap_or(true);
-            let session = inner.session.as_ref().ok_or("Sign in before signing.")?;
-            let identity = session
-                .identity
-                .clone()
-                .ok_or("Get a signing certificate before signing.")?;
-            (team_id, free, identity, session.profiles.clone())
-        };
-        let team_tag = crate::renewal::tag(&team_id);
-        // Signing is local and CPU-bound: it reads and writes a whole app bundle and computes
-        // hashes over every file, so it never runs on the async runtime's threads.
-        let mut signed = tokio::task::spawn_blocking(move || {
-            let report =
-                crate::inspect(&path, &cancel, |_| {}).map_err(|error| error.to_string())?;
-            let plan = crate::plan::build(
-                &report,
-                &crate::plan::Target {
-                    team_id,
-                    kind: if free {
-                        crate::plan::TeamKind::Personal
-                    } else {
-                        crate::plan::TeamKind::Paid
-                    },
-                    watch,
-                },
-            );
-            crate::signer::sign(
-                &path,
-                &out_dir,
-                &plan,
-                &profiles,
-                &identity,
-                marker.as_deref(),
-                &cancel,
-                progress,
-            )
-        })
-        .await
-        .map_err(|_| "Signing stopped unexpectedly.".to_string())??;
-        // The team the build was signed for, so the library can tell a countdown about this
-        // build apart from one about a build signed for somebody else.
-        signed.team_tag = Some(team_tag);
-        Ok(signed)
-    }
-    /// Reuse or obtain this session's development certificate for the selected team.
-    pub async fn request_certificate(
-        &self,
-        acknowledged: bool,
-    ) -> Result<crate::certificates::Outcome, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
-        let (generation, mut developer, team, existing, stored) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-            inner.expire();
-            let signed_in = inner.session.is_some();
-            let selected = inner.view.selected_team.clone();
-            if let Some(refusal) =
-                crate::certificates::refusal(acknowledged, selected.is_some(), signed_in)
-            {
-                return Err(refusal.into());
-            }
-            let team = selected.ok_or("Select the signing team the certificate belongs to.")?;
-            let email = inner.view.account.clone().unwrap_or_default();
-            let session = inner
-                .session
-                .as_ref()
-                .ok_or("Sign in before requesting a signing certificate.")?;
-            (
-                inner.generation.clone(),
-                session.developer.clone(),
-                team.clone(),
-                session
-                    .identity
-                    .as_ref()
-                    .map(|identity| identity.key.clone()),
-                crate::keychain::account(&email, &team),
-            )
-        };
-        // The key persists in this Mac's Keychain, so a restart reuses the certificate Apple
-        // already issued instead of spending another of the team's few certificate slots.
-        let key = match existing {
-            Some(key) => key,
-            None => {
-                let account = stored.clone();
-                let loaded = tokio::task::spawn_blocking(move || crate::keychain::load(&account))
-                    .await
-                    .map_err(|_| "Reading the stored signing key stopped.".to_string())??;
-                match loaded.as_deref().map(crate::certificates::decode_key) {
-                    Some(Ok(key)) => key,
-                    // A key that cannot be decoded is replaced rather than blocking the request.
-                    _ => {
-                        let key = tokio::task::spawn_blocking(crate::certificates::generate_key)
-                            .await
-                            .map_err(|_| "Signing key generation stopped.".to_string())??;
-                        let encoded = crate::certificates::encode_key(&key)?;
-                        let account = stored.clone();
-                        tokio::task::spawn_blocking(move || {
-                            crate::keychain::store(&account, &encoded)
-                        })
-                        .await
-                        .map_err(|_| "Storing the signing key stopped.".to_string())??;
-                        key
-                    }
-                }
-            }
-        };
-        let machine = hostname();
-        let (identity, outcome) =
-            crate::certificates::ensure(&mut developer, &team, &machine, &key).await?;
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-        if inner.generation != generation {
-            return Err("The account session changed while the certificate was issued. Check developer.apple.com before requesting another.".into());
-        }
-        if let Some(session) = inner.session.as_mut() {
-            session.identity = Some(identity);
-        }
-        Ok(outcome)
-    }
-    /// Remove this account and team's stored signing key from this Mac's Keychain.
-    pub async fn forget_signing_key(&self) -> Result<String, String> {
-        let stored = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
-            inner.expire();
-            let team = inner
-                .view
-                .selected_team
-                .clone()
-                .ok_or("Select the team whose stored signing key should be removed.")?;
-            let email = inner.view.account.clone().unwrap_or_default();
-            if let Some(session) = inner.session.as_mut() {
-                session.identity = None;
-            }
-            crate::keychain::account(&email, &team)
-        };
-        tokio::task::spawn_blocking(move || crate::keychain::forget(&stored))
-            .await
-            .map_err(|_| "Removing the stored signing key stopped.".to_string())??;
-        Ok("The stored signing key was removed from this Mac's Keychain. The certificate Apple issued for it still exists: revoke it at developer.apple.com if it is no longer wanted.".into())
-    }
     pub async fn refresh_teams(&self) -> Result<View, String> {
         let _gate = self
             .1
@@ -843,7 +515,7 @@ impl Accounts {
 }
 /// Machine label Apple shows beside the certificate. The computer name, bounded and stripped of
 /// anything that is not plain text, with a neutral fallback.
-fn hostname() -> String {
+pub(super) fn hostname() -> String {
     let raw = std::env::var("HOST")
         .or_else(|_| std::env::var("HOSTNAME"))
         .unwrap_or_default();

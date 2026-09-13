@@ -15,6 +15,7 @@
 //! |---|---|---|
 //! | Library metadata lock, lease table | [`crate::library::Library`] | `Arc` inside the library; cloning shares it |
 //! | Installation gate, prepared review, live status | [`InstallationService`] | `Arc` inside the service; cloning shares it |
+//! | Account session, teams, certificate | [`Accounts`] | `Arc` inside; cloning shares it |
 //! | Installation journal path | [`Runtime`] | Copied where needed; it is a path, not state |
 //!
 //! # Locking
@@ -24,7 +25,11 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{application::installation::InstallationService, library::Library};
+use crate::{
+    accounts::Accounts,
+    application::{installation::InstallationService, signing::SigningService},
+    library::Library,
+};
 
 /// Orbiter's shared, long-lived state.
 ///
@@ -36,6 +41,10 @@ pub struct Runtime {
     library: Library,
     /// The one installation service, holding the gate every install and removal contends for.
     installations: InstallationService,
+    /// The one signing service, sharing this runtime's library and account session.
+    signing: SigningService,
+    /// The one account session: who Orbiter is signed in as, and which team is selected.
+    accounts: Accounts,
     /// Where the current installation's durable journal lives.
     journal: PathBuf,
 }
@@ -51,8 +60,11 @@ impl Runtime {
     pub fn new(storage: &Path) -> Self {
         let library = Library::new(storage.join("library"));
         let journal = storage.join("last-install.json");
+        let accounts = Accounts::default();
         Self {
             installations: InstallationService::new(library.clone(), journal.clone()),
+            signing: SigningService::new(library.clone(), accounts.clone(), storage.join("signed")),
+            accounts,
             library,
             journal,
         }
@@ -72,6 +84,22 @@ impl Runtime {
     /// gate, which is what stops a saved file disappearing while a review points at it.
     pub fn installations(&self) -> InstallationService {
         self.installations.clone()
+    }
+
+    /// The one signing service for this runtime.
+    ///
+    /// Shares this runtime's library and account session, so a build it retains is visible to the
+    /// same library every other service sees.
+    pub fn signing(&self) -> SigningService {
+        self.signing.clone()
+    }
+
+    /// The one account session for this runtime.
+    ///
+    /// Authentication, two-factor challenges, session lifetime and team selection. What a session
+    /// is *used for* lives in [`SigningService`] and [`crate::accounts::provisioning`].
+    pub fn accounts(&self) -> Accounts {
+        self.accounts.clone()
     }
 
     /// Where the current installation's durable journal lives.

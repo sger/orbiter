@@ -360,23 +360,17 @@ async fn account_sign_ipa(
     marker: String,
     progress: tauri::ipc::Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
-    state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::signer::Signed, String> {
     let library = storage(&app)?;
     let artifact_id =
         tokio::task::spawn_blocking(move || library.resolve_or_import(&PathBuf::from(path)))
             .await
             .map_err(|_| "Library worker stopped.")??;
-    Ok(library_sign(
-        artifact_id.into_inner(),
-        watch,
-        marker,
-        progress,
-        app,
-        state,
+    Ok(
+        library_sign(artifact_id.into_inner(), watch, marker, progress, app)
+            .await?
+            .signed,
     )
-    .await?
-    .signed)
 }
 #[tauri::command]
 async fn account_forget_signing_key(
@@ -407,7 +401,6 @@ fn main() {
         .init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(orbiter_core::accounts::Accounts::default())
         .manage(Inspection::default())
         .manage(LogCapture::default())
         .setup(|app| {
@@ -423,6 +416,10 @@ fn main() {
                 // and says what is wrong rather than refusing to start.
                 tracing::warn!(operation = "library-recovery", detail = %error);
             }
+            // The account session is the runtime's, registered so `State<Accounts>` resolves to
+            // the same instance the signing service holds. Two sessions would mean signing never
+            // saw the one a person had signed in to.
+            app.manage(runtime.accounts());
             app.manage(runtime);
             Ok(())
         })
