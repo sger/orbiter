@@ -459,7 +459,7 @@ test("a locked iPhone cannot advance and provides focused help", async ({
       {
         id: 1,
         name: "Locked phone",
-        connection: "USB",
+        connection: "usb",
         state: "locked",
         message: "Unlock the iPhone and review trust in Finder.",
       },

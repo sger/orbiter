@@ -18,6 +18,36 @@ pub enum DeviceState {
     PairingUnverified,
     Unavailable,
 }
+/// How this Mac reaches a phone.
+///
+/// A named answer rather than display text, because behaviour depends on it — timeouts, the
+/// wording of a recovery instruction, and what a person is told an installation will cost. Text
+/// meant for a person is written where it is shown; deciding anything by matching it is how a
+/// reworded sentence silently changes what the application does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    /// A cable.
+    Usb,
+    /// Wi-Fi, relayed by this Mac's own device daemon to the phone's address.
+    Network,
+    /// The daemon named a transport this build does not model. Reported rather than guessed.
+    Unknown,
+}
+impl Transport {
+    /// Which transport to prefer when a phone offers more than one. Lower wins.
+    ///
+    /// A cable is faster and does not stop working when someone walks out of range, so it is
+    /// always chosen over Wi-Fi. An unmodelled transport is last: it may work, and it is not
+    /// something to select on a phone's behalf.
+    fn rank(self) -> u8 {
+        match self {
+            Self::Usb => 0,
+            Self::Network => 1,
+            Self::Unknown => 2,
+        }
+    }
+}
 #[derive(Debug, Serialize)]
 pub struct Device {
     /// Ephemeral transport ID, not the device's UDID. Do not persist as identity.
@@ -25,7 +55,15 @@ pub struct Device {
     pub name: Option<String>,
     pub product_type: Option<String>,
     pub ios_version: Option<String>,
-    pub connection: &'static str,
+    /// The transport this entry uses, and which any operation on it will use.
+    pub connection: Transport,
+    /// Another transport the same phone is reachable on, when there is one.
+    ///
+    /// Present so the window can say a phone is also on Wi-Fi without listing it twice. It names
+    /// only the kind of connection — no address, and no identifier tying the two entries together
+    /// beyond what is already shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternate: Option<Transport>,
     pub state: DeviceState,
     pub message: &'static str,
 }
@@ -71,6 +109,53 @@ fn failure(error: &IdeviceError) -> (DeviceState, &'static str) {
         ),
     }
 }
+/// How many transports the daemon's answer is read up to. A phone reachable two ways occupies two.
+const MAX_TRANSPORTS: usize = 32;
+/// How many phones are probed in one refresh, after collapsing each phone's transports into one.
+const MAX_PHONES: usize = 16;
+
+/// Name the transport the daemon reported.
+fn transport(connection: &Connection) -> Transport {
+    match connection {
+        Connection::Usb => Transport::Usb,
+        Connection::Network(_) => Transport::Network,
+        _ => Transport::Unknown,
+    }
+}
+
+/// Collapse each phone's transports into the one to use and another it is also reachable on.
+///
+/// A phone that is plugged in *and* on Wi-Fi is two entries to the daemon: two transport numbers,
+/// one UDID. Listing both would make three phones read as six, and would invite someone to pick
+/// the slower one by accident. So each phone appears once, on its preferred transport, and says
+/// what else it is reachable on.
+///
+/// `entries` is `(udid, transport number, transport)` in the daemon's order, which is preserved
+/// between phones and irrelevant within one — the preference decides that. The UDID is used to
+/// group and is then dropped: it does not reach the report.
+fn collapse(entries: Vec<(String, u32, Transport)>) -> Vec<(u32, Transport, Option<Transport>)> {
+    let mut phones: Vec<(String, Vec<(u32, Transport)>)> = Vec::new();
+    for (udid, id, transport) in entries {
+        match phones.iter_mut().find(|(known, _)| *known == udid) {
+            Some((_, seen)) => seen.push((id, transport)),
+            None => phones.push((udid, vec![(id, transport)])),
+        }
+    }
+    phones
+        .into_iter()
+        .filter_map(|(_, mut seen)| {
+            // Stable, so two transports of equal preference keep the daemon's order.
+            seen.sort_by_key(|(_, transport)| transport.rank());
+            let &(id, chosen) = seen.first()?;
+            let alternate = seen
+                .iter()
+                .map(|&(_, transport)| transport)
+                .find(|&transport| transport != chosen);
+            Some((id, chosen, alternate))
+        })
+        .collect()
+}
+
 /// List the iPhones attached to this Mac and how usable each one is.
 ///
 /// Read-only: it reports what the local daemon sees and which pairings already exist. It pairs
@@ -97,23 +182,36 @@ pub async fn discover() -> Discovery {
             };
         }
     };
+    // Bounded twice, for two different reasons: the daemon's answer is read up to a limit so a
+    // strange reply cannot become unbounded work, and the collapsed phones are limited again so
+    // the probe budget is spent per phone rather than per cable.
+    let entries = devices
+        .iter()
+        .take(MAX_TRANSPORTS)
+        .map(|raw| {
+            (
+                raw.udid.clone(),
+                raw.device_id,
+                transport(&raw.connection_type),
+            )
+        })
+        .collect();
     let mut result = Vec::new();
-    // Keep the complete refresh bounded even with many attached transports.
-    for raw in devices.into_iter().take(16) {
+    for (id, connection, alternate) in collapse(entries).into_iter().take(MAX_PHONES) {
+        let Some(raw) = devices.iter().find(|raw| raw.device_id == id) else {
+            continue;
+        };
         let mut device = Device {
-            id: raw.device_id,
+            id,
             name: None,
             product_type: None,
             ios_version: None,
-            connection: match raw.connection_type {
-                Connection::Usb => "USB",
-                Connection::Network(_) => "Network",
-                _ => "Unknown",
-            },
+            connection,
+            alternate,
             state: DeviceState::Unavailable,
             message: "Device did not respond in time. Unlock it, check the connection, and refresh.",
         };
-        match timeout(Duration::from_secs(3), probe(&raw, &mut device)).await {
+        match timeout(Duration::from_secs(3), probe(raw, &mut device)).await {
             Ok(Ok(())) => (),
             Ok(Err(e)) => {
                 (device.state, device.message) = failure(&e);
@@ -200,6 +298,79 @@ mod tests {
         ));
         assert!(!msg.contains("secret-device-identifier"));
     }
+    #[test]
+    /// A phone that is plugged in and on Wi-Fi is one phone. It is offered once, on the cable,
+    /// and says it is also reachable over Wi-Fi.
+    fn a_phone_on_two_transports_is_offered_once_and_prefers_the_cable() {
+        let collapsed = collapse(vec![
+            // The daemon's order puts Wi-Fi first here; the preference must still win.
+            ("phone-a".into(), 7, Transport::Network),
+            ("phone-a".into(), 3, Transport::Usb),
+        ]);
+        assert_eq!(
+            collapsed,
+            vec![(3, Transport::Usb, Some(Transport::Network))]
+        );
+    }
+
+    #[test]
+    /// A phone reachable one way says so, rather than implying a second connection exists.
+    fn a_phone_on_one_transport_names_no_alternative() {
+        assert_eq!(
+            collapse(vec![("phone-a".into(), 3, Transport::Network)]),
+            vec![(3, Transport::Network, None)]
+        );
+        // Two of the same transport is not an alternative either — it is one way of connecting.
+        assert_eq!(
+            collapse(vec![
+                ("phone-a".into(), 3, Transport::Usb),
+                ("phone-a".into(), 4, Transport::Usb),
+            ]),
+            vec![(3, Transport::Usb, None)]
+        );
+    }
+
+    #[test]
+    /// Different phones stay different, in the order the daemon gave them — collapsing is about
+    /// one phone's connections, and must never merge two phones or reorder the list.
+    fn separate_phones_are_never_merged_and_keep_their_order() {
+        let collapsed = collapse(vec![
+            ("phone-b".into(), 9, Transport::Network),
+            ("phone-a".into(), 3, Transport::Usb),
+            ("phone-b".into(), 2, Transport::Usb),
+        ]);
+        assert_eq!(
+            collapsed,
+            vec![
+                (2, Transport::Usb, Some(Transport::Network)),
+                (3, Transport::Usb, None),
+            ]
+        );
+    }
+
+    #[test]
+    /// A transport this build does not model is reported and is chosen last: it may well work,
+    /// and it is not something to select on someone's behalf while a known one is available.
+    fn an_unmodelled_transport_is_reported_but_never_preferred() {
+        assert_eq!(
+            transport(&Connection::Unknown("future".into())),
+            Transport::Unknown
+        );
+        let collapsed = collapse(vec![
+            ("phone-a".into(), 1, Transport::Unknown),
+            ("phone-a".into(), 2, Transport::Network),
+        ]);
+        assert_eq!(
+            collapsed,
+            vec![(2, Transport::Network, Some(Transport::Unknown))]
+        );
+        // Alone, it is still offered rather than hidden.
+        assert_eq!(
+            collapse(vec![("phone-a".into(), 1, Transport::Unknown)]),
+            vec![(1, Transport::Unknown, None)]
+        );
+    }
+
     #[test]
     /// Discovery always uses this machine's own device daemon, even when the environment names a
     /// remote one: a phone on someone else's desk is not a device this Mac may enumerate.

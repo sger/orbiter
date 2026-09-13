@@ -252,7 +252,7 @@ export async function mock(page: Page) {
                 name: "My iPhone",
                 product_type: "iPhoneTest",
                 ios_version: "18.0",
-                connection: "USB",
+                connection: "usb",
                 state: "paired",
                 message: "Pairing verified.",
               },

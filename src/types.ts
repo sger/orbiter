@@ -68,12 +68,17 @@ export type SigningProgress = {
 
 /// A connected iPhone as discovery reports it. `id` is an ephemeral transport identifier, never
 /// a UDID — nothing that crosses this boundary identifies a device durably.
+/// How this Mac reaches a phone. Mirrors `devices::Transport` in Rust; the window turns it into
+/// words where it is shown, and never decides anything by matching those words.
+export type Transport = "usb" | "network" | "unknown";
 export type Device = {
   id: number;
   name: string | null;
   product_type: string | null;
   ios_version: string | null;
-  connection: string;
+  connection: Transport;
+  /// Another transport the same phone is reachable on, when there is one.
+  alternate?: Transport | null;
   state:
     | "paired"
     | "locked"

@@ -3,6 +3,13 @@ import { discoverDevices, isTauri } from "../../ipc/commands";
 import type { Discovery } from "../../types";
 import { RefreshCw, Smartphone } from "lucide-react";
 import { Select } from "../../components/ui/Select";
+/// What each transport is called where a person reads it. "Wi-Fi" is the word people use for it;
+/// "Network" is what the device daemon calls it and means nothing to anyone else.
+const transports = {
+  usb: "USB",
+  network: "Wi-Fi",
+  unknown: "Unknown connection",
+};
 const labels = {
   paired: "Pairing verified",
   locked: "Locked",
@@ -65,7 +72,7 @@ export function Devices({
   const device = result?.devices.find((d) => String(d.id) === selected);
   useEffect(() => {
     onSelect?.(
-      device?.state === "paired" && device.connection === "USB"
+      device?.state === "paired" && device.connection === "usb"
         ? device.id
         : null,
     );
@@ -106,7 +113,7 @@ export function Devices({
         {result?.devices.map((d) => (
           <option value={String(d.id)} key={d.id}>
             {d.name ?? d.product_type ?? "Apple device (identity unverified)"} ·{" "}
-            {d.connection} · {labels[d.state]}
+            {transports[d.connection]} · {labels[d.state]}
           </option>
         ))}
       </Select>
