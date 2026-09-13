@@ -86,6 +86,11 @@ jobs:
 
       # Only a tag publishes, and it publishes as a draft: the physical-device checks in
       # docs/validation.md cannot run here, and nothing signs off on a build but a person.
+      #
+      # Pre-release, too, and that is about the software rather than the pipeline: the two-factor
+      # path has never run against Apple, installation interruption and recovery are unvalidated,
+      # and Windows is unverified. The flag says so where a version number cannot, and drops off a
+      # later tag without renumbering anything.
       - name: Draft the release
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -119,6 +124,7 @@ jobs:
           NOTES
           gh release create "${GITHUB_REF_NAME}" \
             --draft \
+            --prerelease \
             --title "Orbiter ${GITHUB_REF_NAME}" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             "$DMG" "$CHECKSUM"

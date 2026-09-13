@@ -8,7 +8,9 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The workflow runs the same checks CI does, builds, and uploads the DMG with a `.sha256` beside it. It stops at a draft on purpose: the physical-device checks in [validation.md](validation.md) cannot run on a CI runner, so nothing signs off on a build but a person. Download the draft's DMG, work through those checks, then publish.
+The workflow runs the same checks CI does, builds, and uploads the DMG with a `.sha256` beside it. It stops at a draft, marked pre-release, on purpose: the physical-device checks in [validation.md](validation.md) cannot run on a CI runner, so nothing signs off on a build but a person. Download the draft's DMG, work through those checks, then publish.
+
+The pre-release flag is about the software, not the pipeline: the two-factor path has never run against Apple, installation interruption and recovery are unvalidated, and Windows is unverified. Drop the flag on a later tag once those are exercised — no renumbering needed.
 
 `workflow_dispatch` runs the same build without publishing anything, for checking the pipeline itself.
 
