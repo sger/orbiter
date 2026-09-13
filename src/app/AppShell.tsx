@@ -37,7 +37,16 @@ export function AppShell({
       />
       <main className="app-main">
         <header>
-          <div className="wordmark">orbiter</div>
+          <div className="wordmark">
+            <img
+              className="brand-icon"
+              src="/orbiter.png"
+              alt=""
+              width={40}
+              height={40}
+            />
+            orbiter
+          </div>
           {account ? (
             <div className="header-account">
               <span className="header-account-name" title={account}>

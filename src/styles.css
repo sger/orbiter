@@ -164,7 +164,7 @@
     letter-spacing: -1px;
     display: flex;
     align-items: center;
-    gap: 22px;
+    gap: 10px;
   }
   .wordmark span {
     font-size: var(--text-caption);
@@ -2160,4 +2160,13 @@
 .sidebar-item span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.brand-icon {
+  display: block;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 10px;
+  object-fit: contain;
 }

@@ -3,7 +3,6 @@ import {
   Smartphone,
   Settings,
   FileArchive,
-  Orbit,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -59,7 +58,13 @@ export function Rail({
     <aside className="sidebar" aria-label="Workspace sidebar">
       <div className="sidebar-top">
         <a href={routeHref("ipas")} aria-label="Orbiter home">
-          <Orbit size={29} />
+          <img
+            className="brand-icon"
+            src="/orbiter.png"
+            alt=""
+            width={40}
+            height={40}
+          />
           {expanded && <span>orbiter</span>}
         </a>
       </div>
