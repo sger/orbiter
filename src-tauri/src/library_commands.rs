@@ -12,8 +12,8 @@ use super::*;
 use crate::failure::Failure;
 use orbiter_core::{
     application::{installation::Acknowledgement, runtime::Runtime, signing::Retained},
-    domain::identifiers::{AppId, ArtifactId, UsbDeviceId},
-    library::{Expiry, Imported, Library, Opened, Snapshot},
+    domain::identifiers::{AppId, ArtifactId, RememberedDeviceId, UsbDeviceId},
+    library::{Expiry, Imported, Library, Opened, Refresh, Snapshot},
     plan::WatchChoice,
 };
 /// The one library for this process.
@@ -93,6 +93,40 @@ pub async fn library_expiry(
     tokio::task::spawn_blocking(move || library.expiry(&artifact_id, tag.as_deref()))
         .await
         .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
+}
+/// What a re-sign of an expiring build would start from: the original it was made from, the watch
+/// decision and marker it was signed under, and the phone it went to.
+///
+/// Read-only and local. Answering does not begin anything — the window uses it to open the review
+/// screen with the previous answers filled in, and that screen still asks for every acknowledgement
+/// it asked for the first time. `None` means the original is gone, so there is nothing to offer.
+#[tauri::command]
+pub async fn library_refresh(
+    artifact_id: String,
+    app: tauri::AppHandle,
+) -> Result<Option<Refresh>, Failure> {
+    let library = storage(&app)?;
+    let artifact_id = ArtifactId::parse(&artifact_id)?;
+    tokio::task::spawn_blocking(move || library.refresh(&artifact_id))
+        .await
+        .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
+}
+/// The library's tag for the phone currently on the cable, so the window can say whether it is the
+/// one a build was installed to.
+///
+/// The UDID is read inside the core crate and never crosses this boundary; what comes back is a
+/// salted hash that means nothing outside this library. Reports an error rather than a guess when
+/// the phone cannot be identified: "cannot tell" and "a different phone" are not the same answer.
+#[tauri::command]
+pub async fn library_device_tag(
+    device_id: u32,
+    app: tauri::AppHandle,
+) -> Result<RememberedDeviceId, Failure> {
+    runtime(&app)?
+        .remembered_device(UsbDeviceId::new(device_id))
+        .await
         .map_err(Into::into)
 }
 /// One app icon's bytes. Fetched per hash and cached in the window, so a library of many apps

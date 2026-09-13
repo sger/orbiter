@@ -875,3 +875,153 @@ test("a structured backend failure is shown as its message, not as an object", a
   await expect(alert).toContainText("Library storage is corrupt");
   await expect(alert).not.toContainText("object Object");
 });
+
+/// Seed a signed build that was installed and has now expired, which is the only state the refresh
+/// action exists for. Written directly rather than driven through signing and installing: those
+/// paths have their own tests, and what is under test here is what happens *after* the seven days.
+async function expired(page: Page) {
+  await page.evaluate(() => {
+    const w = window as any;
+    // A Watch app and a marker that is not the default, so a prefill can be told apart from a
+    // control that simply started out that way.
+    w.__watch = true;
+    w.__addSigned();
+    w.__library.artifacts.find((a: any) => a.id === "signed-1").marker = "beta";
+    w.__library.devices = [
+      { id: "salted-device", name: "My iPhone", last_seen_unix: 200 },
+    ];
+    w.__library.attempts = [
+      {
+        id: "attempt-1",
+        app_id: "app-1",
+        artifact_id: "signed-1",
+        device_id: "salted-device",
+        app_name: "Library App",
+        identifier: "test.library.signed",
+        version: "preview",
+        build: "alpha",
+        sha256: "b".repeat(64),
+        signed: true,
+        expires: "2099-01-01T00:00:00Z",
+        started_unix: 200,
+        finished_unix: 201,
+        stage: "installed",
+        message: "iOS reported completion.",
+      },
+    ];
+    localStorage.setItem("test-library", JSON.stringify(w.__library));
+  });
+  await counting(page, [
+    entry({
+      artifact_id: "signed-1",
+      standing: { state: "expired", days: 2 },
+      urgent: true,
+      sentence:
+        "Library App stopped launching 2 days ago. Re-sign and install it again.",
+    }),
+  ]);
+}
+
+test("a dead build's countdown opens the original with the previous answers filled in", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await expired(page);
+
+  await page
+    .getByRole("button", { name: "Sign and install again", exact: true })
+    .click();
+  // The original, never the signed build: a spent profile cannot be signed again.
+  await expect(page).toHaveURL(/#\/ipas\/app-1\/workspace\/version-1$/);
+  const note = page.locator("[data-refresh='true']");
+  await expect(note).toContainText("Signing Library App again");
+  // Named, so a person with two testers is not sent to re-sign for the wrong phone.
+  await expect(note).toContainText("My iPhone");
+  // Filled in from what the expired build was signed under. The control lives further into the
+  // flow, so reaching it is the only way to assert the prefill actually landed rather than
+  // assuming the state behind it.
+  await page.getByRole("button", { name: "Check app & iPhone" }).click();
+  await page
+    .getByRole("button", { name: "Re-sign with my Apple account" })
+    .click();
+  await page.getByLabel("Apple account email").fill("local@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page.getByRole("checkbox", { name: /I agree to authenticate/ }).check();
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+  // Both answers the expired build was signed under, neither of them a default.
+  await expect(page.getByLabel("Included Watch app")).toHaveValue("remove");
+  await page.getByText("Advanced signing options", { exact: true }).click();
+  await expect(page.getByLabel("App name marker")).toHaveValue("beta");
+  // Filled in, not decided: nothing was signed on the way here.
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__calls.filter(
+          (c: any) => c.cmd === "library_execute_preparation",
+        ).length,
+    ),
+  ).toBe(0);
+});
+
+test("a refresh says when the phone on the cable is a different one, and nothing when it cannot tell", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await expired(page);
+  await page.evaluate(() => {
+    (window as any).__deviceTag = "a-different-phone";
+  });
+
+  await page
+    .getByRole("button", { name: "Sign and install again", exact: true })
+    .click();
+  const note = page.locator("[data-refresh='true']");
+  await expect(note).toContainText("not the one that build was installed to");
+  await expect(note).toContainText(
+    "does not replace anything on the other one",
+  );
+
+  // Not being able to identify the phone is not evidence that it is the wrong one. Saying so
+  // would send a person looking for a problem that is not there.
+  await page.evaluate(() => {
+    const w = window as any;
+    delete w.__deviceTag;
+    w.__deviceTagError = "Selected iPhone disconnected. Select it again.";
+  });
+  await page.reload();
+  await expect(page.locator("[data-refresh='true']")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Install an app" }),
+  ).toBeVisible();
+});
+
+test("a countdown whose original is gone still counts down and offers nothing", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await expired(page);
+  await expect(
+    page.getByRole("button", { name: "Sign and install again", exact: true }),
+  ).toBeVisible();
+
+  // The saved file is removed; the history, and the fact that a tester's app has stopped
+  // working, both survive it. What does not survive is the ability to do anything about it.
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__library.artifacts.forEach((a: any) => {
+      if (a.id === "version-1") a.deleted = true;
+    });
+    localStorage.setItem("test-library", JSON.stringify(w.__library));
+    window.dispatchEvent(new Event("library-changed"));
+  });
+  await page.reload();
+  await expect(page.locator(".renewal")).toContainText(
+    "stopped launching 2 days ago",
+  );
+  await expect(
+    page.getByRole("button", { name: "Sign and install again", exact: true }),
+  ).toHaveCount(0);
+});

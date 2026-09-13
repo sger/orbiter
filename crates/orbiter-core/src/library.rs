@@ -209,6 +209,26 @@ pub struct Expiry {
     pub urgent: bool,
 }
 
+/// The starting point for re-signing a build whose seven days have run out.
+///
+/// Deliberately not a plan and not an action: it is the set of answers a person already gave, so
+/// the review screen can open with them filled in rather than asking again. Every one of them
+/// stays editable, and the review screen still asks for the same acknowledgements it always did.
+#[derive(Clone, Serialize)]
+pub struct Refresh {
+    pub app_id: AppId,
+    /// The original to sign again — never the expiring signed build itself.
+    pub artifact_id: ArtifactId,
+    pub name: String,
+    /// What the expired build was signed under, so a refresh does not silently produce a
+    /// different app. Shown for confirmation; never applied without one.
+    pub watch: Option<String>,
+    pub marker: Option<String>,
+    /// The phone that build went to, so the picker can say whether this is the same one.
+    pub device_id: Option<RememberedDeviceId>,
+    pub device_name: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct Imported {
     pub app_id: AppId,
@@ -847,6 +867,66 @@ impl Library {
                 found.urgent = crate::renewal::urgent(found.standing, found.bearing);
                 found
             }))
+    }
+    /// What a re-sign of an expiring build would start from, if it can still be started.
+    ///
+    /// A signed build cannot be signed again: its profile is already spent and its identifiers
+    /// already rewritten, so the thing to sign is the original it was made from. That original is
+    /// what `source_id` names, and an installed *import* is its own source. Either way the answer
+    /// is one artifact that still exists, still has its bytes, and has not been removed — and when
+    /// none of that holds the answer is `None`, because an offer to refresh something Orbiter can
+    /// no longer open is an offer to fail one click later.
+    ///
+    /// The watch decision and marker come back alongside it because they are what the previous
+    /// signing ran under, and a refresh that quietly changed either would produce a different app
+    /// than the one that expired. They are carried as a suggestion for the review screen to show,
+    /// never as a decision: removing a Watch app stays a consequence a person accepts each time.
+    ///
+    /// Nothing here signs, contacts Apple, or touches the phone. It reads the manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the manifest cannot be read.
+    pub fn refresh(&self, artifact_id: &ArtifactId) -> Result<Option<Refresh>> {
+        let _lock = self.lock()?;
+        let m = self.read()?;
+        let installed = m.artifacts.iter().find(|a| &a.id == artifact_id);
+        let Some(installed) = installed else {
+            return Ok(None);
+        };
+        // A signed build points at the original it came from; an import is its own original.
+        let origin_id = installed.source_id.as_ref().unwrap_or(&installed.id);
+        let Some(origin) = m.artifacts.iter().find(|a| &a.id == origin_id) else {
+            return Ok(None);
+        };
+        if origin.deleted {
+            return Ok(None);
+        }
+        // The phone it went to, taken from the most recent installation of this exact build. A
+        // refresh is for a tester holding a device, so naming the wrong one would be worse than
+        // naming none.
+        let device = m
+            .attempts
+            .iter()
+            .filter(|a| a.artifact_id == installed.id && a.stage == Stage::Installed)
+            .max_by_key(|a| a.started_unix)
+            .and_then(|a| {
+                m.devices
+                    .iter()
+                    .find(|d| d.id == a.device_id)
+                    .map(|d| (d.id.clone(), d.name.clone()))
+            });
+        Ok(Some(Refresh {
+            app_id: origin.app_id.clone(),
+            artifact_id: origin.id.clone(),
+            name: origin.name.clone(),
+            // Taken from the build that expired rather than the original: the original carries
+            // whatever it was imported with, which is not what was installed.
+            watch: installed.watch.clone(),
+            marker: installed.marker.clone(),
+            device_id: device.as_ref().map(|(id, _)| id.clone()),
+            device_name: device.map(|(_, name)| name),
+        }))
     }
     /// Compatibility for older path-based clients. Resolve a managed path back to its exact
     /// retained artifact; external paths are imported as originals before any operation.

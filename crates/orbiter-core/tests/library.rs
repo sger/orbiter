@@ -841,3 +841,74 @@ fn concurrent_imports_of_different_bytes_keep_both() {
     assert!(restarted.open(&left.artifact_id).is_ok());
     assert!(restarted.open(&right.artifact_id).is_ok());
 }
+
+#[test]
+/// A refresh starts from the original, never from the build that expired: a signed build's
+/// identifiers are already rewritten and its profile already spent, so signing it again would
+/// produce something Apple has no record of issuing.
+fn a_refresh_starts_from_the_original_and_carries_the_previous_answers() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let (source, signed) = installed(&lib, "one", "job-one", "udid-one", 2_000_000);
+
+    let refresh = lib
+        .refresh(&signed)
+        .unwrap()
+        .expect("an installed build can be refreshed");
+    assert_eq!(refresh.artifact_id, source);
+    assert_ne!(refresh.artifact_id, signed);
+    // The answers the previous signing ran under, so the review screen can open with them filled
+    // in rather than asking a person to remember what they chose a week ago.
+    assert_eq!(refresh.watch.as_deref(), Some("keep"));
+    assert_eq!(refresh.marker.as_deref(), Some("test"));
+    // Named, so a person with two testers is not sent to re-sign for the wrong phone.
+    assert_eq!(refresh.device_name.as_deref(), Some("Tester phone"));
+    assert_eq!(
+        refresh.device_id.as_ref(),
+        lib.snapshot().unwrap().devices.first().map(|d| &d.id)
+    );
+}
+
+#[test]
+/// Asking about an original returns that same original: an installed import is its own source, and
+/// there is nothing further back to go to.
+fn refreshing_an_installed_import_returns_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let (source, _) = installed(&lib, "one", "job-one", "udid-one", 2_000_000);
+
+    let refresh = lib
+        .refresh(&source)
+        .unwrap()
+        .expect("the original is known");
+    assert_eq!(refresh.artifact_id, source);
+}
+
+#[test]
+/// With the original removed there is nothing to sign, so nothing is offered. An action that can
+/// only fail one click later is worse than no action: the history stays, and it stays honest about
+/// what it can still do.
+fn a_refresh_is_not_offered_once_the_original_is_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let (source, signed) = installed(&lib, "one", "job-one", "udid-one", 2_000_000);
+    let app = lib.snapshot().unwrap().apps[0].id.clone();
+    lib.remove(&app, Some(&source)).unwrap();
+
+    assert!(lib.refresh(&signed).unwrap().is_none());
+    // The countdown is unaffected: history survives the saved file being removed, and a person
+    // still needs to be told the app on the phone has stopped working.
+    assert!(lib.expiry(&signed, None).unwrap().is_some());
+}
+
+#[test]
+/// An artifact the library never held is not a refresh with unknown parts; it is not a refresh.
+fn an_unknown_build_has_no_refresh() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    assert!(
+        lib.refresh(&ArtifactId::new("nothing-here"))
+            .unwrap()
+            .is_none()
+    );
+}

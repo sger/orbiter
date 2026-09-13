@@ -583,6 +583,8 @@ fn main() {
             library_remove,
             library_prepare_install,
             library_expiry,
+            library_refresh,
+            library_device_tag,
             library_icon,
             library_reclaim,
             library_prepare_provisioning,

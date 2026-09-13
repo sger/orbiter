@@ -15,11 +15,12 @@ import { Accounts } from "../team/Accounts";
 import { Devices } from "../device/Devices";
 import { AppIcon } from "../library/AppIcon";
 import { useLibraryDrop } from "../library/useLibraryDrop";
-import type { Opened } from "../library/types";
+import type { Opened, Refresh } from "../library/types";
 import type { AccountView, TeamStatus, WatchChoice } from "../../types";
 import {
   isTauri,
   libraryChanged,
+  libraryDeviceTag,
   libraryImport,
   libraryOpen,
   withdrawCertificates,
@@ -30,6 +31,8 @@ import { HelpPanel } from "../help/HelpPanel";
 import type { Consents } from "./types";
 import { useLibraryExpiry } from "../renew/useLibraryExpiry";
 import { ExpiryLine } from "../renew/ExpiryLine";
+import { claimRefresh } from "../renew/intent";
+import { RefreshNote } from "../renew/RefreshNote";
 import "./guided.css";
 const noConsent: Consents = {
   registration: false,
@@ -65,6 +68,12 @@ export function GuidedWorkspace({
     [accepted, setAccepted] = useState(false);
   const [withdrawAck, setWithdrawAck] = useState(false);
   const [help, setHelp] = useState<string | null>(null);
+  /// The build this workspace was opened to replace, when it was opened from a countdown.
+  const [refreshing, setRefreshing] = useState<Refresh | null>(null);
+  /// Whether the phone on the cable is the one that expiring build went to. `null` while nothing
+  /// is selected or the phone cannot be identified — which is not the same as "a different one",
+  /// and is not reported as one.
+  const [sameDevice, setSameDevice] = useState<boolean | null>(null);
   const flow = useGuidedFlow(
     selected,
     deviceId,
@@ -107,6 +116,43 @@ export function GuidedWorkspace({
   useEffect(() => {
     if (flow.job && !flow.busy) refresh();
   }, [flow.job?.stage, flow.busy, refresh]);
+  // Opened from a countdown: fill in what the expired build was signed under. A person should not
+  // have to remember a week later what they chose, and a refresh that quietly changed either
+  // answer would produce a different app than the one that stopped working. Both controls stay
+  // editable, and nothing further is decided here — the review screen still asks for every
+  // acknowledgement it asked for the first time.
+  useEffect(() => {
+    const claimed = claimRefresh(item?.artifact.id ?? null);
+    if (!claimed) return;
+    setRefreshing(claimed);
+    // "undecided" is not a decision, and an unrecognised value must not become one: the Watch
+    // control stays as it is and asks, exactly as it does for a build with no history.
+    if (claimed.watch === "remove" || claimed.watch === "sign")
+      setWatch(claimed.watch);
+    if (claimed.marker !== null) setMarker(claimed.marker);
+  }, [item?.artifact.id]);
+  // Whether this is the same phone. Asked in Rust, where the salt lives; the UDID never reaches
+  // the window. A failure leaves the question unanswered rather than answering it wrongly —
+  // telling someone this is the wrong phone when Orbiter could not tell would send them looking
+  // for a problem that is not there.
+  useEffect(() => {
+    if (!refreshing?.device_id || deviceId === null) {
+      setSameDevice(null);
+      return;
+    }
+    let disposed = false;
+    const expected = refreshing.device_id;
+    libraryDeviceTag(deviceId)
+      .then((tag) => {
+        if (!disposed) setSameDevice(tag === expected);
+      })
+      .catch(() => {
+        if (!disposed) setSameDevice(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [refreshing?.device_id, deviceId]);
   useEffect(() => {
     setAccepted(false);
   }, [flow.review?.token]);
@@ -305,6 +351,7 @@ export function GuidedWorkspace({
             </div>
           )}
           <div hidden={flow.stage !== "choose"} className="guided-section">
+            <RefreshNote refresh={refreshing} sameDevice={sameDevice} />
             <Devices
               onSelect={setDeviceId}
               paused={locked || flow.stage !== "choose"}

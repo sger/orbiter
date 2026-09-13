@@ -16,12 +16,19 @@ export function ExpiryLine({
   variant,
   canResign,
   onResign,
+  onRefresh,
+  refreshLabel = "Re-sign now",
 }: {
   expiry: LibraryExpiry | null;
   /// `line` sits among the hints of a row; `banner` is the two-state block above an action.
   variant: "line" | "banner";
   canResign?: boolean;
   onResign?: () => void;
+  /// Offered where re-signing is not on this screen: it opens the one that does it, with the
+  /// previous answers filled in, and asks for nothing on the way. Absent when the original the
+  /// build was made from is gone, because there would be nothing for that screen to open.
+  onRefresh?: () => void;
+  refreshLabel?: string;
 }) {
   if (!expiry) return null;
   if (variant === "line") {
@@ -48,6 +55,14 @@ export function ExpiryLine({
       {expiry.urgent && canResign && onResign && (
         <button className="primary" onClick={onResign}>
           Re-sign now
+        </button>
+      )}
+      {onRefresh && (
+        <button
+          className={expiry.urgent ? "primary" : "text-button"}
+          onClick={onRefresh}
+        >
+          {refreshLabel}
         </button>
       )}
     </section>

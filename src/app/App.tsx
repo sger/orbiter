@@ -9,6 +9,7 @@ import { HelpPage } from "../features/help/HelpPage";
 import { AppShell } from "./AppShell";
 import { useAppRoute, type AppRoute } from "./navigation";
 import { message } from "../ipc/failure";
+import { forgetRefresh } from "../features/renew/intent";
 
 export function App() {
   const route = useAppRoute();
@@ -140,6 +141,10 @@ export function App() {
             selectedId={selected?.artifact.id}
             onInstall={() => {
               if (busy || opening) return;
+              // Starting a fresh install is a different intention from refreshing an expiring
+              // build, so an intent nobody followed through on is dropped rather than left to
+              // fill in answers about a build this one has nothing to do with.
+              forgetRefresh();
               setSelected(null);
               window.location.hash = "/ipas/workspace";
             }}

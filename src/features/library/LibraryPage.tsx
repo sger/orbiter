@@ -3,6 +3,7 @@ import { useLibraryDrop } from "./useLibraryDrop";
 import { useRenewal } from "../renew/useRenewal";
 import { RenewalBanner } from "../renew/RenewalBanner";
 import { ExpiryLine } from "../renew/ExpiryLine";
+import { useRefresh } from "../renew/useRefresh";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Box, Plus, Search, ArrowLeft, ArrowRight, Trash2 } from "lucide-react";
@@ -221,6 +222,12 @@ export function LibraryPage({
   // Longest-lived first from Rust, so the first entry for an app is the copy still launching.
   const headline = (id: string) =>
     data.expiries.find((e) => e.app_id === id) ?? null;
+  // Whether the build this page leads with can still be signed again, answered in Rust. Asked for
+  // the opened app only: it is the one screen with room to act on the answer.
+  const { target: refreshTarget, start: startRefresh } = useRefresh(
+    appId ? (headline(appId)?.artifact_id ?? null) : null,
+  );
+  const refreshable = !!refreshTarget;
   const installedExpiry = (attempt?: Attempt) =>
     attempt
       ? `${attempt.signed ? "Installed signed build" : "Installed original profile"}: ${expiry(attempt.expires)}`
@@ -381,7 +388,14 @@ export function LibraryPage({
                 </button>
               ))}
             </nav>
-            <ExpiryLine expiry={headline(app.id)} variant="banner" />
+            <ExpiryLine
+              expiry={headline(app.id)}
+              variant="banner"
+              // Only when the original is still here: see `useRefresh`. Re-signing itself is not
+              // on this page, so this opens the page that does it rather than starting anything.
+              onRefresh={refreshable && !busy ? startRefresh : undefined}
+              refreshLabel="Sign and install again"
+            />
             {tab === "Versions" && (
               <div className="card library-card">
                 <p className="hint">
