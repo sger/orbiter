@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { accountSignOut } from "../ipc/commands";
 import type { AppRoute } from "./navigation";
 import { Rail } from "./Rail";
+import { AttentionNotice } from "../features/renew/AttentionNotice";
+import { useAttention } from "../features/renew/useAttention";
 
 export function AppShell({
   busy = false,
@@ -27,6 +29,7 @@ export function AppShell({
     return () => query.removeEventListener("change", update);
   }, []);
   const expanded = preference ?? wide;
+  const attention = useAttention();
   return (
     <div className="shell" data-expanded={expanded}>
       <Rail
@@ -66,6 +69,16 @@ export function AppShell({
             </span>
           )}
         </header>
+        {/* Wherever a person happens to be, and not while they are in the middle of something:
+            an operation already has their attention, and a build that has run out will still have
+            run out when it finishes. */}
+        {!busy && (
+          <AttentionNotice
+            urgent={attention.urgent}
+            soon={attention.soon}
+            route={route}
+          />
+        )}
         {children}
       </main>
     </div>

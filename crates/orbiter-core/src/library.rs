@@ -207,6 +207,8 @@ pub struct Expiry {
     pub bearing: crate::renewal::Bearing,
     pub sentence: String,
     pub urgent: bool,
+    /// Still launching, but not for long. The step before `urgent`, and never true beside it.
+    pub soon: bool,
 }
 
 /// The starting point for re-signing a build whose seven days have run out.
@@ -865,6 +867,7 @@ impl Library {
                 found.sentence =
                     crate::renewal::line(&found.app_name, found.standing, found.bearing);
                 found.urgent = crate::renewal::urgent(found.standing, found.bearing);
+                found.soon = crate::renewal::due_soon(found.standing, found.bearing);
                 found
             }))
     }
@@ -1496,6 +1499,7 @@ fn expiries(m: &Manifest, now: std::time::SystemTime) -> Vec<Expiry> {
                 bearing,
                 sentence: crate::renewal::line(&a.app_name, standing, bearing),
                 urgent: crate::renewal::urgent(standing, bearing),
+                soon: crate::renewal::due_soon(standing, bearing),
             })
         })
         .collect();

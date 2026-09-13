@@ -70,6 +70,8 @@ export interface LibraryExpiry {
   bearing: Bearing;
   sentence: string;
   urgent: boolean;
+  /// Still launching, but not for long. The step before `urgent`, never true beside it.
+  soon: boolean;
 }
 /// The starting point for re-signing a build whose seven days have run out.
 ///

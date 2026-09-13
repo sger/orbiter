@@ -676,6 +676,7 @@ const entry = (over: Record<string, unknown> = {}) => ({
   sentence:
     "Library App was installed from this team and stops launching in 5 days.",
   urgent: false,
+  soon: false,
   ...over,
 });
 
@@ -1024,4 +1025,127 @@ test("a countdown whose original is gone still counts down and offers nothing", 
   await expect(
     page.getByRole("button", { name: "Sign and install again", exact: true }),
   ).toHaveCount(0);
+});
+
+/// Both escalations, as Rust hands them over: still launching but nearly out, and already gone.
+const nearly = (over: Record<string, unknown> = {}) =>
+  entry({
+    standing: { state: "valid", days: 2 },
+    soon: true,
+    sentence:
+      "Library App was installed from this team and stops launching in 2 days.",
+    ...over,
+  });
+const dead = (over: Record<string, unknown> = {}) =>
+  entry({
+    standing: { state: "expired", days: 2 },
+    urgent: true,
+    sentence:
+      "Library App stopped launching 2 days ago. Re-sign and install it again.",
+    ...over,
+  });
+
+test("a countdown escalates before it runs out, and only then", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+
+  // Most of the seven days is background. A line that is always red is one nobody reads by the
+  // time it means something.
+  await counting(page, [entry()]);
+  const banner = page.locator(".renewal");
+  await expect(banner).not.toHaveClass(/renewal-soon|renewal-urgent/);
+
+  await counting(page, [nearly()]);
+  await expect(banner).toHaveClass(/renewal-soon/);
+  await expect(banner).not.toHaveClass(/renewal-urgent/);
+  await expect(banner).toContainText("stops launching in 2 days");
+
+  // And hands over rather than overlapping: the two states are never shown at once.
+  await counting(page, [dead()]);
+  await expect(banner).toHaveClass(/renewal-urgent/);
+  await expect(banner).not.toHaveClass(/renewal-soon/);
+});
+
+test("a build running out is said once, wherever a person is, and links to the app", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await counting(page, [nearly()]);
+
+  // The point of the line: it reaches someone who opened Orbiter to do something else entirely.
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  const notice = page.locator("[data-attention]");
+  await expect(notice).toHaveAttribute("data-attention", "soon");
+  // Rust's own sentence, unchanged, so three screens cannot word one fact three ways.
+  await expect(notice).toContainText("stops launching in 2 days");
+  await expect(notice).toContainText("My iPhone");
+
+  await notice.getByRole("link").click();
+  await expect(page).toHaveURL(/#\/ipas\/app-1$/);
+});
+
+test("a dead build outranks one that is merely close, and neither interrupts an install", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await counting(page, [
+    nearly(),
+    dead({ attempt_id: "attempt-2", app_name: "Other App" }),
+  ]);
+
+  // An app's own pages already carry its countdown, so the line does not repeat it above them.
+  await expect(page.locator("[data-attention]")).toHaveCount(0);
+
+  // One line, and only the worst state it has: saying both at once makes neither legible.
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  const notice = page.locator("[data-attention]");
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toHaveAttribute("data-attention", "urgent");
+
+  // An app that was never installed is not warned about at all.
+  await counting(page, []);
+  await expect(notice).toHaveCount(0);
+});
+
+test("nothing running out interrupts an installation, and it is said once that is over", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await page.evaluate(() => {
+    (window as any).__addSigned();
+    (window as any).__holdInstall = true;
+  });
+  // A build of another app, so what is under test is the operation rather than the route: this
+  // line would otherwise be suppressed simply for being about the app on screen.
+  await counting(page, [dead({ app_id: "app-2", app_name: "Other App" })]);
+  await expect(page.locator("[data-attention]")).toBeVisible();
+
+  await page
+    .getByRole("link", { name: "Review installation", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Check app & iPhone" }).click();
+  await page
+    .getByRole("button", { name: "Review installation", exact: true })
+    .click();
+  await page
+    .getByRole("checkbox", { name: /I authorize installation/ })
+    .check();
+  await page.getByRole("button", { name: "Install on iPhone" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Installing on your iPhone" }),
+  ).toBeVisible();
+
+  // An operation already has a person's attention, and holds it even where the news is about a
+  // different app entirely: a build that has run out will still have run out in a minute.
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.locator("[data-attention]")).toHaveCount(0);
+
+  // Once it is over, the news it was holding back is said.
+  await page.evaluate(() => (window as any).__finishInstall());
+  await expect(page.locator("[data-attention]")).toBeVisible();
 });

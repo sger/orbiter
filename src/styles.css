@@ -534,6 +534,19 @@
     color: var(--color-danger);
     margin: 18px 0 0;
   }
+  /* A build that has already stopped launching outranks one that is about to: `.notice` is
+     the warning weight, and this is the state where somebody's app is dead right now. */
+  .notice-urgent {
+    background: var(--color-danger-surface);
+    border-color: var(--color-danger-line);
+    color: var(--color-danger);
+  }
+  .notice svg {
+    flex-shrink: 0;
+  }
+  .notice a {
+    color: inherit;
+  }
   .error button {
     margin-left: auto;
     background: none;
@@ -1513,6 +1526,22 @@
   }
   .renewal-urgent svg {
     color: var(--color-danger);
+  }
+  /* Still launching, and not for much longer. Weighted between the quiet line and the alarm on
+     purpose: re-signing needs a Mac, a phone and an Apple sign-in, so the warning has to arrive
+     while there is still time to arrange them — and has to stay distinguishable from the state
+     where it is already too late. */
+  .renewal-soon {
+    border-color: var(--color-warning-line);
+    background: var(--color-warning-surface);
+    color: var(--color-warning);
+  }
+  .renewal-soon svg {
+    color: var(--color-warning);
+  }
+  /* The same escalation among the hints of a row, where there is no room for a block. */
+  .hint[data-soon="true"] {
+    color: var(--color-warning);
   }
 }
 
