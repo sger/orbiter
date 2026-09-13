@@ -70,6 +70,25 @@ export interface LibraryExpiry {
   bearing: Bearing;
   sentence: string;
   urgent: boolean;
+  /// Still launching, but not for long. The step before `urgent`, never true beside it.
+  soon: boolean;
+}
+/// The starting point for re-signing a build whose seven days have run out.
+///
+/// Not a plan and not an action: the answers a person already gave, so the review screen can open
+/// with them filled in rather than asking again. Every one stays editable, and that screen still
+/// asks for the same acknowledgements it asked for the first time.
+export interface Refresh {
+  app_id: string;
+  /// The original to sign again — never the expiring signed build itself.
+  artifact_id: string;
+  name: string;
+  /// What the expired build was signed under. Shown for confirmation, never applied silently.
+  watch: string | null;
+  marker: string | null;
+  /// The phone that build went to, as this library's tag for it.
+  device_id: string | null;
+  device_name: string | null;
 }
 export interface LibrarySnapshot {
   apps: LibraryApp[];

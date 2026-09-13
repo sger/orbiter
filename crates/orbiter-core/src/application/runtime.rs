@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use crate::{
     accounts::Accounts,
     application::{installation::InstallationService, signing::SigningService},
+    domain::identifiers::{RememberedDeviceId, UsbDeviceId},
     library::Library,
 };
 
@@ -108,6 +109,33 @@ impl Runtime {
     /// deliberately a single file: Orbiter runs one installation at a time.
     pub fn journal(&self) -> &Path {
         &self.journal
+    }
+
+    /// The library's tag for an attached phone, so a remembered device can be recognised.
+    ///
+    /// The two halves of this question live in different places on purpose: the transport knows
+    /// which phone is on the cable, and only the library holds the salt that turns its identity
+    /// into the tag written in history. This is the one place they meet, and it is here rather
+    /// than in either of them so the raw UDID never leaves the crate — it is read, hashed, and
+    /// dropped inside this function. The number returned is meaningless outside this library.
+    ///
+    /// Used to answer one question: is the phone connected now the phone that expiring build was
+    /// installed to? A wrong answer there sends someone to re-sign for the wrong tester, so the
+    /// caller is expected to treat a failure as "cannot tell" rather than as "no".
+    ///
+    /// # Errors
+    ///
+    /// Returns the device layer's own sentence if no attached phone has that number, or if it is
+    /// locked, untrusted, or unreachable; and the library's if the manifest cannot be read.
+    pub async fn remembered_device(
+        &self,
+        device: UsbDeviceId,
+    ) -> Result<RememberedDeviceId, String> {
+        let (udid, _) = crate::installation::verified_identity(device.get()).await?;
+        let library = self.library.clone();
+        tokio::task::spawn_blocking(move || library.device_tag(&udid))
+            .await
+            .map_err(|_| "Library worker stopped.".to_string())?
     }
 
     /// Reconcile durable state with reality after a restart.

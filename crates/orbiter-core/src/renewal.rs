@@ -82,6 +82,9 @@ pub struct Status {
     /// True only for a record about the build on screen that has run out. The interface promotes
     /// this one above the signing controls; everything else stays a quiet line.
     pub urgent: bool,
+    /// True for the step before that: still launching, but not for long. Never true at the same
+    /// time as `urgent`.
+    pub soon: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -184,6 +187,30 @@ pub fn line(name: &str, standing: Standing, bearing: Bearing) -> String {
     }
 }
 
+/// How much of the seven days has to be left before a countdown stops being background.
+///
+/// Two days, and the number is about what acting on it actually takes rather than about the
+/// arithmetic. Re-signing needs this Mac, the tester's phone in hand, an Apple sign-in and often a
+/// second factor — so a warning is only useful if it arrives while there is still a working day to
+/// arrange all of that in. Warning from day six would put a red line on screen for most of every
+/// build's life, and a line that is always there is one nobody reads by the time it matters.
+const SOON_DAYS: i64 = 2;
+
+/// Whether a build still works but not for much longer.
+///
+/// Deliberately disjoint from [`urgent`]: that one is about a build that has stopped launching or
+/// stops today, and this is the warning that comes before it. A screen showing both treats them as
+/// two steps of the same escalation, never as two names for one state.
+///
+/// A record about another build or another team is never either, for the same reason: this screen
+/// cannot act on it.
+pub fn due_soon(standing: Standing, bearing: Bearing) -> bool {
+    match (bearing, standing) {
+        (Bearing::SameApp | Bearing::Unknown, Standing::Valid { days }) => days <= SOON_DAYS,
+        _ => false,
+    }
+}
+
 /// Whether this is news a person has to act on rather than a line they can note and move past.
 ///
 /// One rule, so the library and the legacy record cannot disagree about what counts as urgent.
@@ -262,6 +289,7 @@ pub fn status(
     Some(Status {
         sentence: line(&best.app_name, standing, bearing),
         urgent: urgent(standing, bearing),
+        soon: due_soon(standing, bearing),
         identifier: best.identifier,
         app_name: best.app_name,
         watch: best.watch,
@@ -423,6 +451,39 @@ mod tests {
         assert!(mine.urgent);
         let theirs = status(&path, Some("5555U85K3T"), None, at(1_000_000)).unwrap();
         assert!(!theirs.urgent);
+    }
+
+    #[test]
+    /// The warning arrives two days out and not before, and it hands over to `urgent` rather than
+    /// overlapping it: a screen is never told a build is both nearly out of time and already out.
+    fn the_warning_arrives_before_the_last_day_and_stops_where_urgent_begins() {
+        let now = at(1_000_000);
+        let soon = |expires: i64| {
+            let record = record(expires);
+            let standing = standing(&record, now);
+            (
+                due_soon(standing, Bearing::SameApp),
+                urgent(standing, Bearing::SameApp),
+            )
+        };
+        // Most of a build's life is background: a line that is always red is one nobody reads.
+        assert_eq!(soon(1_000_000 + 3 * DAY), (false, false));
+        assert_eq!(soon(1_000_000 + 2 * DAY), (true, false));
+        assert_eq!(soon(1_000_000 + DAY), (true, false));
+        // Under a day the warning is over and the announcement takes it.
+        assert_eq!(soon(1_000_000 + DAY - 1), (false, true));
+        assert_eq!(soon(1_000_000 - DAY), (false, true));
+    }
+
+    #[test]
+    /// A build belonging to another team or another app is never warned about either: a warning
+    /// this screen cannot act on is the same false alarm an expired-elsewhere countdown would be.
+    fn a_record_about_something_else_is_never_warned_about() {
+        let standing = Standing::Valid { days: 1 };
+        assert!(due_soon(standing, Bearing::SameApp));
+        assert!(due_soon(standing, Bearing::Unknown));
+        assert!(!due_soon(standing, Bearing::OtherApp));
+        assert!(!due_soon(standing, Bearing::OtherTeam));
     }
 
     #[test]

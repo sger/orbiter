@@ -10,231 +10,253 @@ CLI ─────────────────────────�
                                                └─ conservative findings
 ```
 
-`crates/orbiter-core` owns inspection and report types and has no Tauri dependency. `src-tauri` owns window setup, inspection, discovery, review, and installation IPC commands, one active inspection, cancellation, and redacted structured logging. `src` renders only returned data and explicit unavailable states. IPC permissions grant only opening a file dialog and registering/removing drag/drop listeners; no shell, arbitrary filesystem frontend access, remote content, or updater permissions. Custom commands expose inspection/discovery, review, and explicitly acknowledged installation. The frontend has no general filesystem or shell permission.
+| Crate                 | Owns                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `crates/orbiter-core` | Inspection, plan, certificates, provisioning, signing, installation, library. No Tauri dependency. |
+| `src-tauri`           | Window setup, IPC commands, one active inspection, cancellation, redacted structured logging.      |
+| `src`                 | Rendering returned data and explicit unavailable states.                                           |
 
-Blocking archive reads run on Tokio's blocking pool. A single atomic busy guard rejects overlapping jobs; a drop guard releases it on success, failure, or worker unwind. Cancellation checks occur between stages, bundles, ZIP entries, and 64 KiB read chunks. CMS/Mach-O/plist parsing is synchronous and cancellation waits for that bounded parse to finish. A late cancellation may lose to completed inspection. No invented byte percentage or immediate-cancellation claim is made. Closing the application abandons inspection; restarting and selecting the original file starts cleanly. Inspection itself has no persistent jobs or resumable partial outputs. The separate installation journal is described below.
+IPC permissions grant only a file dialog and drag/drop listeners. There is no shell, arbitrary filesystem, remote content, or updater permission. Custom commands expose inspection, discovery, review, and explicitly acknowledged installation.
+
+Blocking archive reads run on Tokio's blocking pool. One atomic busy guard rejects overlapping jobs and a drop guard releases it on success, failure, or unwind. Cancellation is checked between stages, bundles, ZIP entries, and 64 KiB chunks; CMS, Mach-O and plist parsing is synchronous, so cancellation waits for that bounded parse. A late cancellation may lose to a completed inspection — no immediate-cancellation claim is made. Inspection has no persistent or resumable jobs; the installation journal is separate.
 
 ## Inspection boundary
 
-All archive entries are inspected for unsafe paths and declared size; only metadata, declared executables, profiles, and candidate icons are decompressed. Resource-file contents and CRCs of unread entries are not verified. No full bundle-signature verification or installability claim is possible from this report.
+Every archive entry is checked for unsafe paths and declared size, but only metadata, declared executables, profiles and candidate icons are decompressed. Resource contents and CRCs of unread entries are not verified. **No full signature verification or installability claim is possible from this report.**
 
-Limits are intentionally conservative:
+| Input            | Limit                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------- |
+| IPA              | 2 GiB compressed; regular local file                                                              |
+| ZIP directory    | 50,000 entries, 32 MiB, single volume; ZIP64, self-extracting and trailing-data variants rejected |
+| Expanded archive | 8 GiB aggregate; 1 GiB per entry; above 1000:1 compression rejected                               |
+| Data read        | 1 GiB cumulative; one executable at a time; 512 MiB each                                          |
+| Bundles          | 512; exactly one direct `Payload/*.app`                                                           |
+| Plists/profiles  | 4 MiB input; depth 64; 100,000 events; 8 MiB expanded scalars                                     |
+| Mach-O           | 32 non-overlapping fat slices; bounded commands and signature slots                               |
+| Icons            | 2 MiB standard PNG; no external URLs                                                              |
 
-| Input | Limit / handling |
-| --- | --- |
-| IPA | 2 GiB compressed; regular local file |
-| ZIP directory | 50,000 entries, 32 MiB directory, single volume; ZIP64/self-extracting/trailing-data variants rejected |
-| Expanded archive | 8 GiB declared aggregate; 1 GiB declared per entry; large entries above 1000:1 compression rejected |
-| Data actually read | 1 GiB cumulative, one executable at a time; 512 MiB executable |
-| Bundles | 512; exactly one direct `Payload/*.app` |
-| Plists/profiles | 4 MiB input; plist depth 64, 100,000 events, 8 MiB expanded scalar data |
-| Mach-O | At most 32 non-overlapping fat slices; bounded commands and signature slots |
-| Icons | 2 MiB standard PNG; no external URLs |
+The `plist` streaming API is pinned exactly so depth and count limits apply before recursive `Value` construction. A ZIP end-directory preflight bounds allocation before the ZIP library is constructed, and central-directory counts are cross-checked because ZIP libraries may collapse duplicate names. Absolute, parent, backslash, colon, empty, control-character and trailing-space/dot components are rejected. Symlinked macOS-style frameworks are unsupported by this iOS inspector.
 
-The `plist` streaming API is enabled with an exact package pin so depth/count limits can be applied before recursive `Value` construction. ZIP end-directory preflight bounds allocation before the ZIP library is constructed. Central-directory counts are cross-checked because ZIP libraries may collapse duplicate names. Absolute, parent, backslash, colon, empty, control-character, and trailing-space/dot components are rejected. Symlinked/versioned macOS-style frameworks are intentionally unsupported by this iOS inspector.
+Recognised bundle roots are `.app`, `.appex` and `.framework` with direct Info.plists. Still future work: loose dylibs, resource bundles, other nested code layouts, DER entitlement decoding, cryptographic verification, and asset-catalog/CgBI icon decoding. Unknown or malformed executables and profiles produce unverified findings, and unknown capability keys are surfaced for review.
 
-The inventory recognizes `.app`, `.appex`, and `.framework` bundle roots with direct Info.plists. Loose dylibs, resource bundles, other nested code layouts, DER entitlement decoding, signature cryptographic verification, and asset-catalog/CgBI icon decoding remain future work. Unknown or malformed executables/profiles produce unverified findings. Unknown capability keys are surfaced for review. Per-slice executable entitlements and provisioning-profile authorizations are separate; an entitlement's presence is not evidence of authorization under a new team.
+Per-slice entitlements and profile authorizations are separate concerns: an entitlement's presence is not evidence of authorization under a new team.
 
 ## Compatibility model
 
-Findings distinguish `not_verified`, `requires_configuration`, `unsupported`, and `preserved`. Inspection alone emits the first three; `preserved` appears only once a team has actually prepared identifiers and profiles, because only then is anything established rather than guessed. Encryption is an unsupported input for re-signing; expired profiles need configuration. Push, domains, merchants, groups, keychain, Watch identity, and unknown entitlements require review. There is no silent entitlement stripping, identifier rewriting, or Watch/extension removal.
+Findings are `not_verified`, `requires_configuration`, `unsupported`, or `preserved`. Inspection alone emits only the first three — `preserved` appears once a team has actually prepared identifiers and profiles, because only then is anything established rather than guessed.
 
-The plan does this: it inspects every nested code object, rewrites identifiers, states each capability it cannot carry with the consequence, and blocks rather than proceeding when an input cannot be signed. Entitlements are never chosen by Orbiter — each bundle is signed with the entitlements inside Apple's own profile for its identifier.
+Encryption is unsupported for re-signing; expired profiles need configuration. Push, domains, merchants, groups, keychain, Watch identity and unknown entitlements require review. There is no silent entitlement stripping, identifier rewriting, or Watch/extension removal.
 
-## Subsequent boundaries
+The plan inspects every nested code object, rewrites identifiers, states each capability it cannot carry with its consequence, and blocks rather than proceeding when an input cannot be signed. Entitlements are never chosen by Orbiter — each bundle is signed with the entitlements inside Apple's own profile for its identifier.
 
-Add device transport through evaluated `idevice` APIs before authentication. The authentication/team preview now uses in-memory sessions and the local macOS Anisette flow described below. Certificate and provisioning operations, bundle transformation and signing, and installation jobs all live in the Rust core (`certificates.rs`, `provisioning.rs`, `signer.rs`, `installation/`). SQLite can persist refresh/job metadata once resumable jobs exist. Signing outputs must use separate paths and preserve the original IPA; never automatically revoke certificates.
+## Device discovery
 
-## Device discovery (Phase 2, first increment)
+`devices.rs` uses exact-pinned idevice 0.1.65 with `usbmuxd` and `ring`; installation adds `afc` and `installation_proxy`. Pairing mutation is not enabled.
 
-`devices.rs` uses exact-pinned idevice 0.1.65 with `usbmuxd` and `ring`; the installation module additionally enables `afc` and `installation_proxy`. Pairing mutation is not enabled. It lists transports through the local daemon, reads selected Lockdown metadata keys, obtains an existing pairing record into memory, and verifies a TLS session. Known non-iPhones are excluded; devices with unavailable metadata remain visible as unverified. Only an ephemeral mux ID, display metadata, connection category, and redacted status leave the core. No UDID, IP address, HostID, or key is exposed in reports/logs.
+It lists transports through the local daemon, reads selected Lockdown keys, loads an existing pairing record into memory, and verifies a TLS session. Known non-iPhones are excluded; devices with unavailable metadata stay visible as unverified. Only an ephemeral mux ID, display metadata, connection category and redacted status leave the core — never a UDID, IP address, HostID or key.
 
-Discovery has a three-second daemon deadline and three seconds per device, capped at sixteen transports (maximum roughly 51 seconds). The UI skips overlapping polls, refreshes every five seconds when idle, and clears selections that disappear. Stale sessions are not reused. A timeout/disconnection produces an unavailable state. Missing/unreadable pairing records are reported as unverified, rather than claiming that trust was rejected. A successful TLS session establishes pairing; lock state and Developer Mode remain unverified unless the device explicitly returns a locked error. `PasswordProtected` is not used to infer lock state.
+Deadlines: three seconds for the daemon, three per device, capped at sixteen transports. The UI skips overlapping polls, refreshes every five seconds when idle, and clears selections that disappear. Stale sessions are never reused.
 
-The desktop tracing filter admits only Orbiter's structured events, excluding dependency logs that could contain pairing or protocol payloads. The standalone discovery CLI installs no tracing subscriber. Pairing records remain managed by the OS Apple service; Orbiter neither stores nor mutates them. Windows uses loopback only and requires its own hardware validation. Installation transport is implemented as the preview described below; its happy path was confirmed by the user; interruption/recovery validation is pending.
+A timeout or disconnection is an unavailable state. A missing or unreadable pairing record is reported as unverified rather than as rejected trust. A successful TLS session establishes pairing; lock state and Developer Mode stay unverified unless the device returns an explicit locked error, and `PasswordProtected` is not used to infer lock state.
 
-## Existing-signature installation
+The desktop tracing filter admits only Orbiter's structured events, excluding dependency logs that could carry pairing or protocol payloads. The discovery CLI installs no subscriber. Pairing records stay managed by the OS; Orbiter neither stores nor mutates them. Windows uses loopback only and needs its own hardware validation.
 
-App icons are read from the archive in process. An Apple-optimised (CgBI) PNG cannot be decoded here, so on macOS `app_icon` writes that one image to a temporary directory and asks the system image converter to re-encode it, with bounded dimensions, a bounded output and a three-second timeout — the only subprocess inspection starts, and the only file it writes. An icon that cannot be read is absent; it never fails the inspection.
+## Installation
 
-`installation::prepare` binds an opaque review token to a private local IPA snapshot and the selected phone's UDID, held only in Rust memory. A SHA-256 fingerprint identifies the reviewed bytes. The review expires in ten minutes. Only one prepared review and one review/install operation are admitted per desktop process. The UI pauses discovery/selection while preparing or executing; the backend independently validates the token and acknowledgement and consumes the review once.
+App icons are read in process. An Apple-optimised (CgBI) PNG cannot be decoded here, so on macOS `app_icon` writes that one image to a temporary directory and asks the system image converter to re-encode it, with bounded dimensions, bounded output and a three-second timeout — the only subprocess inspection starts, and the only file it writes. An unreadable icon is absent; it never fails inspection.
 
-Preflight rejects missing/expired profiles, incomplete/encrypted executable inspection, unverified iPhone platform/architecture/OS metadata, and profiles that do not authorize the selected phone (unless `ProvisionsAllDevices` explicitly authorizes all devices). Nested iPhone bundles receive membership checks; Watch bundles stay included, with Watch-device authorization explicitly unverified. No identifier, entitlement, profile, or signature is modified. Installed-app lookup is limited to the main bundle ID. The review shows potential replacement, and execution repeats the lookup and rejects a changed installed version/build.
+### Review
 
-Before staging, execution checks the same physical UDID, USB connection, pairing, the snapshot's profile conditions, and installed-app state again. AFC transfers in 256 KiB chunks to a UUID-named file under `PublicStaging`; the accumulated hash and byte count must match the review before dispatch. Cancellation is atomic with the transition into installation. After that boundary there is no cancellation or rollback promise. The code uses idevice's InstallationProxy command and progress callback, not the convenience uploader (which reads the entire IPA and uses a shared staging filename).
+`installation::prepare` binds an opaque review token to a private IPA snapshot and the selected phone's UDID, both held only in Rust memory, with a SHA-256 fingerprint identifying the reviewed bytes. A review expires in ten minutes. One prepared review and one operation per process. The UI pauses discovery while preparing or executing; the backend independently validates the token and acknowledgement and consumes the review once.
 
-A job journal is atomically replaced using a private temporary file and synced before device-install dispatch. It records only a random job ID, stage, byte counts, optional iOS-reported percentage, redacted message, and cleanup-needed flag. It records no credentials, UDID, pairing record, source path, or app binary. Preparing/transferring jobs become failed after restart; dispatching/installing jobs become unknown. No job resumes or retries automatically. A reported iOS completion is the sole success signal; 100% progress alone is not success. Explicit device rejections are failed; transport loss after dispatch is unknown.
+Preflight rejects missing or expired profiles, incomplete or encrypted executable inspection, unverified iPhone platform/architecture/OS metadata, and profiles that do not authorize the selected phone (unless `ProvisionsAllDevices` authorizes all). Nested iPhone bundles get membership checks; Watch bundles stay included with Watch-device authorization explicitly unverified. Nothing is modified. Installed-app lookup covers the main bundle ID only; the review shows potential replacement and execution repeats the lookup, rejecting a changed version or build.
 
-Individual AFC calls have a 15-second timeout; device connection/lookup have ten-second deadlines; the overall job has a twenty-minute deadline. Normal terminal outcomes attempt to remove only the generated staging file after rechecking the physical device binding. Unknown outcomes leave staging alone because iOS may still be reading it. Cleanup failures are visible. Process-killed temporary snapshots and staging files are not automatically scavenged; the latest-job journal is not a complete refresh database. Atomic replacement is tested locally, but power-loss durability and multi-process coordination are not claimed. Run one desktop process at a time.
+### Execution
 
-## Account authentication and team selection
+Before staging, execution rechecks the same physical UDID, USB connection, pairing, profile conditions and installed-app state. AFC transfers in 256 KiB chunks to a UUID-named file under `PublicStaging`, and the accumulated hash and byte count must match the review before dispatch. Cancellation is atomic with the transition into installing; after that boundary there is no cancellation or rollback promise.
 
-`accounts::Accounts` owns one active attempt or in-memory session per process. Consent/input validation precedes work. Login has a ten-minute deadline; every 2FA prompt has an opaque one-use ID and masked phone labels. Sign-out invalidates the generation and aborts pending login. Late results cannot restore a signed-out account. Team selection is explicit and must belong to the current session. Refresh is serialized and limited to 60 seconds; failure clears account/team state. The local 30-minute expiry is checked on status and account operations. No credentials or tokens are persisted by Orbiter.
+It uses idevice's InstallationProxy command and progress callback, not the convenience uploader, which reads the whole IPA and uses a shared staging filename.
+
+| Timeout                 | Value  |
+| ----------------------- | ------ |
+| AFC call                | 15 s   |
+| Device connect / lookup | 10 s   |
+| Whole job               | 20 min |
+
+### Journal and recovery
+
+A journal is atomically replaced through a private temporary file and synced before dispatch. It records a random job ID, stage, byte counts, optional iOS percentage, redacted message and a cleanup flag — no credentials, UDID, pairing record, source path, or binary.
+
+After a restart, preparing and transferring jobs become failed; dispatching and installing become unknown. Nothing resumes or retries automatically. A reported iOS completion is the sole success signal — 100% progress is not success. Explicit device rejections are failed; transport loss after dispatch is unknown.
+
+Normal terminal outcomes remove only the generated staging file, after rechecking the device binding. Unknown outcomes leave staging alone, because iOS may still be reading it. Cleanup failures are visible. Snapshots and staging files from a killed process are not scavenged, and the journal is not a complete job database. Atomic replacement is tested; power-loss durability and multi-process coordination are not claimed. **Run one desktop process at a time.**
+
+## Accounts and teams
+
+`accounts::Accounts` owns one attempt or in-memory session per process. Consent and input validation precede work. Login has a ten-minute deadline, and every 2FA prompt carries an opaque one-use ID and masked phone labels.
+
+Sign-out invalidates the generation and aborts a pending login, so a late result cannot restore a signed-out account. Team selection is explicit and must belong to the current session. Refresh is serialised and limited to 60 seconds; failure clears account and team state. The 30-minute local expiry is checked on every status and account operation. Orbiter persists no credentials or tokens.
+
+An explicit LocalProvider resolves macOS authentication material before the account builder contacts Apple. See [local-authentication.md](local-authentication.md) for the bridge, privacy, timeouts, licensing and platform limits. Windows authentication returns unavailable, and existing-signature installation does not depend on sign-in.
 
 ### Federated and Managed Apple IDs are out of scope, by choice
 
-Orbiter signs in the way Xcode does for an ordinary Apple ID: it asks Apple for the material to prove it knows the password, and completes a password handshake (SRP) with it. An account federated to an organisation's identity provider — a Managed Apple ID from Apple Business Manager — has no Apple-side password at all. Apple accepts the request, answers without any of the password-verification fields, and reports no error of its own. Nothing has gone wrong; there was simply nothing to verify.
+Orbiter signs in the way Xcode does for an ordinary Apple ID: it asks Apple for the material to prove it knows the password, then completes an SRP handshake. An account federated to an organisation's identity provider — a Managed Apple ID — has no Apple-side password at all, so Apple accepts the request, answers without the password-verification fields, and reports no error. Nothing went wrong; there was nothing to verify.
 
-Xcode signs those accounts in by handing the login to a browser, letting the identity provider authenticate, and receiving tokens back. Orbiter does not, and will not: that exchange is Xcode's private arrangement with Apple rather than a documented interface, so it can only be reproduced by reverse engineering and can break whenever Apple changes it. Orbiter is an open-source tool that works outside Apple's own tooling, for a tester re-signing a build with **their own** Apple ID because a company team's device allowance is full. A corporate account is the opposite of the case it exists to serve, and supporting one would buy a fragile dependency for no gain — the company team being full is the premise.
+Xcode signs those accounts in by handing the login to a browser and receiving tokens back. Orbiter will not: that exchange is Xcode's private arrangement with Apple, reproducible only by reverse engineering and breakable whenever Apple changes it. Orbiter exists for a tester re-signing a build with **their own** Apple ID because a company team's device allowance is full — a corporate account is the opposite of that case.
 
-So this is refused rather than half-supported. `isideload::auth_error_is_unsupported_account` identifies the three shapes that mean it (Apple's federation code `-22320`, an additional sign-in step the adapter does not implement, and the missing-password-fields answer above) and Orbiter says the account cannot be signed in and to use a personal Apple ID. It is kept distinct from both a rejected password and an inconclusive failure: a person must never be sent to reset a password that was never wrong.
-
-The explicit LocalProvider resolves macOS authentication material before the account builder contacts Apple. A bounded Objective-C bridge links only Foundation and dynamically loads installed Apple frameworks. No authentication-support server or remote-provider fallback exists. The vendored upstream adapter enforces direct Apple HTTPS destinations, disables redirects/proxies/debug TLS, and exposes a constructor for local data. See [local-authentication.md](local-authentication.md) for API, privacy, timeout, licensing, and platform limits. Windows authentication returns unavailable. Existing-signature installation remains independent of account sign-in.
-
+So it is refused rather than half-supported. `isideload::auth_error_is_unsupported_account` identifies the three shapes that mean it — Apple's federation code `-22320`, an unimplemented additional sign-in step, and the missing-password-fields answer — and Orbiter says to use a personal Apple ID. This stays distinct from a rejected password and from an inconclusive failure, so nobody is sent to reset a password that was never wrong.
 
 ## Re-signing plan
 
-`plan.rs` computes what re-signing an inspected IPA under another team would change. It is pure local computation: it signs nothing, writes nothing, and contacts no Apple service. Identifiers are rewritten deterministically from the target team ID, so the same team always produces the same identifiers and a weekly re-sign replaces the tester's app instead of installing a second copy. Nested bundles keep their relationship to the main app's new identifier; frameworks are rewritten but consume no App ID.
+`plan.rs` computes what re-signing under another team would change. Pure local computation: it signs nothing, writes nothing, and contacts no Apple service.
 
-Each team-scoped entitlement becomes a decision carrying its action, its reason, and the runtime consequence for the tester: push, associated domains, Apple Pay merchant identifiers, and app groups are proposed for removal under a Personal Team, keychain groups and application/team identifiers are rewritten, and the development entitlement is set. Every such decision is marked as needing portal confirmation, because Apple's published capability table does not cleanly separate Personal Team support; the portal's answer must override the proposal once that work exists. Unrecognised `com.apple.developer.*` keys are proposed for removal rather than silently kept.
+Identifiers are rewritten deterministically from the target team ID, so the same team always produces the same identifiers and a weekly re-sign replaces the tester's app instead of installing a second copy. Nested bundles keep their relationship to the main app's new identifier; frameworks are rewritten but consume no App ID.
 
-Encrypted executables, a missing main identifier, an unselected team, and exceeding a Personal Team's ten App IDs per seven days are blockers. A Watch app is never removed silently, and never kept silently either: while the choice is open it is a blocker, because registering its identifier spends one of a Personal Team's ten per seven days and Watch provisioning under such a team is unverified. `WatchChoice::Remove` drops the Watch app and every bundle nested inside it and states that its watchOS features are gone; `WatchChoice::Sign` keeps it and states that it may fail to install or run. Either way the outcome is a stated consequence of the plan, not an open question in the interface. Consequences are collected for acknowledgement, including the seven-day expiry that makes a weekly re-sign necessary.
+Each team-scoped entitlement becomes a decision carrying its action, reason and runtime consequence. Push, associated domains, Apple Pay merchants and app groups are proposed for removal under a Personal Team; keychain groups and application/team identifiers are rewritten; the development entitlement is set. Every decision is marked as needing portal confirmation, because Apple's published capability table does not cleanly separate Personal Team support — the portal's answer must override the proposal. Unrecognised `com.apple.developer.*` keys are proposed for removal rather than silently kept.
 
-The plan is read-only output today, with no signer behind it:
+Blockers: encrypted executables, a missing main identifier, an unselected team, and exceeding a Personal Team's ten App IDs per seven days.
+
+A Watch app is never removed silently and never kept silently. While the choice is open it is a blocker, because registering its identifier spends one of those ten and Watch provisioning under a Personal Team is unverified. `Remove` drops the Watch app and everything nested inside it and states that its watchOS features are gone; `Sign` keeps it and states that it may fail to install or run.
+
+Read-only output today:
 
 ```sh
 cargo run --locked -p orbiter-core --bin orbiter-sign-plan -- /path/to/company.ipa TEAMID --personal
 ```
 
-It exits non-zero when the plan has blockers. Actual signing must revalidate every decision against the real certificate, App ID, and profile rather than trusting this plan.
-
+It exits non-zero when the plan has blockers. Signing revalidates every decision against the real certificate, App ID and profile rather than trusting the plan.
 
 ## Device registration
 
-`provisioning::register` is the first Orbiter operation that writes to Apple rather than reading. It refuses before any request unless a live session exists, a team is selected, and the consequence has been acknowledged: a free personal team allows three devices, and a paid team consumes one of its 100 slots for the membership year, which removing the device later does not return. The refusal order is checked by tests, and a view that merely says "signed in" is not enough — the session object itself authorises the write, so a stale or forged view cannot reach Apple.
+`provisioning::register` is the first operation that writes to Apple. It refuses before any request unless a live session exists, a team is selected, and the consequence is acknowledged: a free team allows three devices, and a paid team consumes one of 100 slots for the membership year, which removing the device later does not return. The session object itself authorises the write, so a stale or forged view cannot reach Apple; tests check the refusal order.
 
-The device identifier is read through the existing verified-iPhone path in the installation module, which requires USB, a readable pairing record, a verified session, and a real iPhone. It is handed straight to Apple with the device name, and never enters the account view, the report, the journal, or any log; the returned outcome carries only whether the device was already registered or was registered now, and how many devices the team then has. A team membership whose kind Apple did not establish is treated as the stricter free allowance rather than the permissive one.
+The device identifier comes from the verified-iPhone path in the installation module — USB, a readable pairing record, a verified session, a real iPhone — and goes straight to Apple with the device name. It never enters the account view, report, journal or any log. The outcome carries only whether the device was already registered and how many the team now has.
 
-Registration lists the team's devices first, so an already-registered iPhone writes nothing. A timeout during the write says explicitly that the request may still have been applied and to check developer.apple.com, because a portal write has no rollback. The UI offers registration only once a team is selected, clears its result when the device or team changes, and requires the acknowledgement checkbox each time.
-
+A membership whose kind Apple did not establish is treated as the stricter free allowance. Registration lists the team's devices first, so an already-registered iPhone writes nothing. A timeout says explicitly that the request may still have been applied and to check developer.apple.com, because a portal write has no rollback.
 
 ## Development certificate
 
-`certificates::ensure` obtains the certificate the signer will use. The RSA key is generated on this Mac and never leaves it: only a PKCS#10 request goes to Apple, and its subject carries no account, device, or company information — a test asserts that and that the key is 2048-bit. Key generation is CPU-bound and runs off the async runtime.
+`certificates::ensure` obtains the certificate the signer uses. The RSA key is generated on this Mac and never leaves it — only a PKCS#10 request goes to Apple, and its subject carries no account, device or company information. A test asserts that and that the key is 2048-bit. Key generation runs off the async runtime.
 
-The team's certificates are listed first and matched against the key they certify, not their name, so a rerun with the same session reuses the existing certificate and writes nothing. Reaching Apple's active-certificate maximum is reported with the count and left to the person: Orbiter never revokes, because revoking invalidates every app already signed with that certificate, including apps Orbiter did not produce. A timeout during the request says the certificate may still have been issued and to check developer.apple.com, since there is no rollback.
+The team's certificates are listed and matched against the key they certify, not their name, so a rerun with the same session reuses the existing certificate and writes nothing. Reaching Apple's active-certificate maximum is reported with the count and left to the person: **Orbiter never revokes**, because revoking invalidates every app already signed with that certificate, including apps Orbiter did not produce. A timeout says the certificate may still have been issued.
 
-The key and certificate live in the signed-in session in memory and are not persisted, so restarting Orbiter needs a new certificate. That is a real limitation for the weekly refresh cycle, given the small number of active certificates a team allows, and persistence is deliberately left as its own decision rather than quietly writing a private key somewhere. Apple labels the certificate with the computer name, bounded to plain text with a neutral fallback.
-
+The key is stored in the Keychain (see [local-authentication.md](local-authentication.md)); the certificate is fetched from Apple again each session and reused without writing. Apple labels it with the computer name, bounded to plain text with a neutral fallback.
 
 ## App identifiers and profiles
 
-`provisioning::ensure_app_id` registers the plan's rewritten identifiers on the selected team, reusing any the team already holds so a rerun writes nothing. Apple's remaining-identifier count is reported, and a team with none left is refused with what to do about it rather than attempting a write. Registration is acknowledged first: a free personal team may register only ten identifiers per seven days, and an identifier cannot be reused by another team afterwards.
+`provisioning::ensure_app_id` registers the plan's rewritten identifiers, reusing any the team already holds so a rerun writes nothing. Apple's remaining-identifier count is reported, and a team with none left is refused with what to do rather than attempting a write. Registration is acknowledged first: a free team may register ten identifiers per seven days, and an identifier cannot be reused by another team afterwards.
 
-This step is where Apple answers the capability questions the plan can only propose. The created App ID reports which features Apple actually enabled, and those are shown as labels — the few feature keys whose meaning is established by use are named, and anything else is reported as an unnamed capability rather than guessed. A capability Apple reports as disabled is not presented as present.
+This is where Apple answers the capability questions the plan could only propose. The created App ID reports which features Apple actually enabled; feature keys whose meaning is established by use are named, anything else is reported as an unnamed capability rather than guessed. A capability Apple reports as disabled is never presented as present.
 
-`provisioning::fetch_profile` then downloads the team provisioning profile for each identifier, which authorises the team's registered devices and, on a free personal team, expires in seven days. Profile bytes are kept in the signed-in session for the signer and are deliberately not serialised into the interface; only the identifier, expiry, and UUID are shown.
+`provisioning::fetch_profile` downloads the team provisioning profile for each identifier. Profile bytes stay in the session for the signer and are deliberately not serialised into the interface — only identifier, expiry and UUID are shown.
 
-Provisioning runs the plan first and writes nothing at all when the plan has blockers. It is driven from the selected IPA, so changing the IPA, the device, or the team clears the result rather than carrying it across.
+Provisioning runs the plan first and writes nothing when the plan has blockers. Changing the IPA, device or team clears the result rather than carrying it across.
 
 ## The seven days
 
-A free team's profile lasts seven days and the installed app then refuses to launch, telling the tester nothing. Orbiter used to state this once, during signing, and never again.
+A free team's profile lasts seven days, after which the installed app refuses to launch and tells the tester nothing.
 
-The library is the memory of it. A countdown exists only for an attempt that reached `Installed` and whose expiry is actually known: a saved file is a fact about this Mac, and counting down from an import would be Orbiter claiming an installation it never performed. Unknown is not zero either — a record written before the library kept epoch seconds has no countdown rather than a fabricated one.
+Expiry travels as epoch seconds from the moment it is read, alongside the display string, both taken from one chosen profile — so the date shown and the date counted can never describe different bundles. `profile::Profile`, `provisioning::ProfileOutcome`, `signer::Signed`, `library::Artifact` and `library::Attempt` all carry the pair. Nothing parses a date back out of a display string.
 
-Expiry travels as seconds since the epoch from the moment it is read, alongside the display string, and both are taken from one chosen profile so the date shown and the date counted can never describe different bundles. `profile::Profile`, `provisioning::ProfileOutcome`, `signer::Signed`, `library::Artifact` and `library::Attempt` all carry the pair. Nothing parses a date back out of a display string.
+`renewal.rs` owns the arithmetic and the wording:
 
-`renewal.rs` owns the arithmetic and the wording. `standing_at` is integer division on twenty-four-hour boundaries, rounded down — six and a half days left is six, because a person planning around the number must never be told they have longer than they do. `line` is the only place the sentence exists, so the library page, the workspace banner and a screenshot of either cannot word the same fact differently, and `urgent` is the single rule for what a person must act on.
+- `standing_at` divides on twenty-four-hour boundaries, rounded down — six and a half days left is six, because nobody may be told they have longer than they do.
+- `line` is the only place the sentence exists, so every screen and any screenshot agree.
+- `urgent` and `due_soon` are the single rules for what must be acted on, and when a warning starts.
 
-`Library::snapshot` reports every qualifying install, longest-lived first within each app. Longest-lived rather than most recent: the same app can be on two testers' phones, and a re-sign installed on one does not revive the copy on the other, so a screen leads with the copy that still launches while every attempt stays visible against its own device. `Library::expiry` answers for one artifact — the workspace is opened from one, so "is this about what I am looking at?" is settled by construction, and a signed build made from an original counts as that original's. Only the team can still differ, and a build signed for another team gets no countdown at all: a reassuring "5 days left" about somebody else's build is worse than silence.
+A countdown exists only for an attempt that reached `Installed` with a known expiry: a saved file is a fact about this Mac, and counting down from an import would claim an installation Orbiter never performed. Unknown is not zero.
 
-`renewal.json` is no longer written. It is still read, and shown as the labelled legacy record it is, with the one control that can clear it.
+`Library::snapshot` reports every qualifying install, longest-lived first within each app — longest-lived rather than most recent, because a re-sign on one tester's phone does not revive the copy on another's. `Library::expiry` answers for one artifact, and a signed build made from an original counts as that original's. A build signed for another team gets no countdown: a reassuring "5 days left" about somebody else's build is worse than silence.
 
-Nothing here contacts Apple, re-signs, or schedules anything. The banner offers the same signing call the main control makes, and only when that control would accept it.
+`renewal.json` is no longer written. It is still read and shown as the labelled legacy record it is, with the one control that clears it.
+
+Nothing here contacts Apple, re-signs or schedules anything. See [app-library.md](app-library.md) for the countdown states and the refresh action.
 
 ## The signer
 
-`signer.rs` turns a reviewed plan, Apple's profiles, and this Mac's certificate into a new IPA. The IPA the person selected is opened read-only and never written; everything happens in a temporary directory inside the application's own storage, which is removed when the operation returns, and the result is a separate file named for the team it was signed for.
+`signer.rs` turns a reviewed plan, Apple's profiles and this Mac's certificate into a new IPA. The selected IPA is opened read-only and never written; work happens in a temporary directory inside the application's own storage, removed when the operation returns, and the result is a separate file named for the team.
 
-Order of work: extract the archive under the same refusals inspection applies (unsafe paths, symlinks, special files, case-colliding duplicates, 2 GiB / 50,000 entries / 8 GiB expanded); remove every bundle the plan left out, shallowest first, so a removed Watch app takes its extensions and frameworks with it and is reported once; rewrite identifiers; install one profile per bundle that holds an App ID; sign from the inside out; repackage with the file permissions on disk, so executables stay executable.
+Order of work:
 
-Identifier rewriting is keyed, not valued: only keys that hold bundle identifiers are rewritten — `CFBundleIdentifier` and anything ending in `BundleIdentifier`, at any depth. That moves every cross-reference bundles hold to each other (`WKCompanionAppBundleIdentifier`, `WKAppBundleIdentifier`, `NSExtension` attributes) and nothing else. Replacing by value instead was tried and was wrong: a framework whose identifier is `VirtualStadiumDataSDK` carries that same word as `CFBundleExecutable`, the name of a file on disk, so the plist ended up pointing at an executable that did not exist and the build would not install. `NSExtensionPointIdentifier` is excluded for the same reason — it names one of Apple's extension points, not a bundle in this build. Matches are whole strings, so an identifier that merely begins with another is left alone. The bundle's own `CFBundleIdentifier` is then set outright, because a bundle signed for an identifier its Info.plist does not claim is one iOS refuses.
+1. Extract under the same refusals inspection applies — unsafe paths, symlinks, special files, case-colliding duplicates, 2 GiB / 50,000 entries / 8 GiB expanded.
+2. Remove every bundle the plan left out, shallowest first, so a removed Watch app takes its extensions and frameworks with it and is reported once.
+3. Rewrite identifiers.
+4. Install one profile per bundle that holds an App ID.
+5. Sign from the inside out.
+6. Repackage with the file permissions on disk, so executables stay executable.
 
-The signer never chooses entitlements. Each bundle is signed with the entitlements inside Apple's own provisioning profile for that identifier, read from the CMS payload. A capability the plan said would be lost is lost because Apple did not grant it, not because this code removed it.
+Identifier rewriting is **keyed, not valued**: only keys holding bundle identifiers are rewritten — `CFBundleIdentifier` and anything ending in `BundleIdentifier`, at any depth. That moves every cross-reference between bundles (`WKCompanionAppBundleIdentifier`, `WKAppBundleIdentifier`, `NSExtension` attributes) and nothing else. Replacing by value was tried and produced builds iOS refused to install, because an identifier can also be the name of a file on disk. `NSExtensionPointIdentifier` is excluded for the same reason — it names one of Apple's extension points, not a bundle. Matches are whole strings. The bundle's own `CFBundleIdentifier` is then set outright, since iOS refuses a bundle signed for an identifier its Info.plist does not claim.
 
-Signing runs on a blocking thread: it reads and writes a whole app bundle and hashes every file. The plan is rebuilt from the IPA, team, and Watch choice rather than remembered, so the build that is signed is the build that was reviewed, and a plan whose profiles were never prepared is refused before the archive is opened. The signed build then goes through the same installation review as any other IPA — including whether the iPhone is in its profile — so the existing preflight validates the signer's own output.
+The signer never chooses entitlements: each bundle is signed with the entitlements inside Apple's profile for that identifier, read from the CMS payload. A capability the plan said would be lost is lost because Apple did not grant it.
 
-A signing run records what each stage did — file and bundle counts, sizes, the identifiers already shown in the interface, each profile's expiry — and returns it with the result, where the interface shows it under "What signing did". The same lines go to the desktop log under `operation = "signing"`. Neither carries a path from the person's disk or a device identifier. A failure names the stage it happened in, because "it did not work" is not a diagnosis.
+Signing runs on a blocking thread. The plan is rebuilt from the IPA, team and Watch choice rather than remembered, so the build signed is the build reviewed, and a plan whose profiles were never prepared is refused before the archive is opened. The signed build then goes through the same installation review as any other IPA, so the existing preflight validates the signer's own output.
 
-Signing needs a certificate in the current session, so the action is disabled until one is held and says so. The key survives a restart in the Keychain; the certificate is fetched from Apple again each session, and a certificate matching the stored key is reused without writing anything.
+Each run records what every stage did — file and bundle counts, sizes, identifiers already shown, each profile's expiry — returned with the result and shown under "What signing did", with the same lines under `operation = "signing"` in the desktop log. Neither carries a disk path or device identifier. A failure names the stage it happened in.
 
-A free personal team has no certificates page at developer.apple.com. When its one slot is held by a certificate whose private key is not on this Mac — an earlier run before the key was stored, say — nothing can sign and nothing can be requested. Only then does the interface offer to withdraw the team's certificates, behind its own acknowledgement, stating that every app already signed with them stops launching. It is never offered otherwise and never happens on its own.
+A free team has no certificates page at developer.apple.com. When its one slot is held by a certificate whose private key is not on this Mac, nothing can sign and nothing can be requested. Only then does the interface offer to withdraw the team's certificates, behind its own acknowledgement, stating that every app already signed with them stops launching.
 
-The rewritten identifier is itself a consequence, stated alongside the capability losses. Nothing in the build is wrong and no entitlement is involved: the identifier is the credential that identity providers and backends check, and it had to change for another team to sign at all. The plan names the SDKs it can see in the build whose services pin it — currently the Facebook SDK and Google Sign-In, by framework identifier — and says plainly that a company's own backend commonly pins it too. Because the suffix derives from the team, every tester's build has a different identifier, so each one has to be registered separately with whatever checks it.
+### Two stated consequences
 
-The signed build's main app can carry a short marker in front of its display name, on by default, so a tester who still has the company build installed can tell two identical icons apart. A prefix, because the Home Screen truncates the end of a name. `signer::marker` decides what is usable — trimmed, control characters dropped, bounded — so the rule holds wherever the value comes from rather than only where it is typed. Only `CFBundleDisplayName`, and only on the main app: `CFBundleName` is filename-adjacent, and rewriting one of those is what produced a build iOS refused to install; nested bundles have no icon a person sees. A bundle with no name is left without one rather than being given the marker as its name, and re-signing the same build every week does not stack markers.
+**The rewritten identifier.** Nothing is wrong with the build and no entitlement is involved — the identifier is the credential identity providers and backends check, and it had to change for another team to sign at all. The plan names SDKs it can see whose services pin it (currently the Facebook SDK and Google Sign-In, by framework identifier) and says plainly that a company backend commonly pins it too. Because the suffix derives from the team, every tester's build has a different identifier.
+
+**The name marker.** The signed main app can carry a short marker before its display name, on by default, so a tester who still has the company build installed can tell two identical icons apart. A prefix, because the Home Screen truncates the end. `signer::marker` decides what is usable — trimmed, control characters dropped, bounded — so the rule holds wherever the value comes from. Only `CFBundleDisplayName`, and only on the main app: `CFBundleName` is filename-adjacent, and rewriting it produced a build iOS refused. A bundle with no name is left without one, and re-signing weekly does not stack markers.
 
 ## Device log capture
 
-`diagnostics.rs` streams the iPhone's system log over the same local usbmuxd transport discovery and installation use, and it exists to answer one question: why did a screen in the re-signed build fail?
+`diagnostics.rs` streams the iPhone's system log over the same usbmuxd transport, to answer one question: why did a screen in the re-signed build fail?
 
-The iPhone's log is the whole device's — every app, every system service, and whatever personal detail those print. Orbiter does not want that and does not take it. A capture is started explicitly, keeps only lines mentioning the subjects it was given (the signed build's identifier and the app's name), counts and discards everything else, holds what it keeps in memory, and writes nothing to disk. It is refused outright unless it has been told which app it is about, so it cannot be used as a general device log reader. Each kept line is trimmed to 600 characters.
+That log is the whole device's — every app, every system service, and whatever personal detail those print. Orbiter does not take it. A capture is started explicitly, keeps only lines mentioning the subjects it was given (the signed build's identifier and the app's name), counts and discards everything else, holds what it keeps in memory, and writes nothing to disk. It is refused outright unless told which app it is about, so it cannot be a general device log reader. Kept lines are trimmed to 600 characters.
 
-A capture stops when asked, after five minutes, or after 500 matching lines, whichever comes first, and reads with a short timeout so a quiet iPhone still honours cancellation. The desktop log records that a capture ran and how many lines matched — never their contents, which belong to the device. The panel appears only once a build has been signed, since there is nothing else it could be about.
+A capture stops when asked, after five minutes, or after 500 matching lines, and reads with a short timeout so a quiet iPhone still honours cancellation. The desktop log records that a capture ran and how many lines matched, never their contents. The panel appears only once a build has been signed.
 
-The signed build and the build it was made from are normally installed side by side, and their processes share a name, so the filter is told both identifiers: a line naming the superseded one and not this one belongs to the other app and is dropped. The rewritten identifier contains the original as a substring, so this build's own lines name both and survive.
+The signed build and its source are normally installed side by side and their processes share a name, so the filter is given both identifiers: a line naming the superseded one and not this one is dropped. The rewritten identifier contains the original as a substring, so this build's own lines survive.
 
-What the log cannot show: a failure inside a `WKWebView`. Web content errors, blocked requests, and JavaScript exceptions never reach the system log — the system log only records that the web process ran. A development-signed build carries `get-task-allow`, so Safari's Web Inspector can attach to it and show those directly; a company distribution build cannot be inspected that way, which makes the re-signed build the more diagnosable of the two.
+**What it cannot show:** a failure inside a `WKWebView`. Web content errors, blocked requests and JavaScript exceptions never reach the system log. A development-signed build carries `get-task-allow`, so Safari's Web Inspector can attach and show them directly — which makes the re-signed build the more diagnosable of the two.
 
-## Interface structure
+## Interface
 
-The frontend has IPAs, Settings, and Help routes within a shared app shell. It is organised by feature rather than by kind:
+React, TypeScript, Vite, Tailwind and Tauri. Organised by feature:
 
 ```
 src/ipc/commands.ts      every call into the Rust core, typed, one function each
 src/state/pipeline.ts    what is done, what is next, and why anything is refused
-src/features/…           build, device, team, sign, install, diagnose, help
+src/features/…           build, device, team, sign, install, renew, diagnose, help
 src/types.ts             the shapes crossing the IPC boundary
 ```
 
-Components never name a command string. The whole IPC surface is one file, so what the interface can ask the backend to do is readable in one place, and a command's name or arguments change once.
+Components never name a command string. The whole IPC surface is one file, so what the interface can ask of the backend is readable in one place.
 
-`state/pipeline.ts` exists because of a real defect. Each control used to derive its own enabled state from whatever was in scope, and "Re-sign IPA" ended up clickable in a session holding no certificate: the button knew about prepared profiles and nothing else, so it offered an action the backend then refused with a sentence the screen never showed. Gates now come from `signBlocked` and `installBlocked` over one `Pipeline` value, and each returns the sentence explaining the refusal — so a disabled control and the reason beside it cannot disagree. The order of the checks is deliberate: the earliest unmet requirement is the one a person can act on.
+`state/pipeline.ts` exists because of a real defect: each control used to derive its own enabled state, and "Re-sign IPA" became clickable in a session holding no certificate — the button knew about prepared profiles and nothing else. Gates now come from `signBlocked` and `installBlocked` over one `Pipeline` value, each returning the sentence explaining the refusal, so a disabled control and the reason beside it cannot disagree. Check order is deliberate: the earliest unmet requirement is the one a person can act on.
 
-The team panel reports one `TeamStatus` upward rather than several callbacks, which keeps the derivation above it and stops the same state being reconstructed in two places.
+The team panel reports one `TeamStatus` upward rather than several callbacks, which keeps derivation above it.
 
-### Stages and help
+### Stages and navigation
 
-Each step of the pipeline renders as a stage: a heading, its controls while it needs attention, and its result once it has one. A satisfied stage collapses to that result, because the column previously showed every control of every step at once and the one thing to do next was indistinguishable from the six already done.
+Each pipeline step renders as a stage: a heading, its controls while it needs attention, its result once it has one. A satisfied stage collapses to that result.
 
-Collapsing is not sequencing. Apple does not require a registered device before issuing a certificate, and identifiers can be registered before either; only the prerequisites that genuinely exist gate a step. A collapsed stage always offers **Change**, so a completed step is never a dead end — a team, a Watch choice or a device can all be revisited.
+Collapsing is not sequencing. Apple does not require a registered device before issuing a certificate, and identifiers can be registered before either — only genuine prerequisites gate a step. A collapsed stage always offers **Change**, so a team, Watch choice or device can be revisited.
 
-The sidebar provides app navigation: IPAs and Help. Signing progress is an always-visible timeline inside the IPA workspace; each labeled step scrolls to its controls. Contextual help buttons still open a slide-over, while sidebar Help opens a dedicated page. Help holds the prose the panels used to carry: what Orbiter does, what a free team cannot carry and why, the seven-day limit, the "Untrusted Developer" step, what is stored, and how to diagnose a failure — including that a web view's failures never reach the device log. Each stage links to its section, which is what allows the stages themselves to be a control and a result rather than three paragraphs.
+The sidebar holds app navigation (IPAs, Settings, Help); signing progress is a separate always-visible timeline inside the workspace, each labelled step scrolling to its controls, horizontal above 700px of content width and vertical below. Contextual help opens a slide-over; sidebar Help opens a page carrying the prose the panels used to: what Orbiter does, what a free team cannot carry, the seven-day limit, the "Untrusted Developer" step, what is stored, and how to diagnose a failure.
+
+Routes are hash-based with no new dependency: `#/ipas`, `#/settings`, `#/help`, supporting back/forward and Tauri's asset protocol. Empty or unknown hashes normalise to IPAs. Route changes focus the destination heading. `App` keeps the IPA workspace mounted but hidden while Help or Settings is selected, so inspection, account state, form values and signing survive navigation without a global store or browser storage.
+
+Sidebar expansion defaults at 1100px; a manual choice lasts until remount. To add a section, extend `AppRoute`, register the view in `App`, and add a typed `NavigationItem`.
 
 ### Styling
 
-Tailwind v4 via the Vite plugin, with the palette the interface already had declared once in `@theme` in `src/styles.css`. Those tokens are the source of truth: the stylesheet's rules read them through `var(--color-…)` rather than repeating hex values, which is what had already gone wrong — the audit found three dead rule blocks and a dozen near-duplicate greens that had drifted apart.
+Tailwind v4 via the Vite plugin, with the palette declared once in `@theme` in `src/styles.css`. Those tokens are the source of truth and rules read them through `var(--color-…)` rather than repeating hex values — an audit had already found three dead rule blocks and a dozen near-duplicate greens that had drifted apart.
 
-Feature layouts can use utilities in the markup; shared controls and shell layout use scoped component classes. The remaining component rules stay in `styles.css` because they are genuinely shared across elements; they draw from the same tokens, so there is one palette and no second place for it to drift. Those rules are wrapped in `@layer components`, which is not cosmetic: unlayered CSS beats every layered rule regardless of specificity, so while they sat outside a layer a bare `button { border: 0 }` silently defeated a `border` utility on a button and the rail's progress dots lost their outline. Nothing reported a conflict, and specificity reasoning does not predict it.
+Feature layouts use utilities in markup; shared controls and shell layout use scoped component classes, which stay in `styles.css` because they are genuinely shared. They are wrapped in `@layer components`, which is not cosmetic: unlayered CSS beats every layered rule regardless of specificity, so while they sat outside a layer a bare `button { border: 0 }` silently defeated a `border` utility.
 
-One `Select` draws every dropdown. There were two kinds a few pixels apart — the device selector with its own bordered row, the team and Watch selects with the platform's native control — and a difference that size reads as meaning something it does not.
-
-Browser tests run their own Vite server on port 1421, never the one `npm run tauri dev` occupies on 1420. Reusing that server meant tests silently exercised whatever bundle it had started with: a Vite config added afterwards was invisible to them, so a run could pass green against a build nobody was shipping. It cost real time to notice, and the fix is one port and `reuseExistingServer: false`.
-
-App navigation and signing progress are separate. Progress is generated from the pipeline stages; adding a stage adds a shortcut inside the workspace. To add an app section, extend `AppRoute`, register its view in `App`, and add a typed `NavigationItem` to the sidebar. IPAs, Settings, and Help are exposed today.
-
-### Frontend organization
-
-The frontend continues to use React and TypeScript with Vite, Tailwind, and Tauri. `main.tsx` only mounts the app. `app` owns shell layout, hash navigation, and the expandable sidebar. Native links target `#/ipas`, `#/settings`, and `#/help`, support back/forward, and work with Tauri's asset protocol. Empty or unknown hashes normalize to IPAs. Sidebar expansion defaults at 1100px and a manual choice lasts until the app is remounted. Primary and utility navigation groups scroll independently as they grow.
-
-`App` keeps the IPA workspace mounted but hidden while Help is selected. Inspection, account state, form values, and signing operations survive navigation without a global store or browser storage. Help reuses the same content as the contextual help panel. Route changes focus the destination heading. Signing progress shows numbered, connected steps horizontally, switching to a vertical timeline below 700px of content width. Each step remains a keyboard-accessible shortcut.
-
-`components/ui` owns native form controls: `TextField`, `Checkbox`, and `Select`. Feature containers must not style their descendant input/select elements globally. Checkbox text has its own wrapping span, and select chrome is drawn once around a native select. Tokens live in `styles.css`; container queries adapt the workspace at 900px of content width and account fields at 440px.
-
-`features/workspace` composes the inspection, account, compatibility, signing, and installation UI. Inspection and signing lifecycles live in feature hooks; `features/team/useAccounts.ts` owns account state, polling, and invalidation effects. Credentials remain in component memory. `state/pipeline.ts` remains the source of workflow gates, and `ipc/commands.ts` owns typed command names and payloads, including challenge IDs and the discriminated account answer. The routing layer uses browser hash events without a new dependency. No global state store or backend contract change is introduced.
-
+`components/ui` owns native form controls — `TextField`, `Checkbox`, `Select`. Feature containers must not style descendant inputs globally. One `Select` draws every dropdown; there used to be two kinds a few pixels apart, and a difference that size reads as meaning something it does not. Container queries adapt the workspace at 900px of content width and account fields at 440px.
 
 ### Appearance
 
-Settings offers System (the default), Light, and Dark appearance. Only this preference is stored under `orbiter.appearance` in local storage; account data and credentials are unaffected. Startup applies the preference before React mounts. System mode follows live `prefers-color-scheme` changes, while explicit choices override the OS. Invalid or inaccessible storage falls back to System; changes still work for the session if storage cannot be written.
+Settings offers System (default), Light and Dark. Only this preference is stored, under `orbiter.appearance` in local storage; account data is unaffected. Startup applies it before React mounts. System mode follows live `prefers-color-scheme` changes. Invalid or inaccessible storage falls back to System, and changes still work for the session if storage cannot be written.
 
-The neutral gray palette is defined by semantic CSS variables in `styles.css`. Root `data-theme` overrides supply dark values, and `color-scheme` adapts native controls. All component colors use tokens, including focus, controls, sidebar, contextual Help, and warning/error surfaces. Warning amber and error red retain their status meaning. Settings uses native radio controls and shares the app's existing hash navigation; the IPA workspace stays mounted during appearance changes.
+Root `data-theme` overrides supply dark values and `color-scheme` adapts native controls. All component colours use tokens, including focus, sidebar, help and warning/error surfaces. Warning amber and error red keep their status meaning.
 
-Typography uses shared size tokens: 15px body text and controls, 14px labels and helper text, 13px compact metadata, 18px section headings, and 24px page titles. Timeline labels wrap within their steps; stage headings can wrap instead of crowding actions.
+### Browser tests
 
-Shared spacing tokens define 12px heading/description gaps, 8px field/link gaps, and 16px action gaps. Password fields offer a non-submitting visibility control and return to masked mode when cleared or disabled. Empty compatibility content stays compact until inspection returns findings. Account action emphasis follows the earliest unfinished, enabled action without changing backend prerequisites or acknowledgements.
-
-The UI uses the platform system font through one `--font-sans` token (San Francisco on macOS, Segoe UI on Windows), with no font downloads. Logs and code retain their monospace stack.
-
-Motion uses 140ms hover/press transitions and 200ms content reveals. Route content fades without transforms so contextual Help retains its viewport positioning. Hover movement is limited to enabled actions and appearance choices on pointer devices. Reduced-motion preferences disable transitions, transforms, reveals, smooth scrolling, and spinner animation; textual operation status remains available.
+Tests run their own Vite server on port 1421, never the 1420 that `npm run tauri dev` occupies, with `reuseExistingServer: false`. Reusing that server meant tests silently exercised whatever bundle it had started with, so a run could pass green against a build nobody was shipping.
