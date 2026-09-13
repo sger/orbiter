@@ -83,6 +83,11 @@ fn safe_step_token(step: &str) -> Option<&str> {
 /// Never format a report, its attachments, URLs, or server-provided messages.
 pub fn redacted_auth_error(report: &Report) -> String {
     let detail = redacted_auth_error_detail(report);
+    // Which step an unusable account stopped at is not the point: the account is the answer, and
+    // the step name only gets between a person and it. The diagnostic still carries the step.
+    if auth_error_is_unsupported_account(report) {
+        return detail;
+    }
     let stage = report.iter_reports().find_map(|cause| {
         let context = cause.downcast_current_context::<&str>().copied()
             .or_else(|| cause.downcast_current_context::<String>().map(String::as_str));
@@ -120,7 +125,7 @@ fn redacted_auth_error_detail(report: &Report) -> String {
             // account that signs in through an organisation's identity provider has no Apple
             // password to verify and produces exactly this shape, so it is named as the likely
             // reason — likely, because this response alone does not prove it.
-            Some("Failed to parse initial login response") => fallback = "Apple accepted the request but answered without the password-verification fields this step needs, and reported no error of its own. An account that signs in through an organisation's identity provider — a federated Managed Apple ID — has no Apple password for Orbiter to verify and answers exactly like this. Use a personal Apple ID for this step.",
+            Some("Failed to parse initial login response") => fallback = "Apple answered without the password fields this step needs and reported no error of its own, which is how an account whose password lives at an organisation's identity provider — a federated or Managed Apple ID — answers: there is no Apple password for Orbiter to check. Retyping the password or entering a verification code cannot complete it. Sign in with a personal Apple ID instead.",
             Some("Failed to parse proof login response") => fallback = "Apple's answer to the password check was not in the shape this adapter expects.",
             _ => {}
         }
@@ -295,6 +300,49 @@ pub fn auth_throttle_delay(report: &Report) -> Option<std::time::Duration> {
         }
     }
     None
+}
+
+/// True when the account itself is one Orbiter cannot sign in, whatever the credentials are.
+///
+/// Three shapes mean this, and all three lead to the same answer — use a personal Apple ID:
+///
+/// * Apple's own federation code, `-22320`.
+/// * An additional sign-in step this adapter does not implement.
+/// * Apple accepting the request and answering without the password-verification fields, while
+///   reporting no error of its own. An account whose password lives at an organisation's identity
+///   provider has nothing for the password handshake to verify and answers exactly like this.
+///
+/// Kept separate from [`auth_error_is_inconclusive`], which means Apple never looked at the
+/// credentials. This means Apple looked and there was no password to look at — a conclusive
+/// answer, but not a rejected one, and a person must not be sent to reset a password over it.
+pub fn auth_error_is_unsupported_account(report: &Report) -> bool {
+    let mut missing_login_fields = false;
+    let mut at_initial_login = false;
+    for cause in report.iter_reports() {
+        if let Some(error) = cause.downcast_current_context::<SideloadError>() {
+            match error {
+                SideloadError::AuthWithMessage(-22320, _) | SideloadError::UnsupportedStep(_) => {
+                    return true;
+                }
+                // Apple reporting any other code of its own means it did evaluate the request,
+                // so the shape below is not what happened.
+                SideloadError::AuthWithMessage(..) => return false,
+                _ => {}
+            }
+        }
+        if cause
+            .downcast_current_context::<crate::util::plist::MissingPlistValue>()
+            .is_some()
+        {
+            missing_login_fields = true;
+        }
+        if cause.downcast_current_context::<&str>().copied()
+            == Some("Failed to parse initial login response")
+        {
+            at_initial_login = true;
+        }
+    }
+    missing_login_fields && at_initial_login
 }
 
 /// True when Apple never evaluated the credentials: throttling, service errors, or transport

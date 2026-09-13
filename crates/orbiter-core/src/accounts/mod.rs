@@ -439,9 +439,16 @@ impl Accounts {
             })
             .await
             .map_err(|error| {
-                // Throttling, outages, and transport failures never reached the credentials;
-                // saying "authentication failed" would send the user to reset a valid password.
-                let prefix = if isideload::auth_error_is_inconclusive(&error) {
+                // Three different things, and only one of them is a wrong password.
+                //
+                // An account Orbiter cannot sign in at all is conclusive but not a rejection:
+                // Apple looked and found no password to check, because the account's password
+                // lives at an organisation's identity provider. Throttling, outages, and
+                // transport failures never reached the credentials. Saying "authentication
+                // failed" for either would send someone to reset a password that is fine.
+                let prefix = if isideload::auth_error_is_unsupported_account(&error) {
+                    "Orbiter cannot sign this Apple account in."
+                } else if isideload::auth_error_is_inconclusive(&error) {
                     "Apple did not complete sign-in, and did not report your password or two-factor verification as wrong."
                 } else {
                     "Apple account authentication or two-factor verification failed."
@@ -812,10 +819,14 @@ mod tests {
         ))
         .context("GrandSlam error during initial login request")
         .attach("SECRET_TOKEN");
-        let message = isideload::redacted_auth_error(&error.into_dynamic());
-        assert!(message.starts_with("Initial Apple login:"));
+        let error = error.into_dynamic();
+        let message = isideload::redacted_auth_error(&error);
         assert!(message.contains("federated organization sign-in"));
         assert!(!message.contains("SECRET"));
+        // The account is the answer, so the step it stopped at is left out of the sentence: it
+        // would only stand between a person and the one thing they can act on.
+        assert!(!message.contains("Initial Apple login:"));
+        assert!(isideload::auth_error_is_unsupported_account(&error));
     }
 
     #[test]
@@ -953,6 +964,9 @@ mod tests {
         assert!(message.contains("personal Apple ID"));
         assert!(!message.contains("SECRET"));
         assert!(!message.contains("could not complete this step"));
+        // Without the typed missing field this resembles the federated shape but does not
+        // establish it, so Orbiter reports a parse failure rather than an unusable account.
+        assert!(!isideload::auth_error_is_unsupported_account(&error));
     }
 
     #[test]
@@ -1018,11 +1032,14 @@ mod tests {
         assert!(diagnostic.contains("missing data 's'"));
         assert!(diagnostic.contains("Failed to parse initial login response"));
         assert!(!diagnostic.contains("SECRET"));
-        // And the sentence a person reads still names the likely reason, not the field.
+        // And the sentence a person reads names the reason and what to do, not the field.
         let message = isideload::redacted_auth_error(&error);
-        assert!(message.starts_with("Initial Apple login:"));
         assert!(message.contains("identity provider"));
+        assert!(message.contains("personal Apple ID"));
         assert!(!message.contains("SECRET"));
+        // Conclusive, but not a rejected password: nobody is sent to reset a working one.
+        assert!(isideload::auth_error_is_unsupported_account(&error));
+        assert!(!isideload::auth_error_is_inconclusive(&error));
     }
 
     #[test]
