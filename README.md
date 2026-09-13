@@ -55,7 +55,7 @@ See [architecture and limits](docs/architecture.md), [dependency decisions and A
 
 ## Connected iPhone discovery
 
-Connect and unlock an iPhone. The device selector refreshes automatically; **Refresh** forces a new check. It shows name/model, USB or network transport, iOS version, and verified pairing or a recovery message. A verified pairing session does not prove the device is unlocked, Developer Mode is enabled, or an IPA is authorized for installation.
+Connect and unlock an iPhone. The device selector refreshes automatically; **Refresh** forces a new check. It shows name/model, whether the iPhone is on a cable or Wi-Fi, iOS version, and verified pairing or a recovery message. A phone reachable both ways is listed once, on the cable, and says the other is available. Installing over Wi-Fi works and takes longer; if the connection drops part-way the transfer starts again, since Orbiter never repeats one on its own. An iPhone must be connected by cable once and trusted before it can be reached over Wi-Fi at all — the trust prompt appears over a cable only, and an untrusted iPhone is not advertised over Wi-Fi. A verified pairing session does not prove the device is unlocked, Developer Mode is enabled, or an IPA is authorized for installation.
 
 ```sh
 cargo run --locked -p orbiter-core --bin orbiter-devices
@@ -65,7 +65,7 @@ This CLI returns device display metadata and ephemeral transport IDs, not UDIDs 
 
 ## Install an already-signed IPA
 
-1. Select the company IPA and a paired USB iPhone.
+1. Select the company IPA and a paired iPhone, connected by cable or reachable over Wi-Fi.
 2. In **Install existing signature**, choose **Review installation**. This makes a private local snapshot, checks iPhone platform/OS support, executable inspection, profile expiry and the phone's profile membership, and queries only the selected bundle ID on the phone. It does not upload or install the IPA.
 3. Review the app/device, existing-app warning, blockers, notes, and snapshot fingerprint. Reviews expire after ten minutes and are invalidated when the selected IPA/device changes.
 4. If there are no blockers, acknowledge the replacement/data-retention consequences and choose **Install unchanged IPA**. This uploads the snapshot over AFC, then asks iOS to install it. No signing identity is changed and no Watch bundle or entitlement is stripped.

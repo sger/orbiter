@@ -7,7 +7,7 @@ controls and sample account data are not part of the production application.
 
 ## Flow
 
-Choose a library version or import originals → check the IPA and verified USB iPhone → prepare
+Choose a library version or import originals → check the IPA and verified iPhone, on a cable or Wi-Fi → prepare
 signing only when needed or requested → review the exact artifact → explicitly install → result.
 Imports are sequential, retain partial failures, and never authorize signing or installation.
 
@@ -72,5 +72,5 @@ Run the frontend build, Playwright suite, core Rust tests, workspace Clippy, for
 
 Physical verification still required: use a chosen original IPA and live Personal Team/Developer
 Program accounts to exercise import → prepare/sign → explicit install → restart → reopen.
-USB discovery and verified pairing alone are not native end-to-end validation. Actual installation
+Discovery and verified pairing alone are not native end-to-end validation. Actual installation
 requires its own artifact review and acknowledgement; development work does not bypass that gate.

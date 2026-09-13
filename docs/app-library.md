@@ -34,7 +34,7 @@ Browser tests use synthetic IPC. Rust tests use temporary files and synthetic IP
 
 1. Import a real IPA; verify the source file remains unchanged.
 2. Open it, authenticate, explicitly prepare signing, and sign. Confirm a retained signed artifact appears under the original.
-3. Review that artifact for an unlocked USB iPhone, acknowledge, and install. Confirm artifact/device/outcome attribution.
+3. Review that artifact for an unlocked iPhone, on a cable or Wi-Fi, acknowledge, and install. Confirm artifact/device/outcome attribution.
 4. Restart Orbiter. Reopen the same saved artifact and verify metadata, history, device tag, and expiration persist.
 5. Review a second installation independently; do not assume the prior install authorizes another.
 

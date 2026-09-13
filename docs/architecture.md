@@ -49,9 +49,35 @@ Add device transport through evaluated `idevice` APIs before authentication. The
 
 `devices.rs` uses exact-pinned idevice 0.1.65 with `usbmuxd` and `ring`; the installation module additionally enables `afc` and `installation_proxy`. Pairing mutation is not enabled. It lists transports through the local daemon, reads selected Lockdown metadata keys, obtains an existing pairing record into memory, and verifies a TLS session. Known non-iPhones are excluded; devices with unavailable metadata remain visible as unverified. Only an ephemeral mux ID, display metadata, connection category, and redacted status leave the core. No UDID, IP address, HostID, or key is exposed in reports/logs.
 
-Discovery has a three-second daemon deadline and three seconds per device, capped at sixteen transports (maximum roughly 51 seconds). The UI skips overlapping polls, refreshes every five seconds when idle, and clears selections that disappear. Stale sessions are not reused. A timeout/disconnection produces an unavailable state. Missing/unreadable pairing records are reported as unverified, rather than claiming that trust was rejected. A successful TLS session establishes pairing; lock state and Developer Mode remain unverified unless the device explicitly returns a locked error. `PasswordProtected` is not used to infer lock state.
+A phone reachable on more than one transport is one phone: the daemon lists it once per connection with one identity, and discovery collapses those into a single entry on its preferred transport, naming the other as `alternate`. A cable always wins — it is faster and does not stop working when someone walks out of range. The identity used to group them is dropped before the report is built, so no UDID or address is added to what leaves Rust.
+
+Discovery has a three-second daemon deadline and three seconds per device. Up to thirty-two transports are read from the daemon and up to sixteen phones are probed, so the probe budget is spent per phone rather than per cable. The UI skips overlapping polls, refreshes every five seconds when idle, and clears selections that disappear. Stale sessions are not reused. A timeout/disconnection produces an unavailable state. Missing/unreadable pairing records are reported as unverified, rather than claiming that trust was rejected. A successful TLS session establishes pairing; lock state and Developer Mode remain unverified unless the device explicitly returns a locked error. `PasswordProtected` is not used to infer lock state.
 
 The desktop tracing filter admits only Orbiter's structured events, excluding dependency logs that could contain pairing or protocol payloads. The standalone discovery CLI installs no tracing subscriber. Pairing records remain managed by the OS Apple service; Orbiter neither stores nor mutates them. Windows uses loopback only and requires its own hardware validation. Installation transport is implemented as the preview described below; its happy path was confirmed by the user; interruption/recovery validation is pending.
+
+### Wi-Fi, and why pairing still needs a cable
+
+An operation locates a phone by its identity, not by the number the daemon gave one of its
+connections. That number belongs to a connection and changes when a phone moves between a cable and
+Wi-Fi; the phone does not. So the number is used only for first contact — it is all the window has
+for a phone nobody has identified yet — and every later lookup, including staging cleanup, resolves
+by identity. A review therefore survives the cable being pulled, and cleanup no longer fails for the
+sole reason that the phone moved. The identity check that used to compare UDIDs after resolving is
+now structural: a mismatch cannot arise from a lookup keyed on identity.
+
+A changed connection is reported, not refused. Moving to Wi-Fi changes how long a transfer takes,
+and someone watching a progress bar slow down deserves to know it is the connection rather than the
+phone.
+
+Nothing about pairing changes, and nothing can: Orbiter reads an existing pairing record and never
+creates, resets, or stores one. Apple shows the "Trust This Computer?" prompt over a cable only, and
+the system does not advertise an unpaired phone over Wi-Fi at all — so a phone is either already
+paired or invisible, and there is no first contact over Wi-Fi to support. Orbiter's part is to say
+so when the list is empty rather than to work around it.
+
+Wi-Fi also changes nothing about where requests go. A network install is still relayed by *this
+Mac's own* device daemon, so `address()` and the test that pins it to the local socket are
+untouched and still mean what they say.
 
 ## Existing-signature installation
 
@@ -61,11 +87,11 @@ App icons are read from the archive in process. An Apple-optimised (CgBI) PNG ca
 
 Preflight rejects missing/expired profiles, incomplete/encrypted executable inspection, unverified iPhone platform/architecture/OS metadata, and profiles that do not authorize the selected phone (unless `ProvisionsAllDevices` explicitly authorizes all devices). Nested iPhone bundles receive membership checks; Watch bundles stay included, with Watch-device authorization explicitly unverified. No identifier, entitlement, profile, or signature is modified. Installed-app lookup is limited to the main bundle ID. The review shows potential replacement, and execution repeats the lookup and rejects a changed installed version/build.
 
-Before staging, execution checks the same physical UDID, USB connection, pairing, the snapshot's profile conditions, and installed-app state again. AFC transfers in 256 KiB chunks to a UUID-named file under `PublicStaging`; the accumulated hash and byte count must match the review before dispatch. Cancellation is atomic with the transition into installation. After that boundary there is no cancellation or rollback promise. The code uses idevice's InstallationProxy command and progress callback, not the convenience uploader (which reads the entire IPA and uses a shared staging filename).
+Before staging, execution checks the same physical UDID, pairing, the snapshot's profile conditions, and installed-app state again. AFC transfers in 256 KiB chunks to a UUID-named file under `PublicStaging`; the accumulated hash and byte count must match the review before dispatch. Cancellation is atomic with the transition into installation. After that boundary there is no cancellation or rollback promise. The code uses idevice's InstallationProxy command and progress callback, not the convenience uploader (which reads the entire IPA and uses a shared staging filename).
 
 A job journal is atomically replaced using a private temporary file and synced before device-install dispatch. It records only a random job ID, stage, byte counts, optional iOS-reported percentage, redacted message, and cleanup-needed flag. It records no credentials, UDID, pairing record, source path, or app binary. Preparing/transferring jobs become failed after restart; dispatching/installing jobs become unknown. No job resumes or retries automatically. A reported iOS completion is the sole success signal; 100% progress alone is not success. Explicit device rejections are failed; transport loss after dispatch is unknown.
 
-Individual AFC calls have a 15-second timeout; device connection/lookup have ten-second deadlines; the overall job has a twenty-minute deadline. Normal terminal outcomes attempt to remove only the generated staging file after rechecking the physical device binding. Unknown outcomes leave staging alone because iOS may still be reading it. Cleanup failures are visible. Process-killed temporary snapshots and staging files are not automatically scavenged; the latest-job journal is not a complete refresh database. Atomic replacement is tested locally, but power-loss durability and multi-process coordination are not claimed. Run one desktop process at a time.
+Individual AFC calls have a 15-second timeout over a cable and 60 seconds over Wi-Fi, where a write that would be instant can sit behind other traffic; device connection and lookup have a 25-second deadline covering several lockdown round-trips plus a TLS handshake; the overall job has a 45-minute backstop. The job deadline is one value rather than one per transport because the transport can change mid-job. `install_with_callback` has no deadline of its own and is watched for silence instead: three minutes without iOS reporting progress ends the wait. That interval is a judgement rather than a measurement — iOS reports every few seconds while working — and the outcome is recorded as **unknown**, never failed, because the install command reached the phone and may have completed. Normal terminal outcomes attempt to remove only the generated staging file after rechecking the physical device binding. Unknown outcomes leave staging alone because iOS may still be reading it. Cleanup failures are visible. Process-killed temporary snapshots and staging files are not automatically scavenged; the latest-job journal is not a complete refresh database. Atomic replacement is tested locally, but power-loss durability and multi-process coordination are not claimed. Run one desktop process at a time.
 
 ## Account authentication and team selection
 
@@ -103,7 +129,7 @@ It exits non-zero when the plan has blockers. Actual signing must revalidate eve
 
 `provisioning::register` is the first Orbiter operation that writes to Apple rather than reading. It refuses before any request unless a live session exists, a team is selected, and the consequence has been acknowledged: a free personal team allows three devices, and a paid team consumes one of its 100 slots for the membership year, which removing the device later does not return. The refusal order is checked by tests, and a view that merely says "signed in" is not enough — the session object itself authorises the write, so a stale or forged view cannot reach Apple.
 
-The device identifier is read through the existing verified-iPhone path in the installation module, which requires USB, a readable pairing record, a verified session, and a real iPhone. It is handed straight to Apple with the device name, and never enters the account view, the report, the journal, or any log; the returned outcome carries only whether the device was already registered or was registered now, and how many devices the team then has. A team membership whose kind Apple did not establish is treated as the stricter free allowance rather than the permissive one.
+The device identifier is read through the existing verified-iPhone path in the installation module, which requires a readable pairing record, a verified session, and a real iPhone. It is handed straight to Apple with the device name, and never enters the account view, the report, the journal, or any log; the returned outcome carries only whether the device was already registered or was registered now, and how many devices the team then has. A team membership whose kind Apple did not establish is treated as the stricter free allowance rather than the permissive one.
 
 Registration lists the team's devices first, so an already-registered iPhone writes nothing. A timeout during the write says explicitly that the request may still have been applied and to check developer.apple.com, because a portal write has no rollback. The UI offers registration only once a team is selected, clears its result when the device or team changes, and requires the acknowledgement checkbox each time.
 
