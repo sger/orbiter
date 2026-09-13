@@ -296,10 +296,7 @@
     transition:
       background-color 140ms ease,
       border-color 140ms ease,
-      transform 140ms ease;
-  }
-  .guided-flow button:not(:disabled):hover {
-    transform: translateY(-1px);
+      color 140ms ease;
   }
   .guided-heading {
     animation: guided-enter 160ms ease-out;
@@ -307,11 +304,9 @@
   @keyframes guided-enter {
     from {
       opacity: 0;
-      transform: translateY(3px);
     }
     to {
       opacity: 1;
-      transform: translateY(0);
     }
   }
 }
@@ -333,4 +328,24 @@
   padding: 10px 16px;
   color: var(--color-ink);
   font-weight: 600;
+}
+
+.guided-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.guided-context-actions .text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 36px;
+  padding: 0;
+  text-align: left;
+}
+.guided-back {
+  display: block;
+  max-width: 1120px;
+  margin: 0 auto 16px;
+  padding-inline: 0;
 }

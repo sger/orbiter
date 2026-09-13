@@ -110,7 +110,7 @@ test("subtle motion respects the system reduced-motion preference", async ({
   await page.goto("/#/settings");
   const option = page.locator(".appearance-option").first();
   await option.hover();
-  await expect(option).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, -2)");
+  await expect(option).toHaveCSS("transform", "none");
   await expect(page.locator('[data-page-active="true"]')).toHaveCSS(
     "animation-name",
     "content-reveal",

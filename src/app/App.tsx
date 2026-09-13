@@ -112,7 +112,7 @@ export function App() {
           data-page-active={workspace}
         >
           <a
-            className="text-button"
+            className="text-button guided-back"
             href={selected ? `#/ipas/${selected.artifact.app_id}` : "#/ipas"}
           >
             Back to library

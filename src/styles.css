@@ -1072,6 +1072,30 @@
   }
   .text-field {
     min-width: 0;
+    display: grid;
+    gap: var(--space-field, 8px);
+    align-content: start;
+  }
+  .text-field > label {
+    display: block;
+    margin: 0;
+    line-height: 1.5;
+  }
+  .account-sign-in-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin-top: 16px;
+  }
+  .accounts .account-sign-in-actions > button {
+    margin: 0;
+    flex-shrink: 0;
+  }
+  .account-sign-in-actions > .hint {
+    margin: 0;
+    min-width: 180px;
+    flex: 1;
   }
   .text-field input,
   .two-factor input {
@@ -1702,7 +1726,7 @@
       border-color var(--motion-fast) ease,
       color var(--motion-fast) ease,
       box-shadow var(--motion-fast) ease,
-      transform var(--motion-fast) var(--motion-ease);
+      opacity var(--motion-fast) ease;
   }
   /* Fade route content without making a new containing block for contextual Help. */
   [data-page-active="true"],
@@ -1718,24 +1742,24 @@
   .review-button:enabled:active,
   .secondary:enabled:active,
   .drop:enabled:active {
-    transform: translateY(1px);
+    transform: none;
   }
   .sidebar-item:active,
   .sidebar-toggle:active {
-    transform: scale(0.98);
+    transform: none;
   }
   @media (hover: hover) and (pointer: fine) {
     .primary:enabled:hover,
     .review-button:enabled:hover,
     .secondary:enabled:hover {
-      transform: translateY(-1px);
+      transform: none;
       box-shadow: var(--shadow-soft);
     }
     .card:hover {
       border-color: var(--color-line-strong);
     }
     .appearance-option:hover {
-      transform: translateY(-2px);
+      transform: none;
       border-color: var(--color-ink-muted);
     }
     .select-control:not([data-disabled]):hover,
@@ -1748,7 +1772,7 @@
     .primary:enabled:active,
     .review-button:enabled:active,
     .secondary:enabled:active {
-      transform: translateY(1px);
+      transform: none;
     }
   }
   @keyframes content-reveal {
@@ -2094,6 +2118,8 @@
   flex-shrink: 0;
 }
 .library-heading-actions button {
+  margin: 0;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

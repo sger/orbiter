@@ -892,19 +892,24 @@ export function GuidedWorkspace({
             history.
           </p>
           <ExpiryLine expiry={expiry} variant="line" />
-          {flow.stage !== "account" && (
-            <button className="text-button" onClick={() => setHelp("account")}>
-              What is stored
-            </button>
-          )}
-          {selected && (
-            <a
-              className="text-button"
-              href={`#/ipas/${selected.artifact.app_id}`}
-            >
-              App details
-            </a>
-          )}
+          <div className="guided-context-actions">
+            {flow.stage !== "account" && (
+              <button
+                className="text-button"
+                onClick={() => setHelp("account")}
+              >
+                What is stored
+              </button>
+            )}
+            {selected && (
+              <a
+                className="text-button"
+                href={`#/ipas/${selected.artifact.app_id}`}
+              >
+                App details
+              </a>
+            )}
+          </div>
         </aside>
       </div>
       {help && <HelpPanel open section={help} onClose={() => setHelp(null)} />}

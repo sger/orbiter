@@ -657,3 +657,64 @@ test("App Library is the single app destination and its install action opens a f
     page.getByRole("button", { name: "Check app & iPhone" }),
   ).toBeDisabled();
 });
+
+for (const width of [1280, 780]) {
+  test(`controls and form labels stay aligned at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ colorScheme: width === 1280 ? "dark" : "light" });
+    await choose(page, "needs_signing");
+    const links = page.locator(".guided-context-actions .text-button");
+    const firstLink = await links.nth(0).boundingBox();
+    const secondLink = await links.nth(1).boundingBox();
+    expect(Math.abs(firstLink!.y - secondLink!.y)).toBeLessThan(1);
+    await links.nth(0).hover();
+    await expect(links.nth(0)).toHaveCSS("transform", "none");
+    await page.getByRole("button", { name: "Check app & iPhone" }).click();
+    await page
+      .getByRole("button", { name: "Continue with Apple account" })
+      .click();
+    for (const id of ["account", "apple-password"]) {
+      const label = await page.locator(`label[for="${id}"]`).boundingBox();
+      const input = await page.locator(`#${id}`).boundingBox();
+      expect(input!.y - (label!.y + label!.height)).toBeGreaterThanOrEqual(8);
+    }
+    const action = page.getByRole("button", { name: "Sign in to Apple" });
+    const button = await action.boundingBox();
+    const help = await page.locator("#sign-in-help").boundingBox();
+    expect(
+      Math.abs(button!.y + button!.height / 2 - help!.y - help!.height / 2),
+    ).toBeLessThan(1);
+    await page.getByLabel("Apple account email").fill("local@example.invalid");
+    await page
+      .getByLabel("Password", { exact: true })
+      .fill("synthetic-password");
+    await page
+      .getByRole("checkbox", { name: /I agree to authenticate/ })
+      .check();
+    await action.hover();
+    await expect(action).toHaveCSS("transform", "none");
+    await page.screenshot({
+      path: `test-results/aligned-account-${width}.png`,
+      fullPage: true,
+    });
+    await page.getByRole("link", { name: "App Library", exact: true }).click();
+    const actions = page.locator(".library-heading-actions button");
+    await expect(actions.nth(0)).toBeVisible();
+    const importButton = await actions.nth(0).boundingBox();
+    const installButton = await actions.nth(1).boundingBox();
+    expect(
+      Math.abs(
+        importButton!.y +
+          importButton!.height / 2 -
+          installButton!.y -
+          installButton!.height / 2,
+      ),
+    ).toBeLessThan(1);
+    await page.screenshot({
+      path: `test-results/aligned-library-${width}.png`,
+      fullPage: true,
+    });
+  });
+}

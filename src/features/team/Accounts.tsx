@@ -187,16 +187,16 @@ export function Accounts({
           </Checkbox>
           {/* The action and the reason it is unavailable belong on one line: a button with its
               explanation stranded below it reads as two unrelated things. */}
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <div className="account-sign-in-actions">
             <button
               type="submit"
-              className="secondary action-emphasis !mt-0"
+              className="secondary action-emphasis"
               disabled={signInBlocker !== null}
               aria-describedby="sign-in-help"
             >
               Sign in to Apple
             </button>
-            <p id="sign-in-help" className="hint min-w-0 flex-1" role="status">
+            <p id="sign-in-help" className="hint" role="status">
               {signInBlocker ?? "Ready to sign in with Apple."}
             </p>
           </div>
