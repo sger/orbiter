@@ -8,6 +8,7 @@ import { Workspace } from "../features/workspace/Workspace";
 import { HelpPage } from "../features/help/HelpPage";
 import { AppShell } from "./AppShell";
 import { useAppRoute } from "./navigation";
+import { message } from "../ipc/failure";
 
 export function App() {
   const route = useAppRoute();
@@ -48,7 +49,7 @@ export function App() {
         }
       })
       .catch((e) => {
-        if (!disposed) setError(String(e));
+        if (!disposed) setError(message(e));
       })
       .finally(() => {
         if (!disposed) setOpening(false);

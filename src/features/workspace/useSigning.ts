@@ -6,6 +6,7 @@ import {
   libraryChanged,
 } from "../../ipc/commands";
 import type { Signed, SigningProgress, WatchChoice } from "../../types";
+import { message } from "../../ipc/failure";
 
 export function useSigning(artifactId?: string) {
   const [signed, setSigned] = useState<Signed | null>(null);
@@ -45,9 +46,7 @@ export function useSigning(artifactId?: string) {
           ),
         );
     } catch (error) {
-      setSignError(
-        typeof error === "string" ? error : "Signing did not complete.",
-      );
+      setSignError(message(error));
     } finally {
       setSigning(false);
       setSignStep(null);

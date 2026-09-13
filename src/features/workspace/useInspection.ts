@@ -15,6 +15,7 @@ import {
 } from "../../ipc/commands";
 import type { Opened } from "../library/types";
 import type { Report } from "../../types";
+import { message } from "../../ipc/failure";
 
 export function useInspection(
   installActive: RefObject<boolean>,
@@ -45,7 +46,7 @@ export function useInspection(
       setStage("Inspection complete");
       setIpaPath(path);
     } catch (e) {
-      setError(String(e));
+      setError(message(e));
       setStage("Inspection stopped");
     } finally {
       active.current = false;

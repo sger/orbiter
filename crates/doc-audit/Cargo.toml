@@ -1,0 +1,12 @@
+[package]
+name = "doc-audit"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# A real parser, not a regex: `fn` appears inside strings, comments and macro bodies, and a
+# documentation check that cannot tell those apart proves nothing.
+syn = { version = "=2.0.119", features = ["full", "parsing", "visit"] }
+proc-macro2 = { version = "=1.0.107", features = ["span-locations"] }
+walkdir = "=2.5.0"

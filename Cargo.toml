@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/orbiter-core", "src-tauri"]
+members = ["crates/orbiter-core", "crates/doc-audit", "src-tauri"]
 exclude = ["vendor/isideload"]
 default-members = ["crates/orbiter-core"]
 resolver = "2"

@@ -1,3 +1,15 @@
+//! Reading an embedded provisioning profile.
+//!
+//! A `.mobileprovision` is a CMS envelope wrapping a property list. This parses the envelope
+//! properly rather than hunting for an XML substring inside it, and reports what the profile
+//! claims — **without** verifying the CMS signature or any certificate chain. Nothing here decides
+//! that a profile is trustworthy; `trust` says so in as many words, and every caller repeats it.
+//!
+//! # Privacy
+//!
+//! `ProvisionedDevices` lists real UDIDs. Only their count is kept, so a report can be pasted into
+//! an issue without publishing the hardware identity of someone's phone.
+
 use crate::{Error, Result, entitlements, parse_plist, string};
 use cms::{content_info::ContentInfo, signed_data::SignedData};
 use der::{Decode, asn1::OctetString};
@@ -19,6 +31,15 @@ pub struct Profile {
     pub entitlements: BTreeMap<String, serde_json::Value>,
     pub trust: &'static str,
 }
+/// Unwrap the CMS envelope and return the property list inside it.
+///
+/// Checks both content-type OIDs rather than trusting the structure, so a file that merely
+/// contains a plist is rejected instead of being read as a profile.
+///
+/// # Errors
+///
+/// Returns [`Error::Profile`] for anything that is not a signed-data envelope wrapping data, and
+/// [`Error::Plist`] if the payload is not a bounded, well-formed property list.
 pub(crate) fn dictionary(bytes: &[u8]) -> Result<plist::Dictionary> {
     // Parse the CMS envelope, not an XML substring. This does not verify CMS signatures.
     let content = ContentInfo::from_der(bytes).map_err(|_| Error::Profile)?;
@@ -37,13 +58,40 @@ pub(crate) fn dictionary(bytes: &[u8]) -> Result<plist::Dictionary> {
         .map_err(|_| Error::Profile)?;
     parse_plist(octets.as_bytes())
 }
+/// Describe an embedded provisioning profile.
+///
+/// # Errors
+///
+/// Returns [`Error::Profile`] or [`Error::Plist`]; see [`dictionary`].
 pub fn inspect(bytes: &[u8]) -> Result<Profile> {
     from_dictionary(dictionary(bytes)?)
 }
 #[cfg(test)]
+/// Read a profile from a bare property list, skipping the CMS envelope.
+///
+/// Test-only: it lets a case describe the payload directly instead of building a signed envelope
+/// around it. Production code always goes through [`inspect`], which requires the envelope.
+///
+/// # Errors
+///
+/// Returns [`Error::Plist`] if the bytes are not a bounded, well-formed property list.
 fn from_plist(bytes: &[u8]) -> Result<Profile> {
     from_dictionary(parse_plist(bytes)?)
 }
+/// Build the description from an already-parsed profile payload.
+///
+/// Classifies distribution from what the profile carries rather than from its name: a device
+/// allowlist plus `get-task-allow` reads as development, an allowlist without it as ad hoc, and
+/// `ProvisionsAllDevices` as enterprise-like. Each label ends in "-like" because this is an
+/// inference from contents, not a statement about how the profile was issued.
+///
+/// Expiry is carried in two forms — the displayable string and epoch seconds — taken from one
+/// value, so the date shown and the date counted can never disagree.
+///
+/// # Errors
+///
+/// Currently infallible, but returns `Result` so a future validity check does not change every
+/// caller.
 fn from_dictionary(d: plist::Dictionary) -> Result<Profile> {
     let ent = entitlements(d.get("Entitlements"));
     let devices = d
@@ -91,9 +139,12 @@ fn from_dictionary(d: plist::Dictionary) -> Result<Profile> {
     })
 }
 #[cfg(test)]
+/// Checks that a profile is parsed from its real envelope and that device identities stay out.
 mod tests {
     use super::*;
     #[test]
+    /// A profile's device allowlist is reduced to a count: the serialised description must not
+    /// contain a UDID, because reports are pasted into issues.
     fn redacts_device_identifiers() {
         let p=from_plist(br#"<plist version="1.0"><dict><key>ProvisionedDevices</key><array><string>SECRET-UDID</string></array><key>Entitlements</key><dict><key>get-task-allow</key><false/></dict></dict></plist>"#).unwrap();
         assert_eq!(p.device_count, Some(1));
@@ -101,10 +152,15 @@ mod tests {
         assert!(!serde_json::to_string(&p).unwrap().contains("SECRET-UDID"));
     }
     #[test]
+    /// A file that merely contains a property list is not a profile. Accepting one would mean
+    /// anything could claim to be provisioning.
     fn rejects_xml_outside_cms() {
         assert!(inspect(b"junk<plist><dict/></plist>").is_err());
     }
     #[test]
+    /// A real signed-data envelope is parsed, its expiry is recognised, the result still says
+    /// trust was not verified — and every truncation of those same bytes is refused rather than
+    /// partially read.
     fn parses_cms_envelope_without_claiming_trust() {
         use cms::{
             content_info::CmsVersion,

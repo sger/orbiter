@@ -6,6 +6,7 @@
 //! resolved by ID, never by a caller-supplied path.
 use crate::{
     Report,
+    domain::identifiers::{AppId, ArtifactId, JobId, RememberedDeviceId},
     installation::job::{JobStatus, Stage},
 };
 use base64::Engine;
@@ -16,11 +17,30 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Mutex, atomic::AtomicBool},
+    sync::{Arc, Mutex, atomic::AtomicBool},
 };
 
-static STORE: Mutex<()> = Mutex::new(());
-static PINS: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
+/// Coordination state for one library directory.
+///
+/// This used to be two process-global `static`s. Globals meant two `Library` values for different
+/// roots serialised against each other, tests in one binary shared a lease table, and nothing
+/// owned either — there was no object whose lifetime the coordination belonged to. It now hangs
+/// off the `Library` itself, and the application runtime constructs exactly one per root.
+///
+/// # Locking
+///
+/// `metadata` is the outer lock and `pins` the inner one: code that holds `metadata` may take
+/// `pins`, never the reverse. Both are blocking mutexes and neither is ever held across an `await`
+/// — every public method that takes one runs to completion synchronously, on a blocking thread.
+#[derive(Default)]
+struct Shared {
+    /// Serialises read-modify-write of the manifest. Guards nothing itself; the manifest on disk
+    /// is the state, and this makes one writer at a time within this process.
+    metadata: Mutex<()>,
+    /// Managed files an operation is currently using, by path and depth of use. A pinned file is
+    /// refused to deletion and to republication until every lease on it is dropped.
+    pins: Mutex<BTreeMap<PathBuf, usize>>,
+}
 /// Bumped whenever the manifest gains a field. Reading an older one is fine — its new fields are
 /// simply unknown — but an older Orbiter must refuse a newer manifest rather than load it and
 /// silently drop every field it does not know on its next save.
@@ -42,7 +62,7 @@ fn id() -> String {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct App {
-    pub id: String,
+    pub id: AppId,
     pub identifier: String,
     pub name: String,
     /// The icon's own SHA-256; the bytes live beside the artifacts, not in this file.
@@ -56,9 +76,10 @@ pub struct App {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Artifact {
-    pub id: String,
-    pub app_id: String,
-    pub source_id: Option<String>,
+    pub id: ArtifactId,
+    pub app_id: AppId,
+    /// The original this was signed from, when it is a signed build rather than an import.
+    pub source_id: Option<ArtifactId>,
     pub sha256: String,
     pub name: String,
     pub identifier: String,
@@ -78,16 +99,17 @@ pub struct Artifact {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Device {
-    pub id: String,
+    pub id: RememberedDeviceId,
     pub name: String,
     pub last_seen_unix: i64,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Attempt {
-    pub id: String,
-    pub app_id: String,
-    pub artifact_id: String,
-    pub device_id: String,
+    /// The same value as the review token that authorised it.
+    pub id: JobId,
+    pub app_id: AppId,
+    pub artifact_id: ArtifactId,
+    pub device_id: RememberedDeviceId,
     pub app_name: String,
     pub identifier: String,
     pub version: Option<String>,
@@ -160,10 +182,10 @@ pub struct Snapshot {
 /// library page, the workspace and a screenshot of either cannot word the same fact differently.
 #[derive(Clone, Serialize)]
 pub struct Expiry {
-    pub app_id: String,
-    pub artifact_id: String,
-    pub attempt_id: String,
-    pub device_id: String,
+    pub app_id: AppId,
+    pub artifact_id: ArtifactId,
+    pub attempt_id: JobId,
+    pub device_id: RememberedDeviceId,
     /// Named so a person with two testers can tell which phone the line is about.
     pub device_name: String,
     pub app_name: String,
@@ -180,8 +202,8 @@ pub struct Expiry {
 
 #[derive(Serialize)]
 pub struct Imported {
-    pub app_id: String,
-    pub artifact_id: String,
+    pub app_id: AppId,
+    pub artifact_id: ArtifactId,
     pub duplicate: bool,
 }
 #[derive(Serialize)]
@@ -191,13 +213,28 @@ pub struct Opened {
     pub path: String,
 }
 
-/// Keeps a reviewed/signing artifact alive until its operation ends.
+/// Keeps one managed file alive for as long as an operation is using it.
+///
+/// Held by a reviewed installation and by a signing run. While a lease exists the file cannot be
+/// deleted, reclaimed, or replaced by a re-import, and the operation can rely on the bytes it
+/// verified still being the bytes on disk.
+///
+/// Release is by [`Drop`], so an operation that fails or panics still gives the file back. It is
+/// deliberately the only mechanism: an explicit `release` would be a step someone could forget.
 pub struct Lease {
+    /// The managed file this lease refers to.
     path: PathBuf,
+    /// The library's lease table, kept alive for as long as any lease on it exists.
+    shared: Arc<Shared>,
 }
+
 impl Drop for Lease {
+    /// Give the file back, removing its entry once the last lease on it is gone.
+    ///
+    /// Does no I/O and cannot fail: a poisoned lease table leaves the entry in place, which errs
+    /// towards refusing a deletion rather than allowing one while an operation is still reading.
     fn drop(&mut self) {
-        if let Ok(mut pins) = PINS.lock()
+        if let Ok(mut pins) = self.shared.pins.lock()
             && let Some(count) = pins.get_mut(&self.path)
         {
             *count -= 1;
@@ -207,13 +244,54 @@ impl Drop for Lease {
         }
     }
 }
+/// A library directory and the in-process coordination that goes with it.
+///
+/// Cloning shares the coordination state rather than duplicating it, so handing a clone to a
+/// blocking worker keeps the same lease table and the same one-writer rule. Two `Library` values
+/// built by separate `new` calls for the same root would *not* coordinate — which is why the
+/// application runtime builds one and shares it.
 #[derive(Clone)]
 pub struct Library {
     root: PathBuf,
+    shared: Arc<Shared>,
 }
 impl Library {
+    /// Take the metadata lock for the duration of one read-modify-write.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if the lock was poisoned by a panic while the manifest was being mutated. That
+    /// is reported rather than recovered: the in-memory picture of a half-applied change is not
+    /// something to keep going from.
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
+        self.shared
+            .metadata
+            .lock()
+            .map_err(|_| "Library is unavailable.".to_string())
+    }
+
+    /// Take the lease table. Only ever taken while the metadata lock is held, or on its own in
+    /// [`Self::pin`]; see [`Shared`] for the ordering rule.
+    ///
+    /// # Errors
+    ///
+    /// Fails only on lock poisoning.
+    fn pins(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<PathBuf, usize>>> {
+        self.shared
+            .pins
+            .lock()
+            .map_err(|_| "Library is unavailable.".to_string())
+    }
+
+    /// Open the library rooted at `root`, creating nothing until something is written.
+    ///
+    /// Call this once per directory for the lifetime of the process and clone the result; see the
+    /// type's own documentation for why.
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            shared: Arc::default(),
+        }
     }
     fn manifest_path(&self) -> PathBuf {
         self.root.join("manifest.json")
@@ -395,7 +473,7 @@ impl Library {
     }
     /// The clock is a parameter so a test can stand on a day boundary; nothing else passes one.
     pub fn snapshot_at(&self, now: std::time::SystemTime) -> Result<Snapshot> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = self.lock()?;
         let m = self.read()?;
         let expiries = expiries(&m, now);
         let mut storage_bytes = 0;
@@ -442,7 +520,7 @@ impl Library {
         // refreshes — for the length of the copy, and none of it touches the manifest: it writes
         // one temporary file that nothing else can see until `publish` renames it.
         let (temp, hash, report) = self.stage(source)?;
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = self.lock()?;
         let mut m = self.read()?;
         if !self.manifest_path().exists() {
             self.save(&m)?;
@@ -476,7 +554,7 @@ impl Library {
             }
             app.id.clone()
         } else {
-            let app_id = id();
+            let app_id = AppId::new(id());
             m.apps.push(App {
                 id: app_id.clone(),
                 identifier: main.identifier.clone(),
@@ -545,24 +623,20 @@ impl Library {
         if dest.exists() && hash_file(&dest).is_ok_and(|actual| actual == hash) {
             return Ok(());
         }
-        if PINS
-            .lock()
-            .map_err(|_| "Library is unavailable.")?
-            .contains_key(&dest)
-        {
+        if self.pins()?.contains_key(&dest) {
             return Err("This artifact is in use; retry after the operation finishes.".into());
         }
         temp.persist(dest)
             .map_err(|_| "Cannot save managed IPA. Check disk space and permissions.")?;
         Ok(())
     }
-    pub fn pin(&self, artifact_id: &str) -> Result<(Artifact, PathBuf, Lease)> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+    pub fn pin(&self, artifact_id: &ArtifactId) -> Result<(Artifact, PathBuf, Lease)> {
+        let _lock = self.lock()?;
         let m = self.read()?;
         let a = m
             .artifacts
             .iter()
-            .find(|a| a.id == artifact_id && !a.deleted)
+            .find(|a| &a.id == artifact_id && !a.deleted)
             .cloned()
             .ok_or("This library artifact was removed.")?;
         let path = self.file(&a.sha256)?;
@@ -572,12 +646,15 @@ impl Library {
                     .into(),
             );
         }
-        *PINS
-            .lock()
-            .map_err(|_| "Library is unavailable.")?
-            .entry(path.clone())
-            .or_default() += 1;
-        Ok((a, path.clone(), Lease { path }))
+        *self.pins()?.entry(path.clone()).or_default() += 1;
+        Ok((
+            a,
+            path.clone(),
+            Lease {
+                path,
+                shared: Arc::clone(&self.shared),
+            },
+        ))
     }
     /// Where the seven days stand for the build on screen, if it was ever installed.
     ///
@@ -586,26 +663,30 @@ impl Library {
     /// signed build made from this original counts as the same build — opening the original to
     /// re-sign it is exactly when its expiry is worth knowing — but a different original of the
     /// same app does not, because it was never the thing that was installed.
-    pub fn expiry(&self, artifact_id: &str, team_tag: Option<&str>) -> Result<Option<Expiry>> {
+    pub fn expiry(
+        &self,
+        artifact_id: &ArtifactId,
+        team_tag: Option<&str>,
+    ) -> Result<Option<Expiry>> {
         self.expiry_at(artifact_id, team_tag, std::time::SystemTime::now())
     }
     pub fn expiry_at(
         &self,
-        artifact_id: &str,
+        artifact_id: &ArtifactId,
         team_tag: Option<&str>,
         now: std::time::SystemTime,
     ) -> Result<Option<Expiry>> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = self.lock()?;
         let m = self.read()?;
-        let lineage: BTreeSet<&str> = m
+        let lineage: BTreeSet<&ArtifactId> = m
             .artifacts
             .iter()
-            .filter(|a| a.id == artifact_id || a.source_id.as_deref() == Some(artifact_id))
-            .map(|a| a.id.as_str())
+            .filter(|a| &a.id == artifact_id || a.source_id.as_ref() == Some(artifact_id))
+            .map(|a| &a.id)
             .collect();
         Ok(expiries(&m, now)
             .into_iter()
-            .find(|e| lineage.contains(e.artifact_id.as_str()))
+            .find(|e| lineage.contains(&e.artifact_id))
             .map(|mut found| {
                 // The only thing that can still be wrong is the team: it changes while the
                 // workspace is open, and a countdown about a build signed for someone else is
@@ -624,9 +705,9 @@ impl Library {
     }
     /// Compatibility for older path-based clients. Resolve a managed path back to its exact
     /// retained artifact; external paths are imported as originals before any operation.
-    pub fn resolve_or_import(&self, path: &Path) -> Result<String> {
+    pub fn resolve_or_import(&self, path: &Path) -> Result<ArtifactId> {
         {
-            let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+            let _lock = self.lock()?;
             let m = self.read()?;
             for artifact in m.artifacts.iter().rev().filter(|a| !a.deleted) {
                 if self.file(&artifact.sha256)? == path {
@@ -636,7 +717,7 @@ impl Library {
         }
         Ok(self.import(path)?.artifact_id)
     }
-    pub fn open(&self, artifact_id: &str) -> Result<Opened> {
+    pub fn open(&self, artifact_id: &ArtifactId) -> Result<Opened> {
         let (artifact, path, _lease) = self.pin(artifact_id)?;
         let report =
             crate::inspect(&path, &AtomicBool::new(false), |_| {}).map_err(|e| e.to_string())?;
@@ -644,7 +725,7 @@ impl Library {
             && let Some(icon) = &report.icon_data_url
             && let Ok(hash) = self.keep_icon(icon)
         {
-            let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+            let _lock = self.lock()?;
             let mut m = self.read()?;
             // Comparing two hashes rather than two multi-megabyte strings, which is what this
             // was doing on every open.
@@ -663,18 +744,18 @@ impl Library {
     }
     pub fn retain_signed(
         &self,
-        source_id: &str,
+        source_id: &ArtifactId,
         signed: &crate::signer::Signed,
         team_tag: String,
         watch: String,
         marker: String,
     ) -> Result<Artifact> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = self.lock()?;
         let mut m = self.read()?;
         let source = m
             .artifacts
             .iter()
-            .find(|a| a.id == source_id && !a.deleted && a.source_id.is_none())
+            .find(|a| &a.id == source_id && !a.deleted && a.source_id.is_none())
             .cloned()
             .ok_or("Original version is unavailable.")?;
         let (temp, hash, report) = self.stage(Path::new(&signed.path))?;
@@ -690,23 +771,23 @@ impl Library {
         self.save(&m)?;
         Ok(artifact)
     }
-    pub fn remove(&self, app_id: &str, artifact_id: Option<&str>) -> Result<()> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+    pub fn remove(&self, app_id: &AppId, artifact_id: Option<&ArtifactId>) -> Result<()> {
+        let _lock = self.lock()?;
         let mut m = self.read()?;
-        if !m.apps.iter().any(|a| a.id == app_id) {
+        if !m.apps.iter().any(|a| &a.id == app_id) {
             return Err("App is not in this library.".into());
         }
         if let Some(id) = artifact_id
             && !m
                 .artifacts
                 .iter()
-                .any(|a| a.id == id && a.app_id == app_id && !a.deleted)
+                .any(|a| &a.id == id && &a.app_id == app_id && !a.deleted)
         {
             return Err("Version is not in this app.".into());
         }
         let matches = |a: &Artifact| {
-            a.app_id == app_id
-                && artifact_id.is_none_or(|id| a.id == id || a.source_id.as_deref() == Some(id))
+            &a.app_id == app_id
+                && artifact_id.is_none_or(|id| &a.id == id || a.source_id.as_ref() == Some(id))
         };
         let paths: Vec<PathBuf> = m
             .artifacts
@@ -715,7 +796,7 @@ impl Library {
             .map(|a| self.file(&a.sha256))
             .collect::<Result<_>>()?;
         {
-            let pins = PINS.lock().map_err(|_| "Library is unavailable.")?;
+            let pins = self.pins()?;
             if paths.iter().any(|p| pins.contains_key(p)) {
                 return Err(
                     "An artifact is in use. Wait for its operation to finish before removing it."
@@ -747,16 +828,16 @@ impl Library {
             let icon = m
                 .apps
                 .iter()
-                .find(|a| a.id == app_id)
+                .find(|a| &a.id == app_id)
                 .and_then(|a| a.icon_sha.clone());
-            m.apps.retain(|a| a.id != app_id);
+            m.apps.retain(|a| &a.id != app_id);
             if let Some(icon) = icon
                 && !m.apps.iter().any(|a| a.icon_sha.as_deref() == Some(&icon))
             {
                 m.pending_icon_removals.push(icon);
             }
-            m.artifacts.retain(|a| a.app_id != app_id);
-            m.attempts.retain(|a| a.app_id != app_id);
+            m.artifacts.retain(|a| &a.app_id != app_id);
+            m.attempts.retain(|a| &a.app_id != app_id);
         }
         // Commit the user's removal before deleting bytes. Failed metadata writes leave files intact.
         self.save(&m)?;
@@ -790,11 +871,7 @@ impl Library {
                 continue;
             }
             let path = self.file(hash)?;
-            if PINS
-                .lock()
-                .map_err(|_| "Library is unavailable.")?
-                .contains_key(&path)
-            {
+            if self.pins()?.contains_key(&path) {
                 return Err(
                     "Removed file is still in use. Retry cleanup after the operation finishes."
                         .into(),
@@ -811,7 +888,7 @@ impl Library {
     /// left behind by an interrupted copy are reported and kept until someone says otherwise,
     /// because a tool that deletes files nobody asked it to delete cannot be trusted with any.
     pub fn reclaim(&self) -> Result<u64> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = self.lock()?;
         let m = self.read()?;
         let kept: BTreeSet<&str> = m
             .artifacts
@@ -819,7 +896,7 @@ impl Library {
             .filter(|a| !a.deleted)
             .map(|a| a.sha256.as_str())
             .collect();
-        let pins = PINS.lock().map_err(|_| "Library is unavailable.")?;
+        let pins = self.pins()?;
         let mut freed = 0;
         let entries = match fs::read_dir(self.root.join("artifacts")) {
             Ok(entries) => entries,
@@ -847,16 +924,16 @@ impl Library {
         }
         Ok(freed)
     }
-    pub fn device_tag(&self, udid: &str) -> Result<String> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+    pub fn device_tag(&self, udid: &str) -> Result<RememberedDeviceId> {
+        let _lock = self.lock()?;
         let m = self.read()?;
         if !self.manifest_path().exists() {
             self.save(&m)?;
         }
         Ok(tag(&m.salt, udid))
     }
-    pub fn begin(&self, artifact: &Artifact, job_id: &str, udid: &str, name: &str) -> Result<()> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+    pub fn begin(&self, artifact: &Artifact, job_id: &JobId, udid: &str, name: &str) -> Result<()> {
+        let _lock = self.lock()?;
         let mut m = self.read()?;
         if !m.artifacts.iter().any(|a| {
             a.id == artifact.id
@@ -869,7 +946,7 @@ impl Library {
         if udid.is_empty() {
             return Err("Verified device identity is missing.".into());
         }
-        if m.attempts.iter().any(|a| a.id == job_id) {
+        if m.attempts.iter().any(|a| &a.id == job_id) {
             return Err("This installation attempt was already recorded. Review again.".into());
         }
         let device_id = tag(&m.salt, udid);
@@ -885,7 +962,7 @@ impl Library {
         }
         trim_attempts(&mut m, &artifact.app_id);
         m.attempts.push(Attempt {
-            id: job_id.into(),
+            id: job_id.clone(),
             app_id: artifact.app_id.clone(),
             artifact_id: artifact.id.clone(),
             device_id,
@@ -906,7 +983,7 @@ impl Library {
         self.save(&m)
     }
     pub fn update(&self, status: &JobStatus) -> Result<()> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = self.lock()?;
         let mut m = self.read()?;
         let Some(attempt) = m.attempts.iter_mut().find(|a| a.id == status.id) else {
             return Ok(());
@@ -927,7 +1004,7 @@ impl Library {
     }
     /// Called once on process startup, before any new jobs can run.
     pub fn recover(&self, journal: Option<&JobStatus>) -> Result<()> {
-        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = self.lock()?;
         let mut m = self.read()?;
         let mut changed = false;
         for attempt in &mut m.attempts {
@@ -977,14 +1054,14 @@ fn hash_file(path: &Path) -> Result<String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
-fn tag(salt: &str, udid: &str) -> String {
+fn tag(salt: &str, udid: &str) -> RememberedDeviceId {
     let mut hash = Sha256::new();
     hash.update(salt);
     hash.update([0]);
     hash.update(udid);
-    format!("{:x}", hash.finalize())
+    RememberedDeviceId::new(format!("{:x}", hash.finalize()))
 }
-fn from_report(report: &Report, app_id: String, hash: String) -> Result<Artifact> {
+fn from_report(report: &Report, app_id: AppId, hash: String) -> Result<Artifact> {
     let main = report
         .bundles
         .iter()
@@ -999,7 +1076,7 @@ fn from_report(report: &Report, app_id: String, hash: String) -> Result<Artifact
         .filter_map(|p| Some((p.expires_unix?, p.expires_at.clone()?)))
         .min_by_key(|(unix, _)| *unix);
     Ok(Artifact {
-        id: id(),
+        id: ArtifactId::new(id()),
         app_id,
         source_id: None,
         sha256: hash,
@@ -1018,10 +1095,10 @@ fn from_report(report: &Report, app_id: String, hash: String) -> Result<Artifact
     })
 }
 
-fn attempt_team<'a>(m: &'a Manifest, attempt_id: &str) -> Option<&'a str> {
+fn attempt_team<'a>(m: &'a Manifest, attempt_id: &JobId) -> Option<&'a str> {
     m.attempts
         .iter()
-        .find(|a| a.id == attempt_id)?
+        .find(|a| &a.id == attempt_id)?
         .team_tag
         .as_deref()
 }
@@ -1099,19 +1176,19 @@ fn managed_name(name: &std::ffi::OsStr) -> bool {
 /// and losing it would leave an install with no history to update. Oldest first, because the
 /// question history answers — what is on this tester's phone, and when does it stop working — is
 /// about the recent past.
-fn trim_attempts(m: &mut Manifest, app_id: &str) {
-    let mut drop_oldest = |keep: usize, matching: Option<&str>| {
-        let mut finished: Vec<(i64, String)> = m
+fn trim_attempts(m: &mut Manifest, app_id: &AppId) {
+    let mut drop_oldest = |keep: usize, matching: Option<&AppId>| {
+        let mut finished: Vec<(i64, JobId)> = m
             .attempts
             .iter()
-            .filter(|a| matching.is_none_or(|id| a.app_id == id))
+            .filter(|a| matching.is_none_or(|id| &a.app_id == id))
             .filter(|a| a.stage.terminal())
             .map(|a| (a.started_unix, a.id.clone()))
             .collect();
         let total = m
             .attempts
             .iter()
-            .filter(|a| matching.is_none_or(|id| a.app_id == id))
+            .filter(|a| matching.is_none_or(|id| &a.app_id == id))
             .count();
         // One new attempt is about to be pushed, so make room for it as well.
         let excess = (total + 1).saturating_sub(keep).min(finished.len());
@@ -1119,12 +1196,48 @@ fn trim_attempts(m: &mut Manifest, app_id: &str) {
             return;
         }
         finished.sort();
-        let doomed: BTreeSet<&str> = finished[..excess]
-            .iter()
-            .map(|(_, id)| id.as_str())
-            .collect();
-        m.attempts.retain(|a| !doomed.contains(a.id.as_str()));
+        let doomed: BTreeSet<&JobId> = finished[..excess].iter().map(|(_, id)| id).collect();
+        m.attempts.retain(|a| !doomed.contains(&a.id));
     };
     drop_oldest(MAX_ATTEMPTS_PER_APP, Some(app_id));
     drop_oldest(MAX_ATTEMPTS, None);
+}
+
+#[cfg(test)]
+/// Fixtures shared with other modules' tests inside this crate.
+pub(crate) mod tests_support {
+    use std::io::Write;
+    use zip::{ZipWriter, write::SimpleFileOptions};
+
+    /// A minimal, valid single-bundle IPA whose bytes vary with `content`.
+    ///
+    /// Two fixtures with different `content` hash differently and are therefore distinct
+    /// artifacts, which is what lets a test exercise deduplication and versioning.
+    pub(crate) fn fixture(content: &str) -> tempfile::NamedTempFile {
+        let mut file = tempfile::NamedTempFile::new().expect("a temporary file");
+        let mut zip = ZipWriter::new(&mut file);
+        let info = br#"<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>test.library</string><key>CFBundleName</key><string>Library Test</string><key>CFBundleExecutable</key><string>App</string></dict></plist>"#;
+        let mut macho = vec![0; 56];
+        for (offset, value) in [
+            (0, 0xfeedfacf_u32),
+            (4, 0x100000c),
+            (16, 1),
+            (20, 24),
+            (32, 0x2c),
+            (36, 24),
+        ] {
+            macho[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for (name, bytes) in [
+            ("Payload/A.app/Info.plist", info.as_slice()),
+            ("Payload/A.app/App", &macho),
+            ("Payload/A.app/content", content.as_bytes()),
+        ] {
+            zip.start_file(name, SimpleFileOptions::default())
+                .expect("a zip entry");
+            zip.write_all(bytes).expect("zip entry contents");
+        }
+        zip.finish().expect("a finished archive");
+        file
+    }
 }

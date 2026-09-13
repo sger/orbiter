@@ -1,4 +1,5 @@
 use orbiter_core::{
+    domain::identifiers::{ArtifactId, JobId},
     installation::job::{JobStatus, Stage},
     library::Library,
 };
@@ -32,7 +33,7 @@ fn fixture(content: &str) -> tempfile::NamedTempFile {
 }
 fn status(id: &str, stage: Stage) -> JobStatus {
     JobStatus {
-        id: id.into(),
+        id: JobId::new(id),
         stage,
         message: format!("{stage:?}"),
         transferred_bytes: 0,
@@ -86,7 +87,7 @@ fn leases_prevent_deletion_and_history_survives_version_removal() {
     let f = fixture("one");
     let imported = lib.import(f.path()).unwrap();
     let (a, path, lease) = lib.pin(&imported.artifact_id).unwrap();
-    lib.begin(&a, "attempt", "verified-udid", "My phone")
+    lib.begin(&a, &JobId::new("attempt"), "verified-udid", "My phone")
         .unwrap();
     lib.update(&status("attempt", Stage::Failed)).unwrap();
     assert!(lib.remove(&a.app_id, Some(&a.id)).is_err());
@@ -141,8 +142,10 @@ fn separate_devices_variants_and_exact_outcomes_survive_restart_without_raw_iden
             "".into(),
         )
         .unwrap();
-    lib.begin(&a, "a", "private-udid-one", "Same name").unwrap();
-    lib.begin(&b, "b", "private-udid-two", "Same name").unwrap();
+    lib.begin(&a, &JobId::new("a"), "private-udid-one", "Same name")
+        .unwrap();
+    lib.begin(&b, &JobId::new("b"), "private-udid-two", "Same name")
+        .unwrap();
     lib.update(&status("unrelated", Stage::Installed)).unwrap();
     lib.update(&status("a", Stage::Installed)).unwrap();
     lib.update(&status("b", Stage::Cancelled)).unwrap();
@@ -185,8 +188,10 @@ fn interrupted_attempts_never_become_success_without_a_matching_terminal_journal
     let f = fixture("one");
     let imported = lib.import(f.path()).unwrap();
     let a = lib.open(&imported.artifact_id).unwrap().artifact;
-    lib.begin(&a, "lost", "device", "Phone").unwrap();
-    lib.begin(&a, "known", "device", "Renamed phone").unwrap();
+    lib.begin(&a, &JobId::new("lost"), "device", "Phone")
+        .unwrap();
+    lib.begin(&a, &JobId::new("known"), "device", "Renamed phone")
+        .unwrap();
     lib.recover(Some(&status("known", Stage::Installed)))
         .unwrap();
     let snapshot = lib.snapshot().unwrap();
@@ -276,7 +281,7 @@ fn installed(
     job: &str,
     udid: &str,
     expires_unix: i64,
-) -> (String, String) {
+) -> (ArtifactId, ArtifactId) {
     let source = fixture(content);
     let imported = lib.import(source.path()).unwrap();
     let build = fixture(&format!("{content} signed"));
@@ -289,7 +294,8 @@ fn installed(
             "test".into(),
         )
         .unwrap();
-    lib.begin(&artifact, job, udid, "Tester phone").unwrap();
+    lib.begin(&artifact, &JobId::new(job), udid, "Tester phone")
+        .unwrap();
     lib.update(&status(job, Stage::Installed)).unwrap();
     (imported.artifact_id, artifact.id)
 }
@@ -326,7 +332,8 @@ fn a_countdown_begins_only_when_an_install_succeeds() {
             "test".into(),
         )
         .unwrap();
-    lib.begin(&artifact, "job", "udid", "Tester phone").unwrap();
+    lib.begin(&artifact, &JobId::new("job"), "udid", "Tester phone")
+        .unwrap();
     for waiting in [Stage::Transferring, Stage::Installing] {
         lib.update(&status("job", waiting)).unwrap();
         assert!(lib.snapshot_at(at(NOW)).unwrap().expiries.is_empty());
@@ -356,7 +363,8 @@ fn a_failed_or_cancelled_install_is_never_a_countdown() {
                 "test".into(),
             )
             .unwrap();
-        lib.begin(&artifact, "job", "udid", "Tester phone").unwrap();
+        lib.begin(&artifact, &JobId::new("job"), "udid", "Tester phone")
+            .unwrap();
         lib.update(&status("job", Stage::Transferring)).unwrap();
         lib.update(&status("job", outcome)).unwrap();
         assert!(
@@ -465,7 +473,8 @@ fn an_install_whose_expiry_was_never_recorded_is_silent_not_expired() {
     let imported = lib.import(f.path()).unwrap();
     let artifact = lib.snapshot().unwrap().artifacts.pop().unwrap();
     assert_eq!(artifact.expires_unix, None);
-    lib.begin(&artifact, "job", "udid", "Tester phone").unwrap();
+    lib.begin(&artifact, &JobId::new("job"), "udid", "Tester phone")
+        .unwrap();
     lib.update(&status("job", Stage::Installed)).unwrap();
     // Unknown is not zero. Reporting "expired long ago" here would invent a fact.
     assert!(lib.snapshot_at(at(NOW)).unwrap().expiries.is_empty());
@@ -673,20 +682,21 @@ fn history_is_bounded_and_an_unfinished_attempt_is_never_the_one_dropped() {
     assert_eq!(artifact.id, imported.artifact_id);
 
     // One attempt left running, then far more finished ones than the library keeps.
-    lib.begin(&artifact, "running", "udid", "Tester phone")
+    lib.begin(&artifact, &JobId::new("running"), "udid", "Tester phone")
         .unwrap();
     for n in 0..205 {
         let job = format!("job-{n}");
-        lib.begin(&artifact, &job, "udid", "Tester phone").unwrap();
+        lib.begin(&artifact, &JobId::new(job.as_str()), "udid", "Tester phone")
+            .unwrap();
         lib.update(&status(&job, Stage::Installed)).unwrap();
     }
     let attempts = lib.snapshot().unwrap().attempts;
     assert!(attempts.len() <= 200, "kept {}", attempts.len());
     // The one still in flight survives: it is the record of something happening right now, and
     // an install with no row to update would have nowhere to report its outcome.
-    assert!(attempts.iter().any(|a| a.id == "running"));
-    assert!(!attempts.iter().any(|a| a.id == "job-0"));
-    assert!(attempts.iter().any(|a| a.id == "job-204"));
+    assert!(attempts.iter().any(|a| a.id.as_str() == "running"));
+    assert!(!attempts.iter().any(|a| a.id.as_str() == "job-0"));
+    assert!(attempts.iter().any(|a| a.id.as_str() == "job-204"));
     // And it can still finish.
     lib.update(&status("running", Stage::Transferring)).unwrap();
     lib.update(&status("running", Stage::Failed)).unwrap();
@@ -695,7 +705,7 @@ fn history_is_bounded_and_an_unfinished_attempt_is_never_the_one_dropped() {
             .unwrap()
             .attempts
             .iter()
-            .find(|a| a.id == "running")
+            .find(|a| a.id.as_str() == "running")
             .unwrap()
             .stage,
         Stage::Failed

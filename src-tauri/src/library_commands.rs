@@ -1,12 +1,30 @@
 use super::*;
-use orbiter_core::library::{Artifact, Expiry, Imported, Library, Opened, Snapshot};
+use orbiter_core::{
+    application::runtime::Runtime,
+    domain::identifiers::{AppId, ArtifactId, ArtifactId as SourceId, UsbDeviceId},
+    library::{Artifact, Expiry, Imported, Library, Opened, Snapshot},
+};
+/// The one library for this process.
+///
+/// Takes a handle from the application runtime rather than constructing a library: two libraries
+/// over one directory would not share a lease table, and a file another operation was reading
+/// could then be deleted out from under it.
+///
+/// # Errors
+///
+/// Fails only if the runtime is missing from Tauri's managed state, which would mean startup did
+/// not complete.
 pub fn storage(app: &tauri::AppHandle) -> Result<Library, String> {
-    Ok(Library::new(
-        app.path()
-            .app_data_dir()
-            .map_err(|_| "Cannot locate application storage.")?
-            .join("library"),
-    ))
+    Ok(runtime(app)?.library())
+}
+
+/// The application runtime, as managed by Tauri.
+///
+/// # Errors
+///
+/// Fails if startup did not register it.
+pub fn runtime(app: &tauri::AppHandle) -> Result<Runtime, String> {
+    Ok(app.state::<Runtime>().inner().clone())
 }
 #[tauri::command]
 pub async fn library_list(app: tauri::AppHandle) -> Result<Snapshot, String> {
@@ -32,6 +50,7 @@ pub async fn library_expiry(
 ) -> Result<Option<Expiry>, String> {
     let library = storage(&app)?;
     let tag = team_id.as_deref().map(orbiter_core::renewal::tag);
+    let artifact_id = ArtifactId::parse(&artifact_id)?;
     tokio::task::spawn_blocking(move || library.expiry(&artifact_id, tag.as_deref()))
         .await
         .map_err(|_| "Library worker stopped.")?
@@ -47,15 +66,9 @@ pub async fn library_icon(sha: String, app: tauri::AppHandle) -> Result<Option<S
 }
 /// Delete managed files no record points at. Always on request; never on a timer or at startup.
 #[tauri::command]
-pub async fn library_reclaim(
-    app: tauri::AppHandle,
-    state: State<'_, Installations>,
-) -> Result<u64, String> {
-    let _gate = state
-        .gate
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| "An installation operation is in progress. Wait before removing files.")?;
+pub async fn library_reclaim(app: tauri::AppHandle) -> Result<u64, String> {
+    // Held for the whole sweep: a file an installation is reading must not be reclaimed.
+    let _gate = runtime(&app)?.installations().exclude()?;
     let library = storage(&app)?;
     tokio::task::spawn_blocking(move || library.reclaim())
         .await
@@ -64,6 +77,7 @@ pub async fn library_reclaim(
 #[tauri::command]
 pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<Opened, String> {
     let library = storage(&app)?;
+    let artifact_id = ArtifactId::parse(&artifact_id)?;
     tokio::task::spawn_blocking(move || library.open(&artifact_id))
         .await
         .map_err(|_| "Library worker stopped.")?
@@ -73,71 +87,45 @@ pub async fn library_remove(
     app_id: String,
     artifact_id: Option<String>,
     app: tauri::AppHandle,
-    state: State<'_, Installations>,
 ) -> Result<(), String> {
-    let _gate = state
-        .gate
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| "An installation operation is in progress. Wait before removing files.")?;
-    {
-        let mut saved = state
-            .plan
-            .lock()
-            .map_err(|_| "Installation state unavailable.")?;
-        if saved
-            .as_ref()
-            .and_then(|p| p.library_artifact.as_ref())
-            .is_some_and(|a| {
-                a.app_id == app_id
-                    && artifact_id
-                        .as_ref()
-                        .is_none_or(|id| a.id == *id || a.source_id.as_ref() == Some(id))
-            })
-        {
-            // Explicit removal cancels a pending review; executing jobs hold the gate above.
-            saved.take();
-        }
-    }
+    let installations = runtime(&app)?.installations();
+    // Held for the whole removal: a file must not disappear while a review points at it, and an
+    // installation must not begin against something that is being deleted.
+    let _gate = installations.exclude()?;
+    let app_id = AppId::parse(&app_id)?;
+    let artifact_id = artifact_id.as_deref().map(ArtifactId::parse).transpose()?;
+    // Explicit removal invalidates a review that pointed at what is about to go. A running
+    // installation cannot be affected: it holds the gate taken above.
+    installations.invalidate(&app_id, artifact_id.as_ref())?;
     let library = storage(&app)?;
-    tokio::task::spawn_blocking(move || library.remove(&app_id, artifact_id.as_deref()))
+    tokio::task::spawn_blocking(move || library.remove(&app_id, artifact_id.as_ref()))
         .await
         .map_err(|_| "Library worker stopped.")?
 }
+/// Review installing one saved artifact on one connected phone.
+///
+/// The artifact-based entry point every installation goes through, including the path-based
+/// compatibility command, which imports first and then calls this. Binds the returned token to the
+/// exact bytes and the exact phone, and holds a lease so the file cannot be removed underneath it.
+///
+/// # Errors
+///
+/// Returns the service's structured failure: the artifact missing or changed, the phone absent or
+/// unverified, or another operation already running.
 #[tauri::command]
 pub async fn library_prepare_install(
     artifact_id: String,
     device_id: u32,
     app: tauri::AppHandle,
-    state: State<'_, Installations>,
 ) -> Result<Review, String> {
-    let _gate = state
-        .gate
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| "Another installation operation is in progress.")?;
-    state
-        .plan
-        .lock()
-        .map_err(|_| "Installation state unavailable.")?
-        .take();
-    let library = storage(&app)?;
-    let (artifact, path, lease) = tokio::task::spawn_blocking(move || library.pin(&artifact_id))
+    let artifact_id = ArtifactId::parse(&artifact_id)?;
+    runtime(&app)?
+        .installations()
+        .prepare(&artifact_id, UsbDeviceId::new(device_id))
         .await
-        .map_err(|_| "Library worker stopped.")??;
-    let mut plan = installation::prepare(path, device_id).await?;
-    if plan.review.sha256 != artifact.sha256 {
-        return Err("Managed IPA changed. Import the original again.".into());
-    }
-    plan.library_artifact = Some(artifact);
-    plan.library_lease = Some(lease);
-    let review = plan.review.clone();
-    *state
-        .plan
-        .lock()
-        .map_err(|_| "Installation state unavailable.")? = Some(plan);
-    Ok(review)
+        .map_err(Into::into)
 }
+
 #[tauri::command]
 pub async fn library_prepare_provisioning(
     artifact_id: String,
@@ -147,6 +135,7 @@ pub async fn library_prepare_provisioning(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::Preparation, String> {
     let library = storage(&app)?;
+    let artifact_id = ArtifactId::parse(&artifact_id)?;
     let (artifact, path, _lease) = tokio::task::spawn_blocking(move || library.pin(&artifact_id))
         .await
         .map_err(|_| "Library worker stopped.")??;
@@ -177,6 +166,7 @@ pub async fn library_sign(
 ) -> Result<SavedSigned, String> {
     let library = storage(&app)?;
     let worker_library = library.clone();
+    let artifact_id = SourceId::parse(&artifact_id)?;
     let source_id = artifact_id.clone();
     let (source, path, _lease) =
         tokio::task::spawn_blocking(move || worker_library.pin(&source_id))

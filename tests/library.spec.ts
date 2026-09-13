@@ -229,8 +229,12 @@ async function mock(page: Page) {
         if (cmd === "library_icon")
           return (w.__icons ?? {})[args.sha] ?? null;
         if (cmd === "library_list") {
+          // Either shape: a bare string from a command this refactor has not reached, or the
+          // structured failure the refactored ones reject with.
           if (w.__corrupt)
-            throw "Library storage is corrupt. Restore the manifest.";
+            throw w.__corrupt === true
+              ? "Library storage is corrupt. Restore the manifest."
+              : w.__corrupt;
           return JSON.parse(JSON.stringify(data));
         }
         if (cmd === "library_import") {
@@ -1155,4 +1159,22 @@ test("files nothing points at are named and only removed when asked", async ({
     "not referenced",
   );
   await expect(page.getByRole("button", { name: /Reclaim/ })).toHaveCount(0);
+});
+
+test("a structured backend failure is shown as its message, not as an object", async ({
+  page,
+}) => {
+  await mock(page);
+  // Refactored commands reject with `{ code, message }` rather than a bare string. The window
+  // must read the message; rendering "[object Object]" would lose the failure entirely.
+  await page.evaluate(() => {
+    (window as any).__corrupt = {
+      code: "storage_corrupt",
+      message: "Library storage is corrupt. Restore the manifest.",
+    };
+    window.dispatchEvent(new Event("library-changed"));
+  });
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("Library storage is corrupt");
+  await expect(alert).not.toContainText("object Object");
 });

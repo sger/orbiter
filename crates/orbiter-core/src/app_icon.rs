@@ -1,5 +1,14 @@
 //! Normalize embedded app icons for the webview. Icon failures never block IPA inspection.
 const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+/// Turn an icon read from an IPA into a PNG a web view can render, or decide it cannot be.
+///
+/// A standard PNG is returned unchanged. An Apple-optimised one (`CgBI`) has reordered channels
+/// and premultiplied alpha that no ordinary decoder understands, so on macOS it is re-encoded by
+/// the system converter; elsewhere there is nothing to do it with.
+///
+/// Returns `None` for anything else — a truncated file, an asset-catalog reference, an unexpected
+/// format. `None` always means "there is no icon to show", never "inspection failed": an icon is
+/// decoration, and an IPA with an unreadable one must still be inspectable.
 pub fn normalize(bytes: Vec<u8>) -> Option<Vec<u8>> {
     if !bytes.starts_with(SIGNATURE) {
         return None;
@@ -12,10 +21,24 @@ pub fn normalize(bytes: Vec<u8>) -> Option<Vec<u8>> {
     }
     optimized(&bytes)
 }
+/// No converter for Apple-optimised icons off macOS, so such an icon simply has no rendering.
 #[cfg(not(target_os = "macos"))]
 fn optimized(_: &[u8]) -> Option<Vec<u8>> {
     None
 }
+/// Re-encode an Apple-optimised PNG using the system image converter.
+///
+/// The one subprocess inspection starts, and the only file it writes. The header is parsed and
+/// the dimensions bounded *before* the bytes are handed over, so an arbitrary compressed image
+/// cannot be pushed through the converter; the child runs with all three standard streams closed,
+/// is killed after three seconds, and its output is size-bounded and re-validated as a real PNG
+/// before being returned.
+///
+/// The original IPA's path is never passed: the image is copied into a private temporary
+/// directory first, which is removed when that directory is dropped.
+///
+/// Returns `None` on any failure, including a timeout — see [`normalize`] for why that is never
+/// escalated to an error.
 #[cfg(target_os = "macos")]
 fn optimized(bytes: &[u8]) -> Option<Vec<u8>> {
     use std::{
@@ -70,15 +93,20 @@ fn optimized(bytes: &[u8]) -> Option<Vec<u8>> {
     (result.starts_with(SIGNATURE) && result.get(12..16) == Some(b"IHDR")).then_some(result)
 }
 #[cfg(test)]
+/// Checks that unreadable icons are ignored and that a real optimised icon converts.
 mod tests {
     use super::*;
     #[test]
+    /// Bytes that are not a PNG, and a `CgBI` header with nothing after it, both yield no icon
+    /// rather than a panic or a partial image.
     fn invalid_and_truncated_icons_are_ignored() {
         assert!(normalize(vec![0; 32]).is_none());
         assert!(normalize(b"\x89PNG\r\n\x1a\n\0\0\0\x04CgBI".to_vec()).is_none());
     }
     #[cfg(target_os = "macos")]
     #[test]
+    /// A real Apple-optimised icon comes back as a standard PNG with an `IHDR` chunk and its
+    /// original dimensions, proving the converter ran rather than the bytes being passed through.
     fn apple_optimized_icon_becomes_a_standard_png() {
         let bytes = include_bytes!("../tests/fixtures/optimized-icon.png");
         let image = normalize(bytes.to_vec()).expect("macOS converts the synthetic CgBI icon");

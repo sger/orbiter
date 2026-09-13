@@ -13,6 +13,7 @@ import {
 } from "../../ipc/commands";
 import type { Job, Review } from "../../types";
 import { ArrowRight, LoaderCircle } from "lucide-react";
+import { message } from "../../ipc/failure";
 export function InstallSigned({
   paused = false,
   artifactId,
@@ -112,7 +113,7 @@ export function InstallSigned({
       current.current = next;
       setReview(next);
     } catch (e) {
-      if (generation.current === version) setError(String(e));
+      if (generation.current === version) setError(message(e));
     } finally {
       operation.current = false;
       setPreparing(false);
@@ -131,7 +132,7 @@ export function InstallSigned({
     try {
       setJob(await executeInstall(review.token, accepted, progress));
     } catch (e) {
-      setError(String(e));
+      setError(message(e));
       try {
         setJob(await installationStatus());
       } catch {

@@ -1,11 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod failure;
 mod library_commands;
+use failure::{Failure, internal};
 use library_commands::*;
-use orbiter_core::installation::{
-    self, PreparedInstall, Review,
-    job::{self, Control, JobStatus},
+use orbiter_core::{
+    application::{
+        installation::{Acknowledgement, InstallationService},
+        runtime::Runtime,
+    },
+    domain::identifiers::{ReviewToken, UsbDeviceId},
+    installation::{Review, job::JobStatus},
 };
-use std::sync::Mutex;
 use std::{
     path::PathBuf,
     sync::{
@@ -65,28 +70,23 @@ async fn discover_devices() -> orbiter_core::devices::Discovery {
     orbiter_core::devices::discover().await
 }
 
-#[derive(Default, Clone)]
-struct Installations {
-    gate: Arc<tokio::sync::Mutex<()>>,
-    plan: Arc<Mutex<Option<PreparedInstall>>>,
-    control: Arc<Mutex<Option<Arc<Control>>>>,
-    current: Arc<Mutex<Option<JobStatus>>>,
+/// The one installation service for this process.
+///
+/// # Errors
+///
+/// Fails if the runtime is missing from managed state, which would mean startup did not complete.
+fn installations(app: &tauri::AppHandle) -> Result<InstallationService, Failure> {
+    Ok(runtime(app)?.installations())
 }
-struct EndInstall(Installations);
-impl Drop for EndInstall {
-    fn drop(&mut self) {
-        if let Ok(mut control) = self.0.control.lock() {
-            *control = None;
-        }
-    }
-}
-fn journal(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Cannot locate application storage.")?
-        .join("last-install.json"))
-}
+
+/// Where the legacy renewal record lives.
+///
+/// Written by earlier versions of Orbiter and never written again; still read so an existing
+/// record can be shown as the legacy note it is, and cleared on request.
+///
+/// # Errors
+///
+/// Fails if the platform's application data directory cannot be located.
 fn renewal_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
@@ -113,166 +113,124 @@ fn renewal_status(
 fn renewal_forget(app: tauri::AppHandle) -> Result<(), String> {
     orbiter_core::renewal::forget(&renewal_file(&app)?)
 }
+/// Review installing an IPA chosen by path.
+///
+/// The path-based compatibility entry point: it imports the file into the library first, then runs
+/// exactly the same artifact-based review as [`library_prepare_install`]. It is deliberately not a
+/// second implementation — a path-based install with weaker review or history rules is the kind of
+/// shortcut that makes the two diverge.
+///
+/// # Errors
+///
+/// Returns the service's structured failure, mapped for IPC: an unreadable IPA, a phone that is
+/// absent or unverified, or another operation already running.
 #[tauri::command]
 async fn prepare_install(
     path: String,
     device_id: u32,
     app: tauri::AppHandle,
-    state: State<'_, Installations>,
-) -> Result<Review, String> {
+) -> Result<Review, Failure> {
     let library = storage(&app)?;
     let artifact_id =
         tokio::task::spawn_blocking(move || library.resolve_or_import(&PathBuf::from(path)))
             .await
-            .map_err(|_| "Library worker stopped.")??;
-    library_prepare_install(artifact_id, device_id, app, state).await
+            .map_err(|_| internal("Library worker stopped."))?
+            .map_err(internal)?;
+    Ok(installations(&app)?
+        .prepare(&artifact_id, UsbDeviceId::new(device_id))
+        .await?)
 }
+
+/// Forget a prepared review and release the lease it held.
+///
+/// Idempotent, and ignores a token that is not the current review, so a late call from a window
+/// that has moved on cannot discard a newer one. Nothing on any phone changes.
+///
+/// # Errors
+///
+/// Fails only if installation state is unavailable.
 #[tauri::command]
-fn discard_install(token: String, state: State<'_, Installations>) -> Result<(), String> {
-    let mut plan = state
-        .plan
-        .lock()
-        .map_err(|_| "Installation state unavailable.")?;
-    if plan.as_ref().is_some_and(|p| p.review.token == token) {
-        plan.take();
-    }
-    Ok(())
+fn discard_install(token: String, app: tauri::AppHandle) -> Result<(), Failure> {
+    let token = ReviewToken::parse(&token)?;
+    Ok(installations(&app)?.discard(&token)?)
 }
+
+/// Install the reviewed artifact on the reviewed phone.
+///
+/// Requires the acknowledgement shown with the review. Streams stage changes over `progress`; a
+/// dropped subscription does not stop the installation or lose its history, and
+/// [`installation_status`] catches a reconnecting client up.
+///
+/// # Errors
+///
+/// Returns the service's structured failure: a missing acknowledgement, a stale review, a changed
+/// artifact, another operation running, or an unknown outcome if the worker itself stopped.
 #[tauri::command]
 async fn execute_install(
     token: String,
     acknowledged: bool,
     progress: Channel<JobStatus>,
     app: tauri::AppHandle,
-    state: State<'_, Installations>,
-) -> Result<JobStatus, String> {
-    if !acknowledged {
-        return Err("Review and acknowledge the installation consequences first.".into());
-    }
-    let _gate = state
-        .gate
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| "Another installation operation is in progress.")?;
-    let plan = {
-        let mut saved = state
-            .plan
-            .lock()
-            .map_err(|_| "Installation state unavailable.")?;
-        let plan = saved
-            .as_ref()
-            .ok_or("Review the IPA and device before installing.")?;
-        if plan.review.token != token || plan.expired() {
-            return Err("Installation review is stale. Review again.".into());
-        }
-        if !plan.review.blockers.is_empty() {
-            return Err("Resolve the installation blockers before continuing.".into());
-        }
-        saved.take().ok_or("Installation review is unavailable.")?
-    };
-    let library = storage(&app)?;
-    plan.record_library_attempt(&library)?;
-    let location = journal(&app)?;
-    let owned = state.inner().clone();
-    let _end = EndInstall(owned.clone());
-    let control = Arc::new(Control::default());
-    *owned
-        .control
-        .lock()
-        .map_err(|_| "Installation state unavailable.")? = Some(control.clone());
-    *owned
-        .current
-        .lock()
-        .map_err(|_| "Installation state unavailable.")? = Some(JobStatus {
-        id: plan.review.token.clone(),
-        stage: job::Stage::Preparing,
-        message: "Rechecking reviewed IPA and iPhone.".into(),
-        transferred_bytes: 0,
-        total_bytes: plan.review.size_bytes,
-        device_percent: None,
-        cleanup_pending: false,
+) -> Result<JobStatus, Failure> {
+    let token = ReviewToken::parse(&token)?;
+    let sink = Arc::new(move |status: JobStatus| {
+        // A closed window is not a reason to stop installing.
+        let _ = progress.send(status);
     });
-    let current = owned.current.clone();
-    let history = library.clone();
-    // Transfer progress arrives every 150 ms and the device reports its own percentage on top of
-    // that — a few thousand events for one install. Only a stage change is durable state worth
-    // recording, and asking the library about each tick would re-read and re-validate the whole
-    // manifest on the path that also delivers progress to the window.
-    let recorded = std::sync::Mutex::new(None::<job::Stage>);
-    let result = tokio::spawn(async move {
-        installation::execute(plan, control, location, move |mut status| {
-            let changed = recorded
-                .lock()
-                .map(|mut held| {
-                    let changed = *held != Some(status.stage);
-                    *held = Some(status.stage);
-                    changed
-                })
-                .unwrap_or(true);
-            if changed && let Err(error) = history.update(&status) {
-                status.message.push_str(&format!(
-                    " Installation history could not be saved: {error}"
-                ));
-            }
-            if let Ok(mut current) = current.lock() {
-                *current = Some(status.clone());
-            }
-            let _ = progress.send(status);
-        })
-        .await
-    })
-    .await;
-    match result {
-        // The library records the outcome, including when the build stops launching: the attempt
-        // row written by `record_library_attempt` is updated through the closure above, and
-        // `Library::expiry` counts down from it. Nothing writes `renewal.json` any more.
-        Ok(status) => Ok(status),
-        Err(_) => {
-            let recovered = job::recover(&journal(&app)?)?;
-            library.recover(recovered.as_ref())?;
-            *owned
-                .current
-                .lock()
-                .map_err(|_| "Installation state unavailable.")? = recovered;
-            Err("Installation worker stopped. Check the recorded outcome and the phone before retrying.".into())
-        }
-    }
+    Ok(installations(&app)?
+        .execute(&token, Acknowledgement::from_request(acknowledged), sink)
+        .await?)
 }
+
+/// Ask the running installation to stop.
+///
+/// Returns `true` only if a cancellable installation accepted. Once iOS has been asked to install,
+/// cancellation is refused: the outcome belongs to the device from that point on.
+///
+/// # Errors
+///
+/// Fails only if installation state is unavailable.
 #[tauri::command]
-fn cancel_install(state: State<'_, Installations>) -> Result<bool, String> {
-    Ok(state
-        .control
-        .lock()
-        .map_err(|_| "Installation state unavailable.")?
-        .as_ref()
-        .is_some_and(|c| c.cancel()))
+fn cancel_install(app: tauri::AppHandle) -> Result<bool, Failure> {
+    Ok(installations(&app)?.cancel()?)
 }
+
+/// Where the current or most recent installation stands.
+///
+/// Called when a client reconnects — a reopened window, a page that was hidden — because progress
+/// events it missed are gone. Returns the live picture while an installation runs, and otherwise
+/// the durable journal, so a result survives the window being closed.
+///
+/// # Errors
+///
+/// Fails if installation state is unavailable or the journal cannot be read.
 #[tauri::command]
-fn installation_status(
-    app: tauri::AppHandle,
-    state: State<'_, Installations>,
-) -> Result<Option<JobStatus>, String> {
-    if state
-        .control
-        .lock()
-        .map_err(|_| "Installation state unavailable.")?
-        .is_some()
-    {
-        return Ok(state
-            .current
-            .lock()
-            .map_err(|_| "Installation state unavailable.")?
-            .clone());
-    }
-    job::recover(&journal(&app)?)
+fn installation_status(app: tauri::AppHandle) -> Result<Option<JobStatus>, Failure> {
+    Ok(installations(&app)?.status()?)
 }
+
+/// One device-log capture at a time, with its own stop flag.
+///
+/// Separate from the installation gate on purpose: capturing a log is read-only and may run
+/// alongside anything else. Only a second capture is refused.
 #[derive(Default, Clone)]
 struct LogCapture {
+    /// Admits one capture at a time, refusing rather than queueing.
     gate: Arc<tokio::sync::Mutex<()>>,
+    /// Set by [`stop_device_log`]; the capture checks it between lines.
     cancel: Arc<AtomicBool>,
 }
+
 /// Stream the iPhone's log for one app. Only lines about `subjects` are kept, and the capture
 /// stops on request, after five minutes, or after its line budget.
+///
+/// Nothing is written to disk: lines are filtered in memory and forwarded to `progress`. Lines
+/// that mention only the superseded identifier are counted and discarded, so the capture describes
+/// the signed build rather than the one it replaced.
+///
+/// # Errors
+///
+/// Fails if a capture is already running, or if the device's log service cannot be reached.
 #[tauri::command]
 async fn start_device_log(
     device_id: u32,
@@ -409,11 +367,16 @@ async fn account_sign_ipa(
         tokio::task::spawn_blocking(move || library.resolve_or_import(&PathBuf::from(path)))
             .await
             .map_err(|_| "Library worker stopped.")??;
-    Ok(
-        library_sign(artifact_id, watch, marker, progress, app, state)
-            .await?
-            .signed,
+    Ok(library_sign(
+        artifact_id.into_inner(),
+        watch,
+        marker,
+        progress,
+        app,
+        state,
     )
+    .await?
+    .signed)
 }
 #[tauri::command]
 async fn account_forget_signing_key(
@@ -446,19 +409,21 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(orbiter_core::accounts::Accounts::default())
         .manage(Inspection::default())
-        .manage(Installations::default())
         .manage(LogCapture::default())
         .setup(|app| {
-            let result = storage(app.handle()).and_then(|library| {
-                let recovered = job::recover(&journal(app.handle())?).unwrap_or_else(|_| {
-                    tracing::warn!(operation = "library-recovery", "Unreadable installation journal; interrupted library attempts will be marked unknown.");
-                    None
-                });
-                library.recover(recovered.as_ref())
-            });
-            if let Err(error) = result {
+            // One runtime for the process, built before any command can run. Everything that
+            // needs shared state takes a handle to this rather than constructing its own.
+            let storage = app
+                .path()
+                .app_data_dir()
+                .map_err(|_| "Cannot locate application storage.")?;
+            let runtime = Runtime::new(&storage);
+            if let Err(error) = runtime.recover() {
+                // A library that cannot be reconciled is reported, not fatal: the app still opens
+                // and says what is wrong rather than refusing to start.
                 tracing::warn!(operation = "library-recovery", detail = %error);
             }
+            app.manage(runtime);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

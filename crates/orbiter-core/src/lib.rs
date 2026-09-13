@@ -1,8 +1,10 @@
 pub mod accounts;
 mod app_icon;
+pub mod application;
 pub mod certificates;
 pub mod devices;
 pub mod diagnostics;
+pub mod domain;
 pub mod installation;
 pub mod keychain;
 pub mod library;

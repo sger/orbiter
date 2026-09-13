@@ -1,4 +1,21 @@
+//! Inspect one IPA and print the report as JSON.
+//!
+//! The whole inspection pipeline without the desktop shell: useful for looking at a build from a
+//! terminal, and for checking that a failure is the inspector's rather than the interface's.
+//! Reads the file and nothing else — no network, no credentials, no writes.
+
 use std::{path::PathBuf, sync::atomic::AtomicBool};
+/// Inspect the IPA named by the single argument and print its report.
+///
+/// # Exit status
+///
+/// `0` on success, `1` if the archive cannot be inspected, `2` if the arguments are wrong.
+/// Cancellation is never requested here, so the inspection always runs to completion.
+///
+/// # Panics
+///
+/// Panics only if a report that was just built cannot be serialised, which would mean a bug in
+/// this crate rather than anything about the file.
 fn main() {
     let mut args = std::env::args_os().skip(1);
     let Some(path) = args.next() else {

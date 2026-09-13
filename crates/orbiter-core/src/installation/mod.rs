@@ -27,7 +27,8 @@ pub struct ExistingApp {
 }
 #[derive(Clone, Serialize)]
 pub struct Review {
-    pub token: String,
+    /// Authorises installing exactly these bytes on exactly this phone, until it expires.
+    pub token: crate::domain::identifiers::ReviewToken,
     pub app_name: String,
     pub bundle_id: String,
     pub version: Option<String>,
@@ -311,7 +312,7 @@ pub async fn prepare(path: PathBuf, device_id: u32) -> Result<PreparedInstall, S
         library_artifact: None,
         library_lease: None,
         review: Review {
-            token: uuid::Uuid::new_v4().to_string(),
+            token: crate::domain::identifiers::ReviewToken::new(uuid::Uuid::new_v4().to_string()),
             app_name: main.name.clone(),
             bundle_id: main.identifier.clone(),
             version: main.version.clone(),
@@ -408,7 +409,7 @@ pub async fn execute(
     notify: impl Fn(JobStatus) + Send + Sync,
 ) -> JobStatus {
     let mut status = JobStatus {
-        id: plan.review.token.clone(),
+        id: crate::domain::identifiers::JobId::from_review(&plan.review.token),
         stage: Stage::Preparing,
         message: "Rechecking reviewed IPA and iPhone.".into(),
         transferred_bytes: 0,
@@ -764,7 +765,9 @@ mod fixture_tests {
             library_artifact: None,
             library_lease: None,
             review: Review {
-                token: uuid::Uuid::new_v4().to_string(),
+                token: crate::domain::identifiers::ReviewToken::new(
+                    uuid::Uuid::new_v4().to_string(),
+                ),
                 app_name: "Synthetic".into(),
                 bundle_id: "test.synthetic".into(),
                 version: None,
@@ -800,7 +803,7 @@ impl PreparedInstall {
             }
             library.begin(
                 artifact,
-                &self.review.token,
+                &crate::domain::identifiers::JobId::from_review(&self.review.token),
                 &self.udid,
                 &self.review.device_name,
             )?;

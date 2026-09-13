@@ -15,6 +15,7 @@ import {
   libraryChanged,
 } from "../../ipc/commands";
 import type { Artifact, Attempt, LibrarySnapshot } from "./types";
+import { message } from "../../ipc/failure";
 
 const empty: LibrarySnapshot = {
   apps: [],
@@ -83,7 +84,7 @@ export function LibraryPage({
       setData(await libraryList());
       setError("");
     } catch (e) {
-      setError(String(e));
+      setError(message(e));
     } finally {
       setLoading(false);
     }
@@ -146,7 +147,7 @@ export function LibraryPage({
                 ? `/ipas/${result.app_id}/workspace/${result.artifact_id}`
                 : `/ipas/${result.app_id}`;
         } catch (e) {
-          setResults((old) => [...old, { name, message: String(e) }]);
+          setResults((old) => [...old, { name, message: message(e) }]);
         }
         libraryChanged();
       }
@@ -156,7 +157,7 @@ export function LibraryPage({
           : "",
       );
     } catch (e) {
-      setError(String(e));
+      setError(message(e));
     } finally {
       importingRef.current = false;
       setImporting(false);
@@ -181,7 +182,7 @@ export function LibraryPage({
       libraryChanged();
       if (!removal.artifactId) window.location.hash = "/ipas";
     } catch (e) {
-      setError(String(e));
+      setError(message(e));
     } finally {
       setRemoving(false);
     }
@@ -608,7 +609,7 @@ export function LibraryPage({
                     await libraryReclaim();
                     libraryChanged();
                   } catch (e) {
-                    setError(String(e));
+                    setError(message(e));
                   } finally {
                     setReclaiming(false);
                   }

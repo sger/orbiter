@@ -22,7 +22,8 @@ impl Stage {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobStatus {
-    pub id: String,
+    /// The installation this describes, which is also the token of the review that authorised it.
+    pub id: crate::domain::identifiers::JobId,
     pub stage: Stage,
     pub message: String,
     pub transferred_bytes: u64,
@@ -158,7 +159,7 @@ mod tests {
         save(
             &p,
             &JobStatus {
-                id: "synthetic".into(),
+                id: crate::domain::identifiers::JobId::new("synthetic"),
                 stage: Stage::Installing,
                 message: "Installing".into(),
                 transferred_bytes: 1,

@@ -223,3 +223,24 @@ export type Renewal = {
   /// The build on screen has run out. The one case that moves above the signing controls.
   urgent: boolean;
 };
+
+/// A backend failure's stable classification.
+///
+/// Mirrors `orbiter_core::domain::errors::ErrorCode`. The window switches on these; it never
+/// parses the message. Adding one is a change to a contract both sides share.
+export type ErrorCode =
+  | "artifact_missing"
+  | "artifact_changed"
+  | "operation_in_progress"
+  | "review_stale"
+  | "acknowledgement_required"
+  | "device_unavailable"
+  | "authentication_required"
+  | "storage_read"
+  | "storage_write"
+  | "storage_corrupt"
+  | "storage_unsupported_version"
+  | "cancelled"
+  | "outcome_unknown"
+  | "invalid_request"
+  | "internal";
