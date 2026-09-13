@@ -19,7 +19,7 @@ import { Select } from "../../components/ui/Select";
 import { Stage } from "../../app/Stage";
 import type { Preparation, TeamStatus, WatchChoice } from "../../types";
 
-import { useAccounts } from "./useAccounts";
+import { useAccounts, membershipLabel } from "./useAccounts";
 export function Accounts({
   authenticationOnly = false,
   onView,
@@ -353,12 +353,7 @@ export function Accounts({
               {view.teams.map((team) => (
                 <option value={team.id} key={team.id}>
                   {team.name} · {team.id}
-                  {team.kind ? ` · ${team.kind}` : ""}
-                  {team.free === true
-                    ? " · Free personal team"
-                    : team.free === false
-                      ? ` · ${team.membership ?? "Paid membership"}`
-                      : ""}
+                  {team.kind ? ` · ${team.kind}` : ""} · {membershipLabel(team)}
                 </option>
               ))}
             </Select>
@@ -379,7 +374,7 @@ export function Accounts({
                     ? "Free personal team: profiles expire after seven days, so the app must be re-signed weekly, and capabilities this team cannot create are removed from the build."
                     : team.free === false
                       ? "Paid membership: installs use this team's device allowance, which is shared with everyone signing on it."
-                      : `Apple's answer does not establish whether this is a free personal team or a paid membership, so expiry and capability limits are unknown.${
+                      : `Apple's answer does not establish whether this is a free personal team or a paid membership. Orbiter applies the stricter free-team limits until it does — seven-day expiry, the weekly identifier budget, and capabilities a free team cannot create removed — so a paid team is never treated as having more than Apple confirmed.${
                           team.membership
                             ? ` Apple reported the membership as "${team.membership}".`
                             : " Apple reported no membership."

@@ -5,6 +5,7 @@ import type {
   Certificate,
   Preparation,
   Registration,
+  Team,
   TeamStatus,
   WatchChoice,
 } from "../../types";
@@ -18,6 +19,17 @@ const initial: AccountView = {
   challenge: null,
   message: "",
 };
+/// What Apple established about a team's membership, in the words the window uses everywhere.
+///
+/// Free, paid and *undetermined* are three answers, not two. An undetermined membership used to
+/// render as nothing at all, which read as though the question had not been asked — when in fact
+/// Apple answered in wording Orbiter does not recognise, and that changes what signing can do.
+export function membershipLabel(team: Team): string {
+  if (team.free === true) return "Free personal team";
+  if (team.free === false) return team.membership ?? "Paid membership";
+  return "Membership not established";
+}
+
 export function useAccounts({
   paused,
   deviceId,
@@ -118,15 +130,7 @@ export function useAccounts({
       signedIn,
       account: signedIn ? view.account : null,
       teamId: view.selected_team,
-      teamLabel: team
-        ? `${team.name}${
-            team.free === true
-              ? " · Free personal team"
-              : team.free === false
-                ? ` · ${team.membership ?? "Paid membership"}`
-                : ""
-          }`
-        : null,
+      teamLabel: team ? `${team.name} · ${membershipLabel(team)}` : null,
       registered: registration !== null,
       registrationSummary: registration?.message ?? "",
       certificate: certificate !== null,
@@ -200,15 +204,7 @@ export function useAccounts({
   /// exist — an account, and a chosen team — gate a step, and those already gate the whole panel.
   const stageState = (done: boolean, reachable: boolean): StageState =>
     done ? "done" : reachable ? "current" : "waiting";
-  const teamLabel = team
-    ? `${team.name}${
-        team.free === true
-          ? " · Free personal team"
-          : team.free === false
-            ? ` · ${team.membership ?? "Paid membership"}`
-            : ""
-      }`
-    : null;
+  const teamLabel = team ? `${team.name} · ${membershipLabel(team)}` : null;
   const active = view.stage === "signing_in" || view.stage === "two_factor";
   const disabled = !desktop || !ready || busy || paused;
   const signInBlocker = !desktop

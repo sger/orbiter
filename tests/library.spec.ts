@@ -131,6 +131,67 @@ test("an unrecognised sign-in failure offers its technical detail, and only then
   ).toBeVisible();
 });
 
+test("the team's membership is named on the account, and an unestablished one says what happens", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await page.getByRole("link", { name: "Open version", exact: true }).click();
+  await page.getByRole("button", { name: "Check app & iPhone" }).click();
+  await page
+    .getByRole("button", { name: "Re-sign with my Apple account" })
+    .click();
+  await page.evaluate(() => {
+    (window as any).__teams = [
+      {
+        id: "PAID1",
+        name: "Synthetic Company",
+        kind: "Company",
+        free: false,
+        membership: "Apple Developer Program",
+      },
+      {
+        id: "UNK1",
+        name: "Synthetic Unknown",
+        kind: "Company",
+        free: null,
+        membership: null,
+      },
+    ];
+  });
+  await page.getByLabel("Apple account email").fill("local@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByRole("checkbox", { name: /I agree to authenticate/ })
+    .setChecked(true);
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+
+  // Two teams, so neither is chosen for the person. The membership is legible before choosing.
+  const select = page.getByLabel("Signing team", { exact: true });
+  await expect(select).toContainText("Apple Developer Program");
+  await expect(select).toContainText("Membership not established");
+
+  // The chosen team's membership stays legible once the step is collapsed, not only inside the
+  // list, so it is still answerable later in the flow.
+  await select.selectOption("PAID1");
+  await expect(page.locator(".stage-summary").first()).toContainText(
+    "Apple Developer Program",
+  );
+  // Reopening the step is how its consequences are read after the fact.
+  await page.getByRole("button", { name: "Change Signing team" }).click();
+  await expect(page.getByText("Paid membership:")).toBeVisible();
+
+  // Undetermined is a third answer, and it says which limits Orbiter will actually apply rather
+  // than leaving a person to guess.
+  await select.selectOption("UNK1");
+  await expect(page.getByLabel("Signing team", { exact: true })).toHaveValue(
+    "UNK1",
+  );
+  await expect(
+    page.getByText("Orbiter applies the stricter free-team limits"),
+  ).toBeVisible();
+});
+
 test("retained signed build requires review, records exact artifact, and survives restart", async ({
   page,
 }) => {
