@@ -122,6 +122,7 @@ impl SigningService {
         artifact_id: &ArtifactId,
         acknowledgement: super::installation::Acknowledgement,
         watch: WatchChoice,
+        dylibs: Vec<std::path::PathBuf>,
     ) -> OperationResult<crate::accounts::Preparation> {
         let (_artifact, path, _lease) = self.source(artifact_id).await?;
         self.accounts
@@ -129,6 +130,7 @@ impl SigningService {
                 path,
                 acknowledgement == super::installation::Acknowledgement::Given,
                 watch,
+                dylibs,
             )
             .await
             .map_err(OperationError::internal)
@@ -156,10 +158,11 @@ impl SigningService {
         artifact_id: &ArtifactId,
         watch: WatchChoice,
         marker: &str,
+        dylibs: Vec<std::path::PathBuf>,
         progress: Arc<dyn ProgressSink<Progress>>,
     ) -> OperationResult<Retained> {
         let _gate = self.accounts.operation()?;
-        self.sign_under_gate(artifact_id, watch, marker, progress)
+        self.sign_under_gate(artifact_id, watch, marker, dylibs, progress)
             .await
     }
 
@@ -170,6 +173,7 @@ impl SigningService {
         artifact_id: &ArtifactId,
         watch: WatchChoice,
         marker: &str,
+        dylibs: Vec<std::path::PathBuf>,
         progress: Arc<dyn ProgressSink<Progress>>,
     ) -> OperationResult<Retained> {
         let (_source, path, lease) = self.source(artifact_id).await?;
@@ -183,6 +187,7 @@ impl SigningService {
                 self.staging.clone(),
                 watch,
                 cleaned.clone(),
+                dylibs,
                 Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 move |step| progress.send(step),
             )
@@ -295,6 +300,7 @@ mod tests {
                 &ArtifactId::new("not-in-this-library"),
                 WatchChoice::Sign,
                 "test",
+                Vec::new(),
                 Arc::new(Discard),
             )
             .await
@@ -337,7 +343,13 @@ mod tests {
 
         match runtime
             .signing()
-            .sign(&retained.id, WatchChoice::Sign, "test", Arc::new(Discard))
+            .sign(
+                &retained.id,
+                WatchChoice::Sign,
+                "test",
+                Vec::new(),
+                Arc::new(Discard),
+            )
             .await
         {
             Err(error) => assert_eq!(error.code, ErrorCode::InvalidRequest),
@@ -361,6 +373,7 @@ mod tests {
                 &imported.artifact_id,
                 super::super::installation::Acknowledgement::Missing,
                 WatchChoice::Sign,
+                Vec::new(),
             )
             .await
         {
@@ -391,6 +404,7 @@ mod tests {
                 &imported.artifact_id,
                 WatchChoice::Sign,
                 "test",
+                Vec::new(),
                 Arc::new(Discard),
             )
             .await

@@ -141,6 +141,8 @@ export type Preparation = {
     blockers: string[];
     consequences: string[];
     app_ids_required: number;
+    /// Libraries injected into the app, by file name. Empty for a plain re-sign.
+    injected_dylibs: string[];
     bundles: {
       name: string;
       identifier: string;

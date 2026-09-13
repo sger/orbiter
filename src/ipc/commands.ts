@@ -70,11 +70,14 @@ export const prepareProvisioning = (
   path: string,
   acknowledged: boolean,
   watch: WatchChoice,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[] = [],
 ) =>
   invoke<Preparation>("account_prepare_provisioning", {
     path,
     acknowledged,
     watch,
+    dylibs,
   });
 
 // Re-signing. Produces a new IPA; the chosen one is only ever read.
@@ -84,8 +87,10 @@ export const signIpa = (
   /// Prefix for the signed app's display name; "" leaves every name alone. Rust decides what is
   /// usable, so whatever is typed here is sent as typed.
   marker: string,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[],
   progress: Channel<SigningProgress>,
-) => invoke<Signed>("account_sign_ipa", { path, watch, marker, progress });
+) => invoke<Signed>("account_sign_ipa", { path, watch, marker, dylibs, progress });
 
 // The seven-day clock. Reads a local file and a clock; never Apple, never the phone.
 export const renewalStatus = (
@@ -129,12 +134,21 @@ import type {
   Imported,
   Opened,
   Artifact,
+  Refresh,
 } from "../features/library/types";
 export const libraryChanged = () =>
   window.dispatchEvent(new Event("library-changed"));
 /// Where the seven days stand for one saved build, or null when it was never installed.
 export const libraryExpiry = (artifactId: string, teamId: string | null) =>
   invoke<LibraryExpiry | null>("library_expiry", { artifactId, teamId });
+/// What a re-sign of an expiring build would start from, or null when the original is gone.
+/// Reading this begins nothing; the review screen still asks for every acknowledgement.
+export const libraryRefresh = (artifactId: string) =>
+  invoke<Refresh | null>("library_refresh", { artifactId });
+/// This library's tag for the phone on the cable, for telling a remembered device from another
+/// one. Rejects rather than guesses when the phone cannot be identified.
+export const libraryDeviceTag = (deviceId: number) =>
+  invoke<string>("library_device_tag", { deviceId });
 /// One app icon, by its hash. Null when the file is missing or unreadable.
 export const libraryIcon = (sha: string) =>
   invoke<string | null>("library_icon", { sha });
@@ -153,22 +167,28 @@ export const libraryPrepareProvisioning = (
   artifactId: string,
   acknowledged: boolean,
   watch: WatchChoice,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[] = [],
 ) =>
   invoke<Preparation>("library_prepare_provisioning", {
     artifactId,
     acknowledged,
     watch,
+    dylibs,
   });
 export const librarySign = (
   artifactId: string,
   watch: WatchChoice,
   marker: string,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[],
   progress: Channel<SigningProgress>,
 ) =>
   invoke<{ signed: Signed; artifact: Artifact }>("library_sign", {
     artifactId,
     watch,
     marker,
+    dylibs,
     progress,
   });
 
@@ -182,12 +202,15 @@ export const reviewPreparation = (
   deviceId: number,
   watch: WatchChoice,
   marker: string,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[] = [],
 ) =>
   invoke<PreparationReview>("library_review_preparation", {
     artifactId,
     deviceId,
     watch,
     marker,
+    dylibs,
   });
 export const executePreparation = (
   token: string,

@@ -1,41 +1,87 @@
 # Persistent app library
 
-IPAs is the library home. Use Import IPA or drag one or more IPA files onto the library, then search by name or bundle identifier, then open an app to see Versions, Installations, and Devices. Imports are sequential and independent: an invalid file does not stop the remaining imports. Importing never installs anything.
+Import IPAs, keep versions, and see what was installed where. Importing never installs anything.
 
-Originals are grouped by their main bundle identifier. SHA-256 identifies bytes, not version labels: identical imports reuse the saved version; different bytes remain separate even if version and build labels match. Versions use import order. Opening an original enters the existing signing workflow; opening a retained signed build goes to installation review. Acknowledgements and device checks still apply.
+Import with **Import IPA** or by dropping files on the library. Imports run one at a time; an invalid file does not stop the rest. Open an app for **Versions**, **Installations**, and **Devices**.
 
-## Storage and identity
+Apps group by main bundle identifier. Bytes decide identity, not version labels — the same file imported twice is one version; different bytes are a new version even under the same labels. Opening an original starts signing; opening a signed build goes to installation review.
 
-Rust owns `<application-data>/library/manifest.json` (schema 2) and `artifacts/<sha256>.ipa`. Readable embedded PNG app icons are kept as `icons/<sha256>.png` beside the artifacts, with only the hash in the manifest; the window fetches each icon once per hash and caches it. They used to be stored inline as base64, which capped a library at roughly twenty apps against the manifest's own size limit and re-sent every icon on every refresh. A manifest written by an older Orbiter opens and is upgraded on its next write; one written by a newer Orbiter is refused rather than loaded and silently stripped of fields this build does not know. Missing or unreadable icons use a fallback. On macOS, embedded optimized CgBI icons are converted with Apple’s image converter using bounded temporary files and a timeout. Opening an original refreshes its cached library icon. Asset-catalog-only icons are not decoded yet. Import copies into a temporary file in the managed directory, hashes and inspects that copy, and flushes it — all before taking the metadata lock, so a multi-gigabyte copy never blocks the rest of the library — then atomically publishes the artifact and manifest. If the manifest write fails after the bytes are published, the import removes the file it just published: an operation cleaning up after its own failure, which is not the same as sweeping files nobody asked about. Original files are never edited. Metadata mutations are serialized in-process. Invalid or missing manifests with existing artifacts are errors, not permission to create a fresh library.
+## Storage
 
-Apps, artifacts, and attempts have stable identifiers. Source originals and signed artifacts are separate records. Signed records retain their source ID, rewritten bundle identifier, team tag captured inside the signing operation, marker and Watch choices, and known profile expiration. Device records use a SHA-256 tag of a random library-local salt and the verified device identity. Display names are stored separately. Raw UDIDs and account credentials are not stored in the library manifest. The salt stays stable across restarts.
+Rust owns `<application-data>/library/`:
 
-IPC accepts artifact IDs for opening, provisioning, signing, and installation review. Rust resolves and verifies the managed path. Older path-based signing and installation commands resolve existing managed artifacts or import external originals before continuing.
+| Path                     | Holds               |
+| ------------------------ | ------------------- |
+| `manifest.json`          | Records (schema 2)  |
+| `artifacts/<sha256>.ipa` | Saved IPAs          |
+| `icons/<sha256>.png`     | Extracted app icons |
 
-## Operations and history
+An older manifest is upgraded on its next write. A newer one is refused rather than loaded with fields this build would strip.
 
-One React workspace stays mounted while navigating between the library, Settings, and Help. Account state survives navigation. Opening another version invalidates provisioning and installation review. Active account, signing, and installation operations prevent changing the workspace artifact. Backend file leases protect signing, provisioning, and reviewed installation artifacts from removal, including while their page is hidden.
+Import copies, hashes and inspects outside the metadata lock, then publishes the artifact and manifest atomically. A failed manifest write removes the bytes that import just published. Original files are never edited.
 
-Before installation starts, Rust records an attempt for the exact reviewed hash/artifact and verified device. Stage transitions and terminal results are saved by the backend, independently of page visibility. Recovery uses a matching terminal installation journal; unmatched interrupted attempts become unknown. Failed, cancelled, and unknown outcomes are retained. Success is not inferred from the app name, identifier, elapsed time, or a previous install.
+macOS converts embedded CgBI icons with Apple's image converter, under a timeout. Asset-catalog-only icons are not decoded yet.
 
-Expiration on a saved original describes its imported profile. Expiration on a signed artifact describes that generated build. An installation row associates expiration with that build only after a recorded successful installation. A countdown — days remaining, and an announcement once a build has stopped launching — exists only for a successful installation whose expiry is known; an import never counts down, and an unknown expiry is silence rather than a fabricated one. The wording and the day arithmetic come from `renewal.rs` so every screen says the same thing, days round down, and a build signed for another team shows no countdown at all. Within an app the copy that still launches leads, because a re-sign installed on one tester's phone does not revive the copy on another's; every attempt stays listed against its own device. These records do not establish current presence, trust, launchability, or a full phone inventory. Legacy renewal information remains explicitly labeled and is not converted into invented versions or devices.
+## Identity
 
-## Removal and recovery
+Apps, artifacts and attempts have stable IDs. Originals and signed builds are separate records; a signed record keeps its source ID, rewritten bundle identifier, team tag, marker, Watch choice and known expiration.
 
-Removing a version removes its original and retained signed variants but preserves installation attempts and artifact metadata as historical tombstones. Removing one signed build leaves its original and other variants. Removing an entire app requires explicit confirmation and removes its files and history. None of these actions uninstall anything from a phone.
+A device is stored as a SHA-256 tag of the verified device identity and a random library-local salt, with its display name beside it. Raw UDIDs and account credentials are never in the manifest.
 
-Installation history is bounded at 200 attempts per app and 2,000 overall; the oldest finished attempts are dropped first and an attempt still in flight is never one of them. Removal first atomically records tombstones and pending file cleanup. A failed metadata write leaves files intact. Startup retries only cleanup already requested by a user. Shared content is not deleted while another live record references it. Interrupted publication can leave unreferenced bytes; these are retained, counted and named on the library's storage line, and never automatically pruned. **Reclaim unreferenced files** removes them on request and only on request — startup cleanup finishes removals a person already asked for, and nothing else deletes a managed file. Files the library did not name are never touched. There is no cloud sync, scheduled renewal, automatic installation queue, or general automatic deletion.
+IPC takes artifact IDs; Rust resolves the managed path. Older path-based commands resolve or import first.
+
+## History
+
+An attempt is recorded before installation starts, against the exact reviewed hash and verified device. The backend saves stage changes whether or not the page is visible. Recovery needs a matching terminal journal entry — an unmatched interrupted attempt becomes unknown, never success. Failed, cancelled and unknown outcomes are kept.
+
+Backend leases stop signing, provisioning and reviewed installation artifacts being removed mid-operation, including while their page is hidden. Opening another version invalidates provisioning and review.
+
+## Expiration
+
+Expiration on an original describes its imported profile; on a signed build, that build.
+
+A countdown exists only for a successful installation with a known expiry. An import never counts down, and an unknown expiry is silence rather than a guess. `renewal.rs` decides the wording and the arithmetic, so every screen agrees; days round down. A build signed for another team shows no countdown.
+
+Three states, escalating:
+
+| State        | When                                  |
+| ------------ | ------------------------------------- |
+| Quiet line   | More than two days left               |
+| Warning      | Two days or fewer                     |
+| Announcement | Stops launching today, or already has |
+
+The last two also appear once in the window header, wherever you are, linking to the app — suppressed on that app's own pages, and while an operation is running.
+
+Within an app, the copy that still launches leads: a re-sign on one tester's phone does not revive another's. Every attempt stays listed against its own device.
+
+**Sign and install again** opens the guided flow on the _original_ the expired build came from — a spent profile cannot be re-signed — with that build's Watch choice and name marker filled in, and names the phone it went to. Both stay editable; every acknowledgement is still required. It appears only while that original is still saved. If the connected iPhone is not the one that build went to, the screen says so; if it cannot be identified, it says nothing.
+
+Nothing is scheduled, queued or refreshed in the background, and no credential is stored to allow it.
+
+None of these records establish that an app is currently installed, trusted or working.
+
+## Removal
+
+Removing a version removes its original and signed variants but keeps attempts and metadata as tombstones. Removing one signed build leaves its original. Removing an app needs explicit confirmation. None of this uninstalls anything from a phone.
+
+History is capped at 200 attempts per app and 2,000 overall; the oldest finished attempts go first, and one still in flight never does.
+
+Removal records tombstones and pending cleanup atomically. A failed metadata write leaves files intact. Startup only retries cleanup a person already asked for. Shared content survives while another record references it.
+
+Interrupted publication can leave unreferenced bytes. These are counted and named on the storage line, never pruned automatically; **Reclaim unreferenced files** removes them on request. Files the library did not name are never touched.
+
+There is no cloud sync, scheduled renewal, install queue, or automatic deletion.
 
 ## Verification
 
-Automated coverage includes managed-copy preservation, byte deduplication, same-label versions, missing/damaged artifacts, failed metadata writes, corrupt manifests, deletion leases, deletion recovery, stable salted device matching, multiple signed variants/devices, exact attempt attribution, interrupted-job recovery, expiry counting from successful installs only, day rounding and boundaries, foreign-team silence, schema upgrade and refusal, icon storage and removal, bounded history, unreferenced-byte accounting and on-request reclaim, and an import rolling back its own bytes. Browser tests cover the library screens, partial import failure, saved workspace navigation, explicit installation review, retained-build history, removal confirmation, restart persistence in the IPC test double, and light/dark keyboard layouts at 780 × 600.
+Rust tests cover managed-copy preservation, deduplication, same-label versions, damaged artifacts, failed writes, corrupt manifests, leases, deletion recovery, device tagging, attempt attribution, job recovery, expiry counting and rounding, the two-day warning threshold, foreign-team silence, resolving an expired build back to a signable original, schema upgrade and refusal, icon storage, bounded history, unreferenced bytes, and import rollback.
 
-Browser tests use synthetic IPC. Rust tests use temporary files and synthetic IPAs. Neither substitutes for a real phone. The new library flow still requires this physical-device acceptance check:
+Browser tests cover the library screens, partial import failure, workspace navigation, installation review, removal confirmation, the countdown escalating and being announced once, refreshing an expired build with its device identified, misidentified or unknown, restart persistence, and light/dark layouts at 780 × 600.
 
-1. Import a real IPA; verify the source file remains unchanged.
-2. Open it, authenticate, explicitly prepare signing, and sign. Confirm a retained signed artifact appears under the original.
-3. Review that artifact for an unlocked iPhone, on a cable or Wi-Fi, acknowledge, and install. Confirm artifact/device/outcome attribution.
-4. Restart Orbiter. Reopen the same saved artifact and verify metadata, history, device tag, and expiration persist.
-5. Review a second installation independently; do not assume the prior install authorizes another.
+Both use synthetic IPAs and synthetic IPC. Neither replaces a real phone. Before claiming native end-to-end validation:
 
-Do not claim native end-to-end validation of the library until this check has been completed.
+1. Import a real IPA; confirm the source file is unchanged.
+2. Open, authenticate, prepare and sign. Confirm a signed artifact appears under the original.
+3. Review it for an unlocked iPhone, on a cable or Wi-Fi, acknowledge, install. Confirm artifact, device and outcome.
+4. Restart Orbiter. Confirm metadata, history, device tag and expiration persist.
+5. Review a second installation independently — a prior install authorizes nothing.

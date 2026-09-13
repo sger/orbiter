@@ -447,6 +447,7 @@ async fn account_prepare_provisioning(
     path: String,
     acknowledged: bool,
     watch: String,
+    dylibs: Vec<String>,
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::Preparation, Failure> {
     state
@@ -454,6 +455,7 @@ async fn account_prepare_provisioning(
             std::path::PathBuf::from(path),
             acknowledged,
             orbiter_core::plan::WatchChoice::parse(&watch),
+            dylibs.into_iter().map(std::path::PathBuf::from).collect(),
         )
         .await
         .map_err(Into::into)
@@ -481,6 +483,7 @@ async fn account_sign_ipa(
     path: String,
     watch: String,
     marker: String,
+    dylibs: Vec<String>,
     progress: tauri::ipc::Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
 ) -> Result<orbiter_core::signer::Signed, Failure> {
@@ -489,11 +492,16 @@ async fn account_sign_ipa(
         tokio::task::spawn_blocking(move || library.resolve_or_import(&PathBuf::from(path)))
             .await
             .map_err(|_| "Library worker stopped.")??;
-    Ok(
-        library_sign(artifact_id.into_inner(), watch, marker, progress, app)
-            .await?
-            .signed,
+    Ok(library_sign(
+        artifact_id.into_inner(),
+        watch,
+        marker,
+        dylibs,
+        progress,
+        app,
     )
+    .await?
+    .signed)
 }
 /// Remove this Mac's stored signing key from the Keychain.
 ///
@@ -583,6 +591,8 @@ fn main() {
             library_remove,
             library_prepare_install,
             library_expiry,
+            library_refresh,
+            library_device_tag,
             library_icon,
             library_reclaim,
             library_prepare_provisioning,

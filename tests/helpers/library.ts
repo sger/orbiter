@@ -275,6 +275,44 @@ export async function mock(page: Page) {
             ) ?? null
           );
         }
+        // What a re-sign would start from. Mirrors the library: a signed build resolves to the
+        // original it was made from, an import is its own original, and a removed original is no
+        // starting point at all.
+        if (cmd === "library_refresh") {
+          const installed = data.artifacts.find(
+            (a: any) => a.id === args.artifactId,
+          );
+          if (!installed) return null;
+          const origin = data.artifacts.find(
+            (a: any) => a.id === (installed.source_id ?? installed.id),
+          );
+          if (!origin || origin.deleted) return null;
+          const attempt = data.attempts
+            .filter(
+              (a: any) =>
+                a.artifact_id === installed.id && a.stage === "installed",
+            )
+            .sort((a: any, b: any) => b.started_unix - a.started_unix)[0];
+          const device = attempt
+            ? data.devices.find((d: any) => d.id === attempt.device_id)
+            : undefined;
+          return {
+            app_id: origin.app_id,
+            artifact_id: origin.id,
+            name: origin.name,
+            watch: installed.watch,
+            marker: installed.marker,
+            device_id: device?.id ?? null,
+            device_name: device?.name ?? null,
+          };
+        }
+        // The library's tag for the phone on the cable. A test sets `__deviceTag` to a value that
+        // does not match to stand on the "different phone" case, or to a rejection to stand on
+        // "could not tell" — which the window must not report as a different phone.
+        if (cmd === "library_device_tag") {
+          if (w.__deviceTagError) throw w.__deviceTagError;
+          return w.__deviceTag ?? "salted-device";
+        }
         if (cmd === "library_reclaim") {
           const freed = data.unreferenced_bytes;
           data.unreferenced_bytes = 0;

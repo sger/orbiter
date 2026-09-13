@@ -164,7 +164,7 @@
     letter-spacing: -1px;
     display: flex;
     align-items: center;
-    gap: 22px;
+    gap: 10px;
   }
   .wordmark span {
     font-size: var(--text-caption);
@@ -533,6 +533,19 @@
     border-color: var(--color-danger-line);
     color: var(--color-danger);
     margin: 18px 0 0;
+  }
+  /* A build that has already stopped launching outranks one that is about to: `.notice` is
+     the warning weight, and this is the state where somebody's app is dead right now. */
+  .notice-urgent {
+    background: var(--color-danger-surface);
+    border-color: var(--color-danger-line);
+    color: var(--color-danger);
+  }
+  .notice svg {
+    flex-shrink: 0;
+  }
+  .notice a {
+    color: inherit;
   }
   .error button {
     margin-left: auto;
@@ -1124,6 +1137,26 @@
     min-width: 180px;
     flex: 1;
   }
+  .two-factor {
+    display: grid;
+    gap: 16px;
+    margin-top: 12px;
+  }
+  .two-factor > p {
+    margin: 0;
+  }
+  .two-factor form {
+    display: grid;
+    gap: 16px;
+  }
+  .accounts .two-factor form > button {
+    justify-self: start;
+    margin: 0;
+  }
+  .two-factor .auth-actions {
+    margin: 0;
+    gap: 8px 16px;
+  }
   .text-field input,
   .two-factor input {
     width: 100%;
@@ -1514,6 +1547,22 @@
   .renewal-urgent svg {
     color: var(--color-danger);
   }
+  /* Still launching, and not for much longer. Weighted between the quiet line and the alarm on
+     purpose: re-signing needs a Mac, a phone and an Apple sign-in, so the warning has to arrive
+     while there is still time to arrange them — and has to stay distinguishable from the state
+     where it is already too late. */
+  .renewal-soon {
+    border-color: var(--color-warning-line);
+    background: var(--color-warning-surface);
+    color: var(--color-warning);
+  }
+  .renewal-soon svg {
+    color: var(--color-warning);
+  }
+  /* The same escalation among the hints of a row, where there is no room for a block. */
+  .hint[data-soon="true"] {
+    color: var(--color-warning);
+  }
 }
 
 @layer components {
@@ -1545,6 +1594,41 @@
   .marker > span {
     font-size: var(--text-caption);
     color: var(--color-ink-faint);
+  }
+  .inject {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 11px;
+  }
+  .inject > span {
+    font-size: var(--text-caption);
+    color: var(--color-ink-faint);
+  }
+  .inject-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .inject-list li {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 4px 3px 9px;
+    border: 1px solid var(--color-line);
+    border-radius: 6px;
+    background: var(--color-surface-soft);
+    font-size: var(--text-label);
+    color: var(--color-ink);
+  }
+  .inject-list li .text-button {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
   }
 }
 
@@ -1943,6 +2027,9 @@
   .library-card {
     padding: 24px;
   }
+  .library-page > .renewal:has(+ .library-card) {
+    margin-bottom: 24px;
+  }
   .library-version {
     display: flex;
     justify-content: space-between;
@@ -2160,4 +2247,13 @@
 .sidebar-item span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.brand-icon {
+  display: block;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 10px;
+  object-fit: contain;
 }

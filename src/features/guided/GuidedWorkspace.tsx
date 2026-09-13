@@ -7,15 +7,17 @@ import {
   LoaderCircle,
   Smartphone,
   Upload,
+  X,
 } from "lucide-react";
 import { Checkbox } from "../../components/ui/Checkbox";
 import { Select } from "../../components/ui/Select";
 import { TextField } from "../../components/ui/TextField";
 import { Accounts } from "../team/Accounts";
+import { DeviceLog } from "../diagnose/DeviceLog";
 import { Devices } from "../device/Devices";
 import { AppIcon } from "../library/AppIcon";
 import { useLibraryDrop } from "../library/useLibraryDrop";
-import type { Opened } from "../library/types";
+import type { Opened, Refresh } from "../library/types";
 import type {
   AccountView,
   TeamStatus,
@@ -25,6 +27,7 @@ import type {
 import {
   isTauri,
   libraryChanged,
+  libraryDeviceTag,
   libraryImport,
   libraryOpen,
   withdrawCertificates,
@@ -35,6 +38,8 @@ import { HelpPanel } from "../help/HelpPanel";
 import type { Consents } from "./types";
 import { useLibraryExpiry } from "../renew/useLibraryExpiry";
 import { ExpiryLine } from "../renew/ExpiryLine";
+import { claimRefresh } from "../renew/intent";
+import { RefreshNote } from "../renew/RefreshNote";
 import "./guided.css";
 const noConsent: Consents = {
   registration: false,
@@ -73,16 +78,25 @@ export function GuidedWorkspace({
   const importLock = useRef(false);
   const [watch, setWatch] = useState<WatchChoice>("undecided"),
     [marker, setMarker] = useState("test");
+  // Absolute paths of libraries to inject at re-sign; the plan states this as a consequence.
+  const [dylibs, setDylibs] = useState<string[]>([]);
   const [consents, setConsents] = useState<Consents>(noConsent),
     [accepted, setAccepted] = useState(false);
   const [withdrawAck, setWithdrawAck] = useState(false);
   const [help, setHelp] = useState<string | null>(null);
+  /// The build this workspace was opened to replace, when it was opened from a countdown.
+  const [refreshing, setRefreshing] = useState<Refresh | null>(null);
+  /// Whether the phone on the cable is the one that expiring build went to. `null` while nothing
+  /// is selected or the phone cannot be identified — which is not the same as "a different one",
+  /// and is not reported as one.
+  const [sameDevice, setSameDevice] = useState<boolean | null>(null);
   const flow = useGuidedFlow(
     selected,
     deviceId,
     `${accountView?.account ?? ""}/${accountView?.selected_team ?? ""}/${accountView?.stage ?? ""}`,
     watch,
     marker,
+    dylibs,
   );
   const locked = flow.busy || accountBusy || importing;
   useEffect(() => {
@@ -98,6 +112,11 @@ export function GuidedWorkspace({
   const app = item?.report.bundles.find(
     (bundle) => bundle.path === item.report.main_path,
   );
+  // The identifier this build was made from — used to tell the signed build's log lines from the
+  // company build's when both are installed. Empty until an original is selected.
+  const originalIdentifier = selected?.report.bundles.find(
+    (bundle) => bundle.path === selected.report.main_path,
+  )?.identifier;
   const selectedTeam = accountView?.teams.find(
     (team) => team.id === accountView.selected_team,
   );
@@ -119,6 +138,43 @@ export function GuidedWorkspace({
   useEffect(() => {
     if (flow.job && !flow.busy) refresh();
   }, [flow.job?.stage, flow.busy, refresh]);
+  // Opened from a countdown: fill in what the expired build was signed under. A person should not
+  // have to remember a week later what they chose, and a refresh that quietly changed either
+  // answer would produce a different app than the one that stopped working. Both controls stay
+  // editable, and nothing further is decided here — the review screen still asks for every
+  // acknowledgement it asked for the first time.
+  useEffect(() => {
+    const claimed = claimRefresh(item?.artifact.id ?? null);
+    if (!claimed) return;
+    setRefreshing(claimed);
+    // "undecided" is not a decision, and an unrecognised value must not become one: the Watch
+    // control stays as it is and asks, exactly as it does for a build with no history.
+    if (claimed.watch === "remove" || claimed.watch === "sign")
+      setWatch(claimed.watch);
+    if (claimed.marker !== null) setMarker(claimed.marker);
+  }, [item?.artifact.id]);
+  // Whether this is the same phone. Asked in Rust, where the salt lives; the UDID never reaches
+  // the window. A failure leaves the question unanswered rather than answering it wrongly —
+  // telling someone this is the wrong phone when Orbiter could not tell would send them looking
+  // for a problem that is not there.
+  useEffect(() => {
+    if (!refreshing?.device_id || deviceId === null) {
+      setSameDevice(null);
+      return;
+    }
+    let disposed = false;
+    const expected = refreshing.device_id;
+    libraryDeviceTag(deviceId)
+      .then((tag) => {
+        if (!disposed) setSameDevice(tag === expected);
+      })
+      .catch(() => {
+        if (!disposed) setSameDevice(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [refreshing?.device_id, deviceId]);
   useEffect(() => {
     setAccepted(false);
   }, [flow.review?.token]);
@@ -317,6 +373,7 @@ export function GuidedWorkspace({
             </div>
           )}
           <div hidden={flow.stage !== "choose"} className="guided-section">
+            <RefreshNote refresh={refreshing} sameDevice={sameDevice} />
             <Devices
               onSelect={setDeviceId}
               onConnection={setConnection}
@@ -474,6 +531,61 @@ export function GuidedWorkspace({
                   <p className="hint">
                     Leave empty to keep the original display name. Required
                     capability changes are shown before signing.
+                  </p>
+                  {/* Injected libraries load at launch and run with the app's entitlements. This is
+                  stated in the review's consequences too, where it is acknowledged; the control only
+                  chooses them. The original IPA is still never written to. */}
+                  <div className="inject">
+                    <button
+                      className="text-button"
+                      disabled={locked}
+                      onClick={() =>
+                        void (async () => {
+                          const picked = await open({
+                            multiple: true,
+                            directory: false,
+                            filters: [
+                              { name: "Dynamic library", extensions: ["dylib"] },
+                            ],
+                          });
+                          if (!picked) return;
+                          const chosen = Array.isArray(picked) ? picked : [picked];
+                          setDylibs((current) => [
+                            ...current,
+                            ...chosen.filter((path) => !current.includes(path)),
+                          ]);
+                        })()
+                      }
+                    >
+                      Add libraries…
+                    </button>
+                    {dylibs.length === 0 ? (
+                      <span>No libraries injected.</span>
+                    ) : (
+                      <ul className="inject-list">
+                        {dylibs.map((path) => (
+                          <li key={path}>
+                            {path.split(/[\\/]/).pop() ?? path}
+                            <button
+                              aria-label={`Remove ${path.split(/[\\/]/).pop() ?? path}`}
+                              className="text-button"
+                              disabled={locked}
+                              onClick={() =>
+                                setDylibs((current) =>
+                                  current.filter((other) => other !== path),
+                                )
+                              }
+                            >
+                              <X size={13} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <p className="hint">
+                    Optional. Libraries load at launch and run with the app's
+                    entitlements; the review lists this before you sign.
                   </p>
                 </details>
                 <button
@@ -832,6 +944,18 @@ export function GuidedWorkspace({
                     </p>
                   )}
                   <ExpiryLine expiry={expiry} variant="banner" />
+                  {/* The signed build's own log, filtered to it, to answer why a screen in the
+                  re-signed app failed — the whole device log is read and dropped, never shown. */}
+                  {deviceId !== null && app && (
+                    <section className="card diagnostics">
+                      <DeviceLog
+                        deviceId={deviceId}
+                        subjects={[app.identifier, app.name].filter(Boolean)}
+                        superseded={[originalIdentifier ?? ""].filter(Boolean)}
+                        disabled={locked}
+                      />
+                    </section>
+                  )}
                 </>
               )}
               {flow.stage === "result" && flow.job?.stage !== "installed" && (

@@ -17,7 +17,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let (Some(path), Some(team)) = (args.next(), args.next()) else {
         eprintln!(
-            "Usage: orbiter-sign-plan <ipa> <team-id> [--personal|--paid] [--watch-remove|--watch-sign]"
+            "Usage: orbiter-sign-plan <ipa> <team-id> [--personal|--paid] [--watch-remove|--watch-sign] [--inject <name>]..."
         );
         std::process::exit(2)
     };
@@ -29,18 +29,24 @@ fn main() {
             std::process::exit(2)
         }
     };
-    let watch = match args.next().as_deref() {
-        None => orbiter_core::plan::WatchChoice::Undecided,
-        Some("--watch-remove") => orbiter_core::plan::WatchChoice::Remove,
-        Some("--watch-sign") => orbiter_core::plan::WatchChoice::Sign,
-        Some(_) => {
-            eprintln!("Expected --watch-remove or --watch-sign.");
-            std::process::exit(2)
+    let mut watch = orbiter_core::plan::WatchChoice::Undecided;
+    let mut injected_dylibs = Vec::new();
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--watch-remove" => watch = orbiter_core::plan::WatchChoice::Remove,
+            "--watch-sign" => watch = orbiter_core::plan::WatchChoice::Sign,
+            "--inject" => match args.next() {
+                Some(name) => injected_dylibs.push(name),
+                None => {
+                    eprintln!("--inject needs a library name.");
+                    std::process::exit(2)
+                }
+            },
+            _ => {
+                eprintln!("Expected --watch-remove, --watch-sign, or --inject <name>.");
+                std::process::exit(2)
+            }
         }
-    };
-    if args.next().is_some() {
-        eprintln!("Too many arguments.");
-        std::process::exit(2)
     }
     let report = match orbiter_core::inspect(&PathBuf::from(path), &AtomicBool::new(false), |_| {})
     {
@@ -56,6 +62,7 @@ fn main() {
             team_id: team,
             kind,
             watch,
+            injected_dylibs,
         },
     );
     println!(
