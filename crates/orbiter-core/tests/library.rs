@@ -1,3 +1,9 @@
+//! The library against real files: deduplication, leases, removal, recovery and expiry.
+//!
+//! Every case uses a temporary directory and a synthetic IPA, so none of it needs Apple
+//! credentials or a phone. What is asserted throughout is that the library never invents anything
+//! — not a success, not an expiry, not a file it was never given.
+
 use orbiter_core::{
     domain::identifiers::{ArtifactId, JobId},
     installation::job::{JobStatus, Stage},
@@ -5,6 +11,11 @@ use orbiter_core::{
 };
 use std::{fs, io::Write};
 use zip::{ZipWriter, write::SimpleFileOptions};
+/// A minimal, valid single-bundle IPA whose bytes vary with `content`.
+///
+/// Every fixture shares one bundle identifier, so they all group under one app and `content` is
+/// the only thing that changes — which is what makes it the lever for testing deduplication and
+/// versioning by bytes rather than by label.
 fn fixture(content: &str) -> tempfile::NamedTempFile {
     let mut f = tempfile::NamedTempFile::new().unwrap();
     let mut z = ZipWriter::new(&mut f);
@@ -31,6 +42,7 @@ fn fixture(content: &str) -> tempfile::NamedTempFile {
     z.finish().unwrap();
     f
 }
+/// A minimal job status for one attempt at one stage, for driving the library's history.
 fn status(id: &str, stage: Stage) -> JobStatus {
     JobStatus {
         id: JobId::new(id),
@@ -43,6 +55,9 @@ fn status(id: &str, stage: Stage) -> JobStatus {
     }
 }
 #[test]
+/// Identical bytes are one version however often they are imported; different bytes are a new
+/// version even when the version and build labels match. The source file is never modified, and a
+/// saved version survives the original being deleted.
 fn deduplicates_bytes_preserves_original_and_keeps_same_version_different_content() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -67,6 +82,8 @@ fn deduplicates_bytes_preserves_original_and_keeps_same_version_different_conten
     assert!(restart.open(&b.artifact_id).is_ok());
 }
 #[test]
+/// A damaged managed copy is refused rather than used, and re-importing the original repairs it —
+/// so the fix for a corrupted file is the obvious action rather than a mystery.
 fn verifies_artifacts_and_duplicate_import_repairs_damage() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -81,6 +98,9 @@ fn verifies_artifacts_and_duplicate_import_repairs_damage() {
     assert!(lib.open(&a.artifact_id).is_err());
 }
 #[test]
+/// A leased artifact cannot be removed while an operation is using it, and removing a version
+/// afterwards keeps its installation history as a tombstone. The person's own file is untouched
+/// throughout.
 fn leases_prevent_deletion_and_history_survives_version_removal() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -106,6 +126,8 @@ fn leases_prevent_deletion_and_history_survives_version_removal() {
     assert!(f.path().exists());
 }
 #[test]
+/// Two phones with the same name are still two devices, a terminal outcome is never overwritten
+/// by a later event, all of it survives a restart — and the manifest contains no raw UDID.
 fn separate_devices_variants_and_exact_outcomes_survive_restart_without_raw_identity() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -182,6 +204,8 @@ fn separate_devices_variants_and_exact_outcomes_survive_restart_without_raw_iden
     assert!(!raw.contains("private-udid"));
 }
 #[test]
+/// Recovery applies a journalled outcome only to the attempt it actually belongs to; every other
+/// interrupted attempt becomes `Unknown`, and a second recovery does not reconsider it.
 fn interrupted_attempts_never_become_success_without_a_matching_terminal_journal() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -203,6 +227,8 @@ fn interrupted_attempts_never_become_success_without_a_matching_terminal_journal
     assert_eq!(lib.snapshot().unwrap().attempts[1].stage, Stage::Installed);
 }
 #[test]
+/// An invalid import, a corrupt manifest and a failed write each leave existing storage exactly as
+/// it was. A damaged library is reported, never silently replaced with an empty one.
 fn invalid_imports_corrupt_manifest_and_failed_writes_do_not_reset_storage() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -229,6 +255,8 @@ fn invalid_imports_corrupt_manifest_and_failed_writes_do_not_reset_storage() {
     assert!(std::path::Path::new(&path).exists());
 }
 #[test]
+/// Startup finishes deletions a person already asked for, and touches nothing else — a stray file
+/// nobody requested the removal of is left exactly where it is.
 fn pending_user_deletions_resume_after_crash_and_imported_bytes_are_not_automatically_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -253,6 +281,7 @@ fn pending_user_deletions_resume_after_crash_and_imported_bytes_are_not_automati
 const DAY: i64 = 86_400;
 const NOW: i64 = 1_800_000_000;
 
+/// A fixed instant, so a day boundary can be stood on exactly rather than approached.
 fn at(unix: i64) -> std::time::SystemTime {
     std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix as u64)
 }
@@ -301,6 +330,8 @@ fn installed(
 }
 
 #[test]
+/// A saved file is a fact about this Mac. Counting down from an import would be Orbiter claiming
+/// an installation it never performed.
 fn an_import_alone_never_counts_down() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -317,6 +348,8 @@ fn an_import_alone_never_counts_down() {
 }
 
 #[test]
+/// The countdown starts at a successful installation and not before: preparing and transferring
+/// are not the moment a build begins living on a phone.
 fn a_countdown_begins_only_when_an_install_succeeds() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -347,6 +380,8 @@ fn a_countdown_begins_only_when_an_install_succeeds() {
 }
 
 #[test]
+/// Failed, cancelled and unknown outcomes produce no countdown. None of them puts a working build
+/// on a phone, and an unknown one is specifically not a success.
 fn a_failed_or_cancelled_install_is_never_a_countdown() {
     for outcome in [Stage::Failed, Stage::Cancelled, Stage::Unknown] {
         let dir = tempfile::tempdir().unwrap();
@@ -375,6 +410,8 @@ fn a_failed_or_cancelled_install_is_never_a_countdown() {
 }
 
 #[test]
+/// The library's countdown uses the same arithmetic as everything else: rounded down, with the
+/// expiry second already expired, and only a build that has run out counted as urgent.
 fn the_librarys_countdown_rounds_down_like_every_other() {
     use orbiter_core::renewal::Standing;
     for (expires, expected) in [
@@ -399,6 +436,9 @@ fn the_librarys_countdown_rounds_down_like_every_other() {
 }
 
 #[test]
+/// With one app on two phones, the copy that still launches leads — announcing "stopped launching"
+/// while a working install exists would be a false alarm — and the dead one stays listed against
+/// its own device.
 fn the_copy_still_working_leads_and_the_dead_one_is_still_listed() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -415,6 +455,9 @@ fn the_copy_still_working_leads_and_the_dead_one_is_still_listed() {
 }
 
 #[test]
+/// An original and the signed build made from it share a countdown, because opening the original
+/// to re-sign it is exactly when its expiry matters. A different original of the same app was never
+/// the thing installed and gets none.
 fn a_version_that_was_never_installed_has_no_countdown_of_its_own() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -445,6 +488,8 @@ fn a_version_that_was_never_installed_has_no_countdown_of_its_own() {
 }
 
 #[test]
+/// A build signed for a different team shows no day count. A reassuring "5 days left" about
+/// somebody else's build is worse than silence.
 fn a_build_signed_for_another_team_gets_no_countdown() {
     use orbiter_core::renewal::Bearing;
     let dir = tempfile::tempdir().unwrap();
@@ -466,6 +511,8 @@ fn a_build_signed_for_another_team_gets_no_countdown() {
 }
 
 #[test]
+/// An installation whose expiry was never recorded produces nothing rather than a countdown from
+/// zero: unknown is not the same as long expired, and reporting one as the other invents a fact.
 fn an_install_whose_expiry_was_never_recorded_is_silent_not_expired() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -486,6 +533,8 @@ fn an_install_whose_expiry_was_never_recorded_is_silent_not_expired() {
 }
 
 #[test]
+/// Tidying away a saved file does not stop the countdown: the build is still on the tester's phone
+/// and still stops working on the same day.
 fn a_countdown_survives_removing_the_saved_file() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -500,6 +549,9 @@ fn a_countdown_survives_removing_the_saved_file() {
 }
 
 #[test]
+/// A manifest from an older Orbiter opens and says nothing it cannot know, upgrading on the next
+/// write. One from a newer Orbiter is refused rather than loaded and stripped of fields this build
+/// does not understand — which would be silent data loss across a downgrade.
 fn a_library_from_an_older_orbiter_opens_and_a_newer_one_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -572,6 +624,8 @@ fn with_icon(content: &str) -> tempfile::NamedTempFile {
 }
 
 #[test]
+/// Icon bytes live beside the artifacts with only their hash in the manifest, are readable after a
+/// restart, and go when the app does. A missing icon is a placeholder, never an error.
 fn an_icon_is_kept_beside_the_artifacts_and_never_inside_the_manifest() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -615,6 +669,8 @@ fn an_icon_is_kept_beside_the_artifacts_and_never_inside_the_manifest() {
 }
 
 #[test]
+/// Bytes an interrupted copy left behind are counted and named, survive startup untouched, and go
+/// only when someone asks. A file the library did not name is never touched at all.
 fn unreferenced_bytes_are_named_and_only_removed_when_asked() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());
@@ -649,6 +705,8 @@ fn unreferenced_bytes_are_named_and_only_removed_when_asked() {
 }
 
 #[test]
+/// An import whose manifest write fails removes the bytes it just published — an operation
+/// cleaning up after its own failure, which is not the same as sweeping files nobody asked about.
 fn an_import_that_cannot_be_recorded_leaves_no_bytes_behind() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
@@ -673,6 +731,9 @@ fn an_import_that_cannot_be_recorded_leaves_no_bytes_behind() {
 }
 
 #[test]
+/// History is bounded by dropping the oldest finished attempts. An attempt still in flight is
+/// never one of them — losing it would leave a running install with nowhere to report its outcome —
+/// and it can still finish afterwards.
 fn history_is_bounded_and_an_unfinished_attempt_is_never_the_one_dropped() {
     let dir = tempfile::tempdir().unwrap();
     let lib = Library::new(dir.path().into());

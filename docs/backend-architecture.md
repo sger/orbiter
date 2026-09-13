@@ -191,6 +191,25 @@ command decodes its inputs, validates identifiers, calls a service, and maps the
 
 See [the storage decision note](storage-decision.md) for why metadata is still JSON.
 
+## External boundaries
+
+Three narrow traits in `application/ports.rs`, each present because a specific rule could not
+otherwise be tested without a phone or a ten-minute wait:
+
+| Port | Real implementation | What it makes testable |
+|---|---|---|
+| `Clock` | `SystemClock` | Review expiry, stood on exactly rather than waited for |
+| `Reviewer` | `DeviceReviewer` | Binding a review to an artifact and a device; an unavailable phone |
+| `Installer` | `DeviceInstaller` | Cancellation on both sides of the commit boundary, a dropped subscriber, a failed history write, crash recovery |
+
+Deliberately **not** behind a trait: the library, the signer, the plan. Those are local and
+deterministic, already testable with a temporary directory and a synthetic IPA; wrapping them would
+add indirection and remove nothing from a test's path.
+
+The fakes live beside the tests that use them. Each asserts what the *service* does with what a
+boundary reports — never that a boundary was called in a particular way, which would only mirror
+the implementation back at itself.
+
 ## Documentation audit
 
 ```
@@ -198,5 +217,8 @@ cargo run --offline -p doc-audit
 ```
 
 Parses every Orbiter-owned Rust file with `syn` and reports each function, method, trait method,
-inline module and file that carries no documentation. It exists because `missing_docs` only covers
-the public API and a regular expression cannot tell a `fn` in a string from a real one.
+inline module and file that carries no documentation, exiting non-zero if any remain. It exists
+because `missing_docs` only covers the public API and a regular expression cannot tell a `fn`
+inside a string or a macro body from a real one.
+
+**Current result: 37 files audited, 0 undocumented items.**

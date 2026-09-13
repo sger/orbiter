@@ -1,9 +1,20 @@
+//! Inspection against deliberately hostile archives.
+//!
+//! An IPA is a file someone else produced, so most of these are refusals: traversal, case
+//! collisions, symlinks, duplicate entries, oversized and deeply nested property lists. Each
+//! asserts that inspection declines rather than partially succeeding, because a half-read report
+//! is worse than none.
+
 use orbiter_core::{Error, inspect};
 use std::{
     io::Write,
     sync::atomic::{AtomicBool, Ordering},
 };
 use zip::{ZipWriter, write::SimpleFileOptions};
+/// An archive containing exactly the entries given, valid or not.
+///
+/// Deliberately writes whatever it is handed, including traversal paths and duplicate names, so a
+/// test can present the malformed archives inspection has to refuse.
 fn fixture(entries: Vec<(&str, Vec<u8>)>) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().unwrap();
     {
@@ -16,9 +27,11 @@ fn fixture(entries: Vec<(&str, Vec<u8>)>) -> tempfile::NamedTempFile {
     }
     file
 }
+/// A minimal `Info.plist` declaring one bundle identifier and executable.
 fn info(id: &str) -> Vec<u8> {
     format!(r#"<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>{id}</string><key>CFBundleExecutable</key><string>App</string></dict></plist>"#).into_bytes()
 }
+/// A minimal 64-bit arm64 Mach-O with one load command, optionally marked encrypted.
 fn macho(crypt: u32) -> Vec<u8> {
     let mut b = vec![0; 56];
     for (o, v) in [
@@ -35,6 +48,8 @@ fn macho(crypt: u32) -> Vec<u8> {
     b
 }
 #[test]
+/// Nested apps, extensions and frameworks are all found and described, each with its own
+/// identifier, rather than only the main app being reported.
 fn nested_bundle_inventory() {
     let f = fixture(vec![
         ("Payload/A.app/Info.plist", info("test.app")),
@@ -62,6 +77,8 @@ fn nested_bundle_inventory() {
     assert!(!r.findings.iter().any(|f| f.status == "preserved"));
 }
 #[test]
+/// An entry name containing traversal, an absolute path, or a Windows separator is refused before
+/// anything is read: a crafted IPA must not be able to name a file outside the archive.
 fn rejects_traversal_and_windows_paths() {
     for n in [
         "../evil",
@@ -82,6 +99,8 @@ fn rejects_traversal_and_windows_paths() {
     }
 }
 #[test]
+/// Two entries differing only in case are refused, because on a case-insensitive filesystem they
+/// would become one file and the second would silently replace the first.
 fn rejects_case_collisions() {
     let f = fixture(vec![
         ("Payload/A.app/Info.plist", info("a")),
@@ -93,6 +112,7 @@ fn rejects_case_collisions() {
     ));
 }
 #[test]
+/// A symlink entry is refused rather than followed, so an archive cannot reach outside itself.
 fn rejects_symlinks() {
     let mut f = tempfile::NamedTempFile::new().unwrap();
     {
@@ -111,6 +131,8 @@ fn rejects_symlinks() {
     ));
 }
 #[test]
+/// A file that is not a valid archive is refused with a message saying so, rather than being
+/// partially read.
 fn rejects_bad_zip() {
     let mut f = tempfile::NamedTempFile::new().unwrap();
     f.write_all(b"not a zip").unwrap();
@@ -120,6 +142,8 @@ fn rejects_bad_zip() {
     ));
 }
 #[test]
+/// An archive with more or fewer than exactly one main app is refused: guessing which one was
+/// meant would describe a build nobody asked about.
 fn rejects_multiple_main_apps() {
     let f = fixture(vec![
         ("Payload/A.app/Info.plist", info("a")),
@@ -131,6 +155,8 @@ fn rejects_multiple_main_apps() {
     ));
 }
 #[test]
+/// A bundle whose `Info.plist` is malformed or lacks an identifier is refused rather than
+/// described with invented values.
 fn malformed_metadata() {
     let f = fixture(vec![("Payload/A.app/Info.plist", b"bad plist".to_vec())]);
     assert!(matches!(
@@ -139,6 +165,8 @@ fn malformed_metadata() {
     ));
 }
 #[test]
+/// Cancellation takes effect at a boundary and leaves no partial report, and inspecting the same
+/// archive again afterwards succeeds — a cancelled run poisons nothing.
 fn cancellation_at_stage_boundary_and_retry() {
     let f = fixture(vec![
         ("Payload/A.app/Info.plist", info("a")),
@@ -157,6 +185,8 @@ fn cancellation_at_stage_boundary_and_retry() {
     assert!(inspect(f.path(), &c, |_| {}).is_ok());
 }
 #[test]
+/// An encrypted executable produces an unsupported finding: it cannot be re-signed, and saying so
+/// during inspection is what stops a plan being built on it.
 fn encrypted_build_has_hard_blocker() {
     let f = fixture(vec![
         ("Payload/A.app/Info.plist", info("a")),
@@ -170,6 +200,7 @@ fn encrypted_build_has_hard_blocker() {
     );
 }
 #[test]
+/// A property list beyond the size bound is refused before the recursive value builder sees it.
 fn oversized_plist_rejected() {
     let f = fixture(vec![(
         "Payload/A.app/Info.plist",
@@ -181,6 +212,8 @@ fn oversized_plist_rejected() {
     ));
 }
 #[test]
+/// A bundle whose executable cannot be read is reported as not verified, never as compatible:
+/// absence of evidence is not evidence the build will run.
 fn corrupt_executable_is_never_compatible() {
     let f = fixture(vec![
         ("Payload/A.app/Info.plist", info("a")),
@@ -195,6 +228,8 @@ fn corrupt_executable_is_never_compatible() {
     );
 }
 #[test]
+/// A deeply nested property list is refused at the event stream, before recursion could exhaust
+/// the stack.
 fn rejects_deeply_nested_plist() {
     let xml = format!(
         "<plist><dict><key>x</key>{}<string>x</string>{}</dict></plist>",
@@ -208,6 +243,7 @@ fn rejects_deeply_nested_plist() {
     ));
 }
 #[test]
+/// Binary property lists are read as well as XML ones, since real IPAs ship both.
 fn binary_plist_supported() {
     let mut bytes = Vec::new();
     let mut d = plist::Dictionary::new();
@@ -229,6 +265,8 @@ fn binary_plist_supported() {
     );
 }
 #[test]
+/// An archive whose central directory lists the same name twice is refused: which entry a reader
+/// would get is not something to leave to chance.
 fn rejects_duplicate_central_directory_names() {
     let f = fixture(vec![
         ("Payload/A.app/Info.plist", info("a")),
@@ -250,6 +288,8 @@ fn rejects_duplicate_central_directory_names() {
 }
 
 #[test]
+/// An icon beyond the member size limit leaves the report without one, rather than failing the
+/// whole inspection — which would make an IPA with a large icon impossible to import at all.
 fn an_icon_too_large_to_read_is_absent_rather_than_fatal() {
     // A declared icon over the 2 MiB member limit used to fail the whole inspection, so an IPA
     // with a large icon could not be inspected or imported at all.

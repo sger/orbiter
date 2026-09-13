@@ -45,6 +45,10 @@ pub struct Outcome {
     pub message: String,
 }
 
+/// Why a certificate request cannot proceed yet, or `None` if it can.
+///
+/// Checked before anything is sent, and the order matters: it names the *first* missing step, so a
+/// person is told to sign in rather than to acknowledge something they cannot reach.
 pub fn refusal(acknowledged: bool, team_selected: bool, signed_in: bool) -> Option<&'static str> {
     if !signed_in {
         return Some("Sign in to Apple before requesting a signing certificate.");

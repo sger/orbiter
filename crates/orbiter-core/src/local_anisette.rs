@@ -156,7 +156,8 @@ impl AnisetteProvider for LocalProvider {
             data.local_user.clone(),
         ))
     }
-    /// This Mac's client identification. See [`client_info`].
+    /// This Mac's client identification: its real OS and networking versions, and nothing about
+    /// the person using it.
     ///
     /// # Errors
     ///

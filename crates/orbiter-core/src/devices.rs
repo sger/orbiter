@@ -35,6 +35,10 @@ pub struct Discovery {
     pub service_available: bool,
     pub message: Option<&'static str>,
 }
+/// Where the local device daemon listens.
+///
+/// Always this machine's own socket. Any environment variable naming a remote daemon is ignored:
+/// a phone on someone else's desk is not a device this Mac may enumerate or install to.
 pub(crate) fn address() -> UsbmuxdAddr {
     // Deliberately ignore USBMUXD_SOCKET_ADDRESS: never send pairing data to a remote daemon.
     #[cfg(unix)]
