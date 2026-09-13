@@ -34,6 +34,10 @@ use std::{
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+/// Configure TLS once, before any authentication request is made.
+///
+/// Installs the process-wide cryptography provider explicitly rather than leaving it to whichever
+/// dependency first needs one, so the first sign-in cannot fail for want of it.
 pub fn initialize() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
@@ -152,12 +156,18 @@ struct Failure {
     retry_after: Option<Duration>,
 }
 impl Failure {
+    /// Classify an authentication failure and keep only what is safe to show.
+    ///
+    /// The upstream report is inspected for its *kind* and then discarded: Apple's own text can
+    /// carry account state and server payloads, and a person needs to know which step to take
+    /// rather than what the service said.
     fn new(message: String, error: &rootcause::Report) -> Self {
         Self {
             retry_after: isideload::auth_throttle_delay(error),
             message,
         }
     }
+    /// A failure with a fixed message and no upstream report to classify.
     fn plain(message: String) -> Self {
         Self {
             message,
@@ -180,6 +190,12 @@ struct Inner {
 pub struct Accounts(Arc<Mutex<Inner>>, Arc<tokio::sync::Mutex<()>>);
 
 impl Inner {
+    /// Forget the session and everything derived from it, leaving `message` on screen.
+    ///
+    /// Aborts any worker still waiting on a challenge and starts a new generation, so a late
+    /// answer from the old one cannot be applied to whatever replaces it. The throttle deadline
+    /// deliberately survives: it is Apple's state about this machine, not Orbiter's about a
+    /// session, and clearing it would let a rejected password be retried immediately.
     fn clear(&mut self, message: &str) {
         self.generation = Uuid::new_v4().to_string();
         if let Some(task) = self.task.take() {
@@ -193,6 +209,9 @@ impl Inner {
             ..View::default()
         };
     }
+    /// How long Apple's throttling still has to run, if it does.
+    ///
+    /// Clears a deadline that has passed, so a lapsed hold does not keep refusing sign-ins.
     fn throttle_remaining(&mut self) -> Option<Duration> {
         let deadline = self.retry_at?;
         match deadline.checked_duration_since(Instant::now()) {
@@ -203,6 +222,10 @@ impl Inner {
             }
         }
     }
+    /// Clear the session if it has outlived its thirty minutes.
+    ///
+    /// Called on every read, so a stale session is never reported as live and a signed-out view is
+    /// what a person sees rather than an operation failing later for an unexplained reason.
     fn expire(&mut self) {
         if self
             .expires_at
@@ -214,16 +237,43 @@ impl Inner {
 }
 
 impl Accounts {
+    /// The current sign-in state, expiring a session that has outlived its lifetime first.
+    ///
+    /// Local only: reports state this process already holds and contacts nothing.
+    ///
+    /// # Errors
+    ///
+    /// Fails only on lock poisoning.
     pub fn status(&self) -> Result<View, String> {
         let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
         inner.expire();
         Ok(inner.view.clone())
     }
+    /// Forget the session.
+    ///
+    /// Local only. Nothing is revoked at Apple: a certificate this session obtained still exists
+    /// and a signed build still works. Any two-factor prompt still waiting is cancelled.
+    ///
+    /// # Errors
+    ///
+    /// Fails only on lock poisoning.
     pub fn sign_out(&self) -> Result<View, String> {
         let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
         inner.clear("Signed out locally. macOS manages its own authentication support data.");
         Ok(inner.view.clone())
     }
+    /// Begin signing in to Apple.
+    ///
+    /// **Contacts Apple.** Validates consent and input before anything is sent or stored, then
+    /// hands the credentials to a worker. The password exists only for that request and is
+    /// zeroized afterwards; it is never written down, logged, or returned.
+    ///
+    /// Returns immediately with the next state — a challenge is answered through [`Self::answer`].
+    ///
+    /// # Errors
+    ///
+    /// Fails without consent, with empty input, while a sign-in is already running, or while
+    /// Apple's throttling of this machine is still in force.
     pub fn start(&self, email: String, password: String, consent: bool) -> Result<View, String> {
         initialize();
         let password = zeroize::Zeroizing::new(password);
@@ -286,6 +336,15 @@ impl Accounts {
         inner.task = Some(task.abort_handle());
         Ok(inner.view.clone())
     }
+    /// Run one sign-in attempt against Apple, on a worker task.
+    ///
+    /// **Contacts Apple.** Holds the password only for the duration of the request and zeroizes it
+    /// afterwards. A two-factor challenge suspends here until [`Self::answer`] supplies a reply or
+    /// the session is cleared.
+    ///
+    /// Apple's throttling of this machine is recorded as a local hold so the next attempt is
+    /// refused here rather than being sent and refused again — which is what makes throttling
+    /// worse.
     async fn login(
         &self,
         generation: &str,
@@ -345,6 +404,11 @@ impl Accounts {
         let teams = read_teams(&mut developer).await.map_err(Failure::plain)?;
         Ok((email, developer, teams))
     }
+    /// Present a two-factor challenge and wait for the person to answer it.
+    ///
+    /// Trusted phone numbers are masked before they reach the view. The wait ends when an answer
+    /// arrives, when the session is cleared, or when the account generation moves on — a stale
+    /// reply can never be applied to a newer prompt.
     async fn challenge(
         &self,
         generation: &str,
@@ -387,6 +451,16 @@ impl Accounts {
         }
         receiver.await.unwrap_or(TwoFactorCallbackResponse::Abort)
     }
+    /// Answer a two-factor challenge, or ask for the code another way.
+    ///
+    /// A verification code is treated exactly as a password: used once, zeroized, never stored. An
+    /// answer to a challenge that is no longer current is refused rather than applied to whatever
+    /// replaced it — which is what stops a stale reply consuming a fresh prompt.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the challenge is unknown or superseded, if the input is empty, or if the session
+    /// was cleared while the prompt was open.
     pub fn answer(&self, challenge_id: String, answer: Answer) -> Result<View, String> {
         let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
         let challenge = inner
@@ -425,6 +499,10 @@ impl Accounts {
         inner.view.message = "Waiting for Apple verification…".into();
         Ok(inner.view.clone())
     }
+    /// Record a completed sign-in: the account, its teams, and the session's deadline.
+    ///
+    /// Ignored if the account generation has moved on, so a worker that finishes after a sign-out
+    /// cannot resurrect the session it was working on.
     fn finish(
         &self,
         generation: &str,
@@ -454,6 +532,11 @@ impl Accounts {
             };
         }
     }
+    /// Record a failed sign-in, optionally holding further attempts until Apple's throttling
+    /// lapses.
+    ///
+    /// Ignored if the account generation has moved on. `message` is already redacted; nothing from
+    /// Apple's own response reaches it.
     fn fail(&self, generation: &str, message: &str, retry_after: Option<Duration>) {
         if let Ok(mut inner) = self.0.lock() {
             if inner.generation != generation || inner.task.is_none() {
@@ -473,6 +556,14 @@ impl Accounts {
             };
         }
     }
+    /// Choose which of the account's teams to work with.
+    ///
+    /// Local only. Identifiers are derived from the team, so a plan prepared for one says nothing
+    /// about another and callers invalidate preparation when this changes.
+    ///
+    /// # Errors
+    ///
+    /// Fails without a session, or if the identifier names no team this account belongs to.
     pub fn select_team(&self, id: String) -> Result<View, String> {
         let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
         inner.expire();
@@ -482,6 +573,16 @@ impl Accounts {
         inner.view.selected_team = Some(id);
         Ok(inner.view.clone())
     }
+    /// Ask Apple for the account's teams again.
+    ///
+    /// **Contacts Apple** but mutates nothing. A session that can no longer be refreshed is
+    /// cleared along with the team selection, so the interface shows signed-out rather than acting
+    /// on a session that has quietly stopped working.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a refresh is already running, or if the session cannot be refreshed — in which
+    /// case the returned view already reflects being signed out.
     pub async fn refresh_teams(&self) -> Result<View, String> {
         let _gate = self
             .1
@@ -533,6 +634,10 @@ pub(super) fn hostname() -> String {
 }
 struct WorkerGuard(Accounts, String);
 impl Drop for WorkerGuard {
+    /// Report a worker that stopped without finishing, so the interface does not wait forever.
+    ///
+    /// Does no I/O and cannot fail: it records a message against the generation it belongs to,
+    /// which is ignored if that generation has already moved on.
     fn drop(&mut self) {
         self.0.fail(
             &self.1,
@@ -541,6 +646,12 @@ impl Drop for WorkerGuard {
         );
     }
 }
+/// Turn Apple's team listing into the view's own shape.
+///
+/// Classifies free versus paid from the membership Apple reports, matching the free wording first
+/// and treating anything unrecognised as undetermined rather than guessing. That answer decides
+/// seven-day expiry and which capabilities survive re-signing, so a guess would be worse than an
+/// admission.
 async fn read_teams(developer: &mut DeveloperSession) -> Result<Vec<Team>, String> {
     let teams = developer.list_teams().await.map_err(|_| "Could not list developer teams. Check your developer account access and sign in again.")?;
     if teams.len() > 100 {
@@ -562,8 +673,10 @@ async fn read_teams(developer: &mut DeveloperSession) -> Result<Vec<Team>, Strin
 }
 
 #[cfg(test)]
+/// Checks that authentication fails legibly without echoing Apple, and that secrets never persist.
 mod tests {
     use super::*;
+    /// An account waiting on a two-factor challenge, with the channel its answer would go to.
     fn pending() -> (Accounts, oneshot::Receiver<TwoFactorCallbackResponse>) {
         let manager = Accounts::default();
         let (tx, rx) = oneshot::channel();
@@ -586,6 +699,8 @@ mod tests {
         (manager, rx)
     }
     #[test]
+    /// A failure's diagnostic carries the classification and none of Apple's own text or
+    /// attachments, which can include account state.
     fn authentication_diagnostic_excludes_server_messages_and_attachments() {
         let error = rootcause::report!(isideload::SideloadError::AuthWithMessage(
             -12345,
@@ -599,6 +714,8 @@ mod tests {
         assert!(!isideload::redacted_auth_error(&unknown.into_dynamic()).contains("SECRET"));
     }
     #[test]
+    /// A federated (managed) account is named as unsupported with what to do about it, without
+    /// echoing the server's response.
     fn federated_login_error_is_actionable_without_exposing_server_payload() {
         let error = rootcause::report!(isideload::SideloadError::AuthWithMessage(
             -22320,
@@ -613,6 +730,8 @@ mod tests {
     }
 
     #[test]
+    /// Rejected credentials produce Orbiter's own sentence, never Apple's — which can differ by
+    /// account state and reveal more than whether the password was right.
     fn rejected_credentials_are_explained_without_apple_text() {
         for code in [-20101, -22406] {
             let error = rootcause::report!(isideload::SideloadError::AuthWithMessage(
@@ -635,6 +754,8 @@ mod tests {
         assert!(isideload::redacted_auth_error(&wrong_code).contains("verification code"));
     }
     #[test]
+    /// Only recognised authentication stages are accepted. An unfamiliar one is refused rather
+    /// than being carried into a state machine that does not model it.
     fn authentication_stages_are_allowlisted() {
         for (context, expected) in [
             (
@@ -658,6 +779,8 @@ mod tests {
     }
 
     #[test]
+    /// Apple throttling this machine is reported as throttling, not as a wrong password — which
+    /// would send someone to reset a password that was correct.
     fn throttled_sign_in_is_not_reported_as_a_rejected_password() {
         let throttled = rootcause::report!(isideload::SideloadError::RateLimited(
             Some(900),
@@ -704,6 +827,8 @@ mod tests {
         assert!(isideload::auth_throttle_delay(&rejected).is_none());
     }
     #[test]
+    /// An additional step Orbiter cannot perform is named as unsupported, without repeating what
+    /// Apple said about it.
     fn unsupported_additional_step_is_named_without_echoing_apple_text() {
         let error = rootcause::report!(isideload::SideloadError::UnsupportedStep(
             "SECRET_STEP_NAME".into()
@@ -715,6 +840,8 @@ mod tests {
         assert!(!isideload::auth_error_is_inconclusive(&error));
     }
     #[test]
+    /// While a throttle hold is in force, further attempts are refused locally rather than sent —
+    /// sending them is what extends the throttling.
     fn apple_throttling_blocks_further_attempts_until_it_lapses() {
         let manager = Accounts::default();
         manager.0.lock().unwrap().generation = "current".into();
@@ -743,6 +870,9 @@ mod tests {
         assert!(manager.0.lock().unwrap().throttle_remaining().is_none());
     }
     #[test]
+    /// Free versus paid is read from the membership Apple reports, and anything unrecognised is
+    /// undetermined rather than guessed — that answer decides seven-day expiry and which
+    /// capabilities survive re-signing.
     fn team_membership_decides_free_versus_paid_and_never_guesses() {
         use isideload::dev::teams::{DeveloperMembership, DeveloperTeam};
         let team = |kind: &str, memberships: Vec<&str>| DeveloperTeam {
@@ -790,6 +920,8 @@ mod tests {
         assert_eq!(hostile, (Some(true), None));
     }
     #[test]
+    /// The machine label sent to Apple is plain, bounded text and never empty, so a certificate is
+    /// not named after whatever a person called their Mac.
     fn the_machine_label_is_plain_text_and_never_empty() {
         // Apple shows this beside the certificate; it must not carry control characters or grow
         // without bound, and it must survive an unset environment.
@@ -801,6 +933,7 @@ mod tests {
         assert_eq!(hostname().len(), 60);
     }
     #[tokio::test]
+    /// Requesting a certificate without a live session is refused locally rather than attempted.
     async fn a_certificate_request_refuses_while_no_live_session_exists() {
         let manager = Accounts::default();
         assert!(
@@ -823,6 +956,7 @@ mod tests {
         );
     }
     #[tokio::test]
+    /// Registering a device without a live session is refused locally rather than attempted.
     async fn device_registration_refuses_while_no_live_session_exists() {
         // Device transport ID 1 is never contacted: every refusal happens before the identifier
         // is read. Ordering of the individual refusals is covered in provisioning::tests.
@@ -856,6 +990,8 @@ mod tests {
         );
     }
     #[test]
+    /// A session past its lifetime is cleared on the next read, along with the team selection, so
+    /// nothing acts on a session that has quietly stopped working.
     fn local_expiry_clears_account_and_team_selection() {
         let manager = Accounts::default();
         {
@@ -872,6 +1008,8 @@ mod tests {
         assert!(view.message.contains("expired"));
     }
     #[test]
+    /// Consent and input are checked before anything is sent or stored, so a refused sign-in never
+    /// puts a password anywhere.
     fn consent_and_input_validation_precede_any_worker_or_storage() {
         let manager = Accounts::default();
         assert!(
@@ -888,6 +1026,8 @@ mod tests {
         assert!(manager.status().unwrap().stage == Stage::SignedOut);
     }
     #[tokio::test]
+    /// An answer to a superseded challenge, or an empty one, leaves the current prompt intact
+    /// instead of consuming it — otherwise a stale reply would cancel a fresh code.
     async fn stale_and_invalid_verification_does_not_consume_prompt() {
         let (manager, rx) = pending();
         assert!(
@@ -913,6 +1053,8 @@ mod tests {
         );
     }
     #[tokio::test]
+    /// Signing out cancels a waiting two-factor prompt and clears the account and team, leaving no
+    /// worker still expecting an answer.
     async fn sign_out_cancels_prompt_and_clears_account_team() {
         let (manager, rx) = pending();
         manager.0.lock().unwrap().view.selected_team = Some("OLDTEAM".into());
@@ -926,6 +1068,8 @@ mod tests {
         assert!(manager.status().unwrap().stage == Stage::SignedOut);
     }
     #[tokio::test]
+    /// Trusted phone numbers reach the view masked, and no raw upstream error is ever serialised
+    /// into it.
     async fn trusted_numbers_are_masked_and_raw_errors_are_not_serialized() {
         let manager = Accounts::default();
         manager.0.lock().unwrap().generation = "current".into();
