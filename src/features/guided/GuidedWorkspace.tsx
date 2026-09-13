@@ -531,11 +531,16 @@ export function GuidedWorkspace({
                             multiple: true,
                             directory: false,
                             filters: [
-                              { name: "Dynamic library", extensions: ["dylib"] },
+                              {
+                                name: "Dynamic library",
+                                extensions: ["dylib"],
+                              },
                             ],
                           });
                           if (!picked) return;
-                          const chosen = Array.isArray(picked) ? picked : [picked];
+                          const chosen = Array.isArray(picked)
+                            ? picked
+                            : [picked];
                           setDylibs((current) => [
                             ...current,
                             ...chosen.filter((path) => !current.includes(path)),

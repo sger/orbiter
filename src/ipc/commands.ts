@@ -90,7 +90,8 @@ export const signIpa = (
   /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
   dylibs: string[],
   progress: Channel<SigningProgress>,
-) => invoke<Signed>("account_sign_ipa", { path, watch, marker, dylibs, progress });
+) =>
+  invoke<Signed>("account_sign_ipa", { path, watch, marker, dylibs, progress });
 
 // The seven-day clock. Reads a local file and a clock; never Apple, never the phone.
 export const renewalStatus = (
