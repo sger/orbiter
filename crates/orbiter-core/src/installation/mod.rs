@@ -564,6 +564,65 @@ fn transport_error(e: IdeviceError) -> RunError {
         definite,
     }
 }
+/// How long one device operation may take over a cable, where a 256 KiB write is milliseconds.
+const USB_OPERATION: Duration = Duration::from_secs(15);
+/// The same, over Wi-Fi. A write that would be instant on a cable can sit behind other traffic on
+/// a busy network, and the cable's ceiling would abort a transfer that was merely slow.
+const NETWORK_OPERATION: Duration = Duration::from_secs(60);
+/// How long iOS may install without reporting any progress before Orbiter stops waiting.
+///
+/// This number is a judgement, not a measurement. iOS reports progress every few seconds while it
+/// is working, so three minutes of silence means something has gone wrong rather than that the app
+/// is large. It is deliberately generous, because giving up early on a working install and
+/// reporting an unknown outcome is worse than waiting a little longer.
+const INSTALL_SILENCE: Duration = Duration::from_secs(180);
+/// How often that silence is checked. Short enough to notice promptly, long enough to be free.
+const SILENCE_CHECK: Duration = Duration::from_secs(10);
+/// The backstop for a whole job, whatever the transport.
+///
+/// One value rather than one per transport, because the transport can change mid-job: a phone
+/// reviewed on a cable and then unplugged would otherwise inherit a cable-sized budget for a
+/// Wi-Fi transfer. The per-operation ceilings and the silence watchdog do the real work; this only
+/// stops a job that has gone wrong in a way neither of them noticed from running forever.
+const JOB_DEADLINE: Duration = Duration::from_secs(45 * 60);
+
+/// How long one device operation may take, for the connection it is running over.
+fn operation_deadline(connection: Transport) -> Duration {
+    match connection {
+        Transport::Usb => USB_OPERATION,
+        // An unmodelled transport is given the same room as Wi-Fi: it may well be a slow one, and
+        // aborting early would be guessing against it.
+        Transport::Network | Transport::Unknown => NETWORK_OPERATION,
+    }
+}
+/// What to say when iOS stops reporting progress during an installation.
+///
+/// Never phrased as a failure. The install command reached the phone, so the app may be installed;
+/// what is lost is Orbiter's ability to watch it, which is a different thing to report.
+fn silent_install(connection: Transport) -> &'static str {
+    match connection {
+        Transport::Network => {
+            "iOS stopped reporting progress for three minutes. The Wi-Fi connection to the iPhone was probably lost."
+        }
+        _ => "iOS stopped reporting progress for three minutes.",
+    }
+}
+/// What to say when a phone stops answering, for the connection it stopped answering over.
+///
+/// Sending someone to check a cable that is not plugged in is sending them to fix the wrong thing.
+fn unresponsive(connection: Transport) -> &'static str {
+    match connection {
+        Transport::Usb => {
+            "The iPhone stopped responding. Check the cable and device before retrying."
+        }
+        Transport::Network => {
+            "The iPhone stopped responding over Wi-Fi. Check that it is awake, unlocked, and on the same network as this Mac before retrying."
+        }
+        Transport::Unknown => {
+            "The iPhone stopped responding. Check that it is awake and still connected before retrying."
+        }
+    }
+}
 /// Bound one device operation in time, so a phone that stops answering does not hang the install.
 ///
 /// # Errors
@@ -571,16 +630,12 @@ fn transport_error(e: IdeviceError) -> RunError {
 /// Returns the operation's own failure, or a timeout classified the same way — by whether the
 /// install command had already been sent.
 async fn limited<T>(
+    connection: Transport,
     future: impl std::future::Future<Output = Result<T, IdeviceError>>,
 ) -> Result<T, RunError> {
-    timeout(Duration::from_secs(15), future)
+    timeout(operation_deadline(connection), future)
         .await
-        .map_err(|_| {
-            RunError::from(
-                "The iPhone stopped responding. Check the cable and device before retrying."
-                    .to_string(),
-            )
-        })?
+        .map_err(|_| RunError::from(unresponsive(connection).to_string()))?
         .map_err(transport_error)
 }
 /// Journal a status, then announce it.
@@ -696,7 +751,7 @@ pub async fn execute(
         Err(e)
     } else {
         timeout(
-            Duration::from_secs(20 * 60),
+            JOB_DEADLINE,
             run(&plan, &control, &journal, &remote, &mut status, &notify),
         )
         .await
@@ -840,8 +895,12 @@ async fn run(
             .into());
     }
     cancel_check(control)?;
-    let mut afc = limited(AfcClient::connect(&target.provider)).await?;
-    let mut proxy = limited(InstallationProxyClient::connect(&target.provider)).await?;
+    let mut afc = limited(target.connection, AfcClient::connect(&target.provider)).await?;
+    let mut proxy = limited(
+        target.connection,
+        InstallationProxyClient::connect(&target.provider),
+    )
+    .await?;
     let mut local = tokio::fs::File::open(&path)
         .await
         .map_err(|_| RunError::from("Cannot open the reviewed snapshot.".to_string()))?;
@@ -853,13 +912,18 @@ async fn run(
     status.message = transfer_message(plan.connection, target.connection).into();
     publish(status, journal, notify)?;
     cancel_check(control)?;
-    if limited(afc.get_file_info("PublicStaging")).await.is_err() {
-        limited(afc.mk_dir("PublicStaging")).await?;
+    if limited(target.connection, afc.get_file_info("PublicStaging"))
+        .await
+        .is_err()
+    {
+        limited(target.connection, afc.mk_dir("PublicStaging")).await?;
     }
     // Journal intent before any package bytes are written, for conservative crash recovery.
     status.cleanup_pending = true;
     publish(status, journal, notify)?;
-    let mut file = limited(afc.open(remote, AfcFopenMode::WrOnly)).await?;
+    let mut file = limited(target.connection, afc.open(remote, AfcFopenMode::WrOnly)).await?;
+    // Copied out so the transfer block does not hold a borrow of the phone for its whole run.
+    let connection = target.connection;
     let mut hash = Sha256::new();
     let mut buf = vec![0; 256 * 1024];
     let mut last = Instant::now();
@@ -880,7 +944,7 @@ async fn run(
                         .into(),
                 );
             }
-            limited(file.write_entire(&buf[..n])).await?;
+            limited(connection, file.write_entire(&buf[..n])).await?;
             hash.update(&buf[..n]);
             status.transferred_bytes += n as u64;
             if last.elapsed() > Duration::from_millis(150) {
@@ -891,7 +955,7 @@ async fn run(
         Ok::<(), RunError>(())
     }
     .await;
-    let closed = limited(file.close()).await;
+    let closed = limited(target.connection, file.close()).await;
     transfer?;
     closed?;
     if status.transferred_bytes != status.total_bytes
@@ -923,26 +987,95 @@ async fn run(
         plan.review.bundle_id.clone().into(),
     );
     let installing = status.clone();
-    proxy
-        .install_with_callback(
-            remote,
-            Some(plist::Value::Dictionary(options)),
-            |(percent, ())| {
-                let mut progress = installing.clone();
-                progress.device_percent = Some(percent.min(100));
-                notify(progress);
-                async {}
-            },
-            (),
-        )
-        .await
-        .map_err(transport_error)?;
-    Ok(())
+    // iOS reports progress as it works. That reporting is the only sign the phone is still there:
+    // this call has no deadline of its own, so without a watchdog a connection that dies here
+    // leaves the window saying "iOS is installing" until the whole job times out. Over a cable
+    // that is nearly unreachable; over Wi-Fi it is a walk out of range.
+    let heard = std::sync::Mutex::new(Instant::now());
+    let install = proxy.install_with_callback(
+        remote,
+        Some(plist::Value::Dictionary(options)),
+        |(percent, ())| {
+            if let Ok(mut at) = heard.lock() {
+                *at = Instant::now();
+            }
+            let mut progress = installing.clone();
+            progress.device_percent = Some(percent.min(100));
+            notify(progress);
+            async {}
+        },
+        (),
+    );
+    tokio::pin!(install);
+    loop {
+        tokio::select! {
+            result = &mut install => return result.map(|_| ()).map_err(transport_error),
+            () = tokio::time::sleep(SILENCE_CHECK) => {
+                // A poisoned lock means a panicking callback, not a silent phone; treating that
+                // as "still working" would hang, so it counts as silence.
+                let quiet = heard.lock().map_or(INSTALL_SILENCE, |at| at.elapsed());
+                if quiet >= INSTALL_SILENCE {
+                    // Deliberately not `definite`: the install command reached iOS, so it may
+                    // well have finished. Saying it failed would tell someone the app is not
+                    // there when it may be sitting on their Home Screen.
+                    return Err(RunError::from(silent_install(connection).to_string()));
+                }
+            }
+        }
+    }
 }
 #[cfg(test)]
 /// Checks the comparisons and classifications a review depends on.
 mod tests {
     use super::*;
+    #[test]
+    /// A device operation gets the time its connection needs. Fifteen seconds is right for a
+    /// cable, where a 256 KiB write is milliseconds, and would abort a Wi-Fi transfer that was
+    /// only slow.
+    fn an_operation_is_given_the_time_its_connection_needs() {
+        assert_eq!(operation_deadline(Transport::Usb), USB_OPERATION);
+        assert_eq!(operation_deadline(Transport::Network), NETWORK_OPERATION);
+        // An unmodelled transport is given room rather than judged against a cable.
+        assert_eq!(operation_deadline(Transport::Unknown), NETWORK_OPERATION);
+        assert!(NETWORK_OPERATION > USB_OPERATION);
+        // The backstop must outlast any single operation by a wide margin, or it would be the
+        // thing that fires and the specific message would never be seen.
+        assert!(JOB_DEADLINE > NETWORK_OPERATION * 10);
+    }
+
+    #[test]
+    /// Nobody is told to check a cable that is not plugged in.
+    fn a_phone_on_wifi_is_not_told_to_check_its_cable() {
+        assert!(unresponsive(Transport::Usb).contains("cable"));
+        let wifi = unresponsive(Transport::Network);
+        assert!(!wifi.contains("cable"));
+        assert!(wifi.contains("network"));
+        assert!(!unresponsive(Transport::Unknown).contains("cable"));
+    }
+
+    #[test]
+    /// iOS going quiet mid-install is never reported as a failure, over any connection.
+    ///
+    /// The install command reached the phone, so the app may be installed. Calling that a failure
+    /// would tell someone the app is not there while it sits on their Home Screen — and the whole
+    /// point of the unknown outcome is that Orbiter does not guess.
+    fn a_silent_install_is_never_called_a_failure() {
+        for connection in [Transport::Usb, Transport::Network, Transport::Unknown] {
+            let message = silent_install(connection);
+            assert!(!message.contains("failed"));
+            assert!(!message.contains("not installed"));
+            // Carried as indefinite, which is what turns it into an unknown outcome rather than
+            // a failed one where the stage is decided.
+            assert!(!RunError::from(message.to_string()).definite);
+        }
+        assert!(silent_install(Transport::Network).contains("Wi-Fi"));
+        // The wording names the wait, so the constant and the sentence must not drift apart.
+        assert_eq!(INSTALL_SILENCE, Duration::from_secs(3 * 60));
+        assert!(silent_install(Transport::Usb).contains("three minutes"));
+        // Silence is checked often enough to be noticed well inside the wait.
+        assert!(SILENCE_CHECK * 4 < INSTALL_SILENCE);
+    }
+
     #[test]
     /// A phone reached the same way it was reviewed produces no remark; a phone that has moved
     /// between a cable and Wi-Fi is still installed to, and is said to have moved.
