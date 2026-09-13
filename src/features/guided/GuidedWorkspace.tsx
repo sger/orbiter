@@ -320,6 +320,7 @@ export function GuidedWorkspace({
             <Devices
               onSelect={setDeviceId}
               onConnection={setConnection}
+              onHelp={setHelp}
               paused={locked || flow.stage !== "choose"}
             />
           </div>

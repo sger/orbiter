@@ -20,12 +20,17 @@ const labels = {
 export function Devices({
   onSelect,
   onConnection,
+  onHelp,
   paused = false,
 }: {
   onSelect?: (id: number | null) => void;
   /// How the selected phone is being reached, for screens that keep saying so after this one.
   /// Reported separately from the id, and as a plain value, so it cannot churn on every poll.
   onConnection?: (connection: Transport | null) => void;
+  /// Open a help section. Offered here because "my iPhone is not listed" is answered by setup
+  /// steps, and someone reading a list that does not contain their phone is exactly who needs
+  /// them — sending them to find the Help page first is sending them away from the problem.
+  onHelp?: (section: string) => void;
   paused?: boolean;
 }) {
   const [result, setResult] = useState<Discovery | null>(null);
@@ -149,9 +154,19 @@ export function Devices({
           <p>
             {result?.message ??
               (desktop && result
-                ? "Connect an iPhone by cable and unlock it. To use one over Wi-Fi, connect it by cable once, trust this Mac, and turn on “Show this iPhone when on Wi-Fi” in Finder — an iPhone that has never been trusted here cannot be reached over Wi-Fi at all."
+                ? "Connect an iPhone by cable and unlock it. Using one over Wi-Fi takes a one-time setup with the cable connected."
                 : "Connect an iPhone to inspect its connection and pairing state.")}
           </p>
+        )}
+        {/* Shown whenever no phone is selected, which is when the question gets asked. */}
+        {desktop && !device && onHelp && (
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => onHelp("connecting")}
+          >
+            iPhone not listed, or want to use Wi-Fi?
+          </button>
         )}
       </div>
     </div>

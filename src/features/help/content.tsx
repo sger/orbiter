@@ -126,6 +126,58 @@ export const sections: HelpSection[] = [
     ),
   },
   {
+    id: "connecting",
+    title: "Connecting the iPhone, by cable or Wi-Fi",
+    body: (
+      <>
+        <p>
+          Orbiter reaches an iPhone through macOS's own device service — the
+          same one Finder uses. A cable always works. Wi-Fi works too, but only
+          after the phone has been set up for it, and that setup can only be
+          done with the phone plugged in.
+        </p>
+        <p>
+          <strong>Why a cable is needed first.</strong> Two things can only
+          happen over a cable, and both are one-time. The{" "}
+          <em>Trust This Computer?</em> prompt appears over a cable only, and
+          without the pairing record it creates, the iPhone will not talk to
+          this Mac by any route. And the switch that makes the phone visible
+          over Wi-Fi lives in Finder's device page, which exists only while the
+          phone is connected. Until it is switched on, nothing advertises the
+          phone on the network, so unplugging alone changes nothing.
+        </p>
+        <p>
+          <strong>To enable Wi-Fi.</strong> Connect the iPhone and unlock it.
+          In <strong>Finder</strong>, select the iPhone in the sidebar under{" "}
+          <em>Locations</em>, open the <strong>General</strong> tab, tick{" "}
+          <strong>Show this iPhone when on Wi-Fi</strong>, and click{" "}
+          <strong>Apply</strong>. After that the cable is optional.
+        </p>
+        <p>
+          A phone reachable both ways is listed once, on the cable, and says
+          the other is available. Orbiter prefers the cable because it is
+          faster and does not stop working when someone walks out of range.
+        </p>
+        <p>
+          <strong>If it does not appear over Wi-Fi.</strong> The iPhone must be
+          awake, unlocked, and on the same network as this Mac — a guest
+          network, or a router that isolates clients from each other, will keep
+          it hidden. Some networks block this entirely. A phone that has gone
+          to sleep stops answering until it wakes.
+        </p>
+        <p>
+          <strong>What Wi-Fi costs.</strong> Everything works over Wi-Fi, and
+          transfers take longer. If the connection drops part-way through a
+          transfer, the transfer starts again — Orbiter never repeats one on its
+          own. If it drops after iOS has begun installing, Orbiter stops waiting
+          after three minutes of silence and reports the outcome as{" "}
+          <em>unknown</em> rather than failed, because the app may well have
+          installed. Check the phone before trying again.
+        </p>
+      </>
+    ),
+  },
+  {
     id: "untrusted",
     title: '"Untrusted Developer" on the iPhone',
     body: (

@@ -264,6 +264,7 @@ export function Workspace({
             </div>
             <Devices
               onSelect={setDeviceId}
+              onHelp={openHelp}
               paused={installBusy || signing || accountBusy}
             />
             <div hidden={!!selected?.artifact.source_id}>
