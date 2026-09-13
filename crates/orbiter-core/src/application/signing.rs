@@ -112,7 +112,7 @@ impl SigningService {
     ///
     /// - [`ErrorCode::AcknowledgementRequired`] without an acknowledgement.
     /// - [`ErrorCode::ArtifactMissing`], [`ErrorCode::ArtifactChanged`] or
-    ///   [`ErrorCode::InvalidRequest`] from [`Self::source`].
+    ///   [`ErrorCode::InvalidRequest`] when the artifact is already a signed build.
     /// - [`ErrorCode::Internal`] carrying Apple's own explanation for a refusal, already redacted
     ///   of authentication detail.
     pub async fn prepare(
@@ -144,7 +144,7 @@ impl SigningService {
     /// # Errors
     ///
     /// - [`ErrorCode::ArtifactMissing`], [`ErrorCode::ArtifactChanged`] or
-    ///   [`ErrorCode::InvalidRequest`] from [`Self::source`].
+    ///   [`ErrorCode::InvalidRequest`] when the artifact is already a signed build.
     /// - [`ErrorCode::AuthenticationRequired`] without a signed-in session, a selected team, or a
     ///   certificate.
     /// - [`ErrorCode::StorageWrite`] if the library cannot retain the output, in which case the
