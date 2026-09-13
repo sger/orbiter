@@ -10,6 +10,7 @@
 //! left to the person. `withdraw_all` exists for the one case where nothing else can work: a free
 //! personal team has no certificates page at developer.apple.com, so a slot held by a certificate
 //! whose key is not on this Mac can only be cleared from here, with an explicit acknowledgement.
+use crate::domain::errors::{ErrorCode, OperationError};
 use isideload::dev::{
     certificates::{CertificatesApi, DevelopmentCertificate},
     developer_session::DeveloperSession,
@@ -49,17 +50,24 @@ pub struct Outcome {
 ///
 /// Checked before anything is sent, and the order matters: it names the *first* missing step, so a
 /// person is told to sign in rather than to acknowledge something they cannot reach.
-pub fn refusal(acknowledged: bool, team_selected: bool, signed_in: bool) -> Option<&'static str> {
+pub fn refusal(acknowledged: bool, team_selected: bool, signed_in: bool) -> Option<OperationError> {
     if !signed_in {
-        return Some("Sign in to Apple before requesting a signing certificate.");
+        return Some(OperationError::new(
+            ErrorCode::AuthenticationRequired,
+            "Sign in to Apple before requesting a signing certificate.",
+        ));
     }
     if !team_selected {
-        return Some("Select the signing team the certificate belongs to.");
+        return Some(OperationError::new(
+            ErrorCode::AuthenticationRequired,
+            "Select the signing team the certificate belongs to.",
+        ));
     }
     if !acknowledged {
-        return Some(
+        return Some(OperationError::new(
+            ErrorCode::AcknowledgementRequired,
             "Requesting a development certificate uses one of the team's few active certificate slots. Orbiter never revokes a certificate: revoking one would invalidate every app already signed with it, including apps Orbiter did not produce. Acknowledge before continuing.",
-        );
+        ));
     }
     None
 }
@@ -370,10 +378,15 @@ mod tests {
     /// Requesting a certificate needs a session, a chosen team and an acknowledgement: a free
     /// team has very few slots and spending one can leave it unable to issue another.
     fn a_certificate_request_is_refused_until_its_cost_is_acknowledged() {
-        assert!(refusal(true, true, false).is_some_and(|m| m.contains("Sign in")));
-        assert!(refusal(true, false, true).is_some_and(|m| m.contains("Select the signing team")));
+        let no_session = refusal(true, true, false).expect("a session is required");
+        assert_eq!(no_session.code, ErrorCode::AuthenticationRequired);
+        assert!(no_session.message.contains("Sign in"));
+        let no_team = refusal(true, false, true).expect("a team is required");
+        assert_eq!(no_team.code, ErrorCode::AuthenticationRequired);
+        assert!(no_team.message.contains("Select the signing team"));
         let unacknowledged = refusal(false, true, true).expect("acknowledgement required");
-        assert!(unacknowledged.contains("never revokes"));
+        assert_eq!(unacknowledged.code, ErrorCode::AcknowledgementRequired);
+        assert!(unacknowledged.message.contains("never revokes"));
         assert!(refusal(true, true, true).is_none());
     }
 

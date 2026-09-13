@@ -15,7 +15,7 @@ import {
   libraryChanged,
 } from "../../ipc/commands";
 import type { Artifact, Attempt, LibrarySnapshot } from "./types";
-import { message } from "../../ipc/failure";
+import { failure, message } from "../../ipc/failure";
 
 const empty: LibrarySnapshot = {
   apps: [],
@@ -147,7 +147,20 @@ export function LibraryPage({
                 ? `/ipas/${result.app_id}/workspace/${result.artifact_id}`
                 : `/ipas/${result.app_id}`;
         } catch (e) {
-          setResults((old) => [...old, { name, message: message(e) }]);
+          // A saved copy that no longer matches its record is repaired by importing the same
+          // file again, so the result says that rather than leaving a dead end. An artifact that
+          // is simply gone is not repairable, and must not be given the same advice.
+          const failed = failure(e);
+          setResults((old) => [
+            ...old,
+            {
+              name,
+              message:
+                failed.code === "artifact_changed"
+                  ? `${failed.message} Importing this file again will replace it.`
+                  : failed.message,
+            },
+          ]);
         }
         libraryChanged();
       }

@@ -22,6 +22,7 @@
 
 pub mod provisioning;
 
+use crate::domain::errors::{ErrorCode, OperationError, OperationResult};
 use isideload::{
     auth::apple_account::{AppleAccount, TwoFactorCallbackParams, TwoFactorCallbackResponse},
     dev::{developer_session::DeveloperSession, teams::TeamsApi},
@@ -140,8 +141,6 @@ struct Session {
     developer: DeveloperSession,
     /// Signing key and certificate for this session. Memory only: never written to disk.
     identity: Option<crate::certificates::Identity>,
-    /// Provisioning profiles fetched for this session's plan, held for the signer.
-    profiles: Vec<crate::provisioning::ProfileOutcome>,
 }
 /// What provisioning produced: the plan it followed, what Apple registered, and the profiles.
 #[derive(Clone, Serialize)]
@@ -185,6 +184,13 @@ struct Inner {
     expires_at: Option<Instant>,
     /// Apple-side sign-in throttling. Kept across sign-out and expiry: it is not Orbiter state.
     retry_at: Option<Instant>,
+    /// Profiles obtained for the selected team, held for the signer.
+    ///
+    /// Beside the team selection rather than inside the session, because that is the relationship
+    /// that governs them: identifiers are derived from the team, so profiles for one team describe
+    /// identifiers another will never produce. Changing the team discards them, and so does losing
+    /// the session — see [`Inner::clear`].
+    profiles: Vec<crate::provisioning::ProfileOutcome>,
 }
 #[derive(Clone, Default)]
 pub struct Accounts(Arc<Mutex<Inner>>, Arc<tokio::sync::Mutex<()>>);
@@ -203,6 +209,7 @@ impl Inner {
         }
         self.response = None;
         self.session = None;
+        self.profiles.clear();
         self.expires_at = None;
         self.view = View {
             message: message.into(),
@@ -226,6 +233,23 @@ impl Inner {
     ///
     /// Called on every read, so a stale session is never reported as live and a signed-out view is
     /// what a person sees rather than an operation failing later for an unexplained reason.
+    /// Point at a team, discarding provisioning obtained for a different one.
+    ///
+    /// Identifiers are derived from the team, so profiles fetched for the previous one describe
+    /// identifiers this team will never produce. Signing would refuse them anyway, but it would
+    /// refuse by naming a missing profile rather than the team change that caused it — and a stale
+    /// profile is not worth keeping either way. Re-selecting the same team changes nothing.
+    fn retarget(&mut self, team: String) {
+        if self.view.selected_team.as_deref() != Some(team.as_str()) {
+            self.profiles.clear();
+        }
+        self.view.selected_team = Some(team);
+    }
+
+    /// Clear the session if it has outlived its thirty minutes.
+    ///
+    /// Called on every read, so a stale session is never reported as live and a signed-out view is
+    /// what a person sees rather than an operation failing later for an unexplained reason.
     fn expire(&mut self) {
         if self
             .expires_at
@@ -244,8 +268,11 @@ impl Accounts {
     /// # Errors
     ///
     /// Fails only on lock poisoning.
-    pub fn status(&self) -> Result<View, String> {
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+    pub fn status(&self) -> OperationResult<View> {
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         inner.expire();
         Ok(inner.view.clone())
     }
@@ -257,8 +284,11 @@ impl Accounts {
     /// # Errors
     ///
     /// Fails only on lock poisoning.
-    pub fn sign_out(&self) -> Result<View, String> {
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+    pub fn sign_out(&self) -> OperationResult<View> {
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         inner.clear("Signed out locally. macOS manages its own authentication support data.");
         Ok(inner.view.clone())
     }
@@ -274,7 +304,7 @@ impl Accounts {
     ///
     /// Fails without consent, with empty input, while a sign-in is already running, or while
     /// Apple's throttling of this machine is still in force.
-    pub fn start(&self, email: String, password: String, consent: bool) -> Result<View, String> {
+    pub fn start(&self, email: String, password: String, consent: bool) -> OperationResult<View> {
         initialize();
         let password = zeroize::Zeroizing::new(password);
         if !consent {
@@ -289,7 +319,10 @@ impl Accounts {
         {
             return Err("Enter your Apple account and password in the application.".into());
         }
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         inner.expire();
         if inner.task.is_some() || inner.session.is_some() {
             return Err("Cancel or sign out before starting another account session.".into());
@@ -461,8 +494,11 @@ impl Accounts {
     ///
     /// Fails if the challenge is unknown or superseded, if the input is empty, or if the session
     /// was cleared while the prompt was open.
-    pub fn answer(&self, challenge_id: String, answer: Answer) -> Result<View, String> {
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+    pub fn answer(&self, challenge_id: String, answer: Answer) -> OperationResult<View> {
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         let challenge = inner
             .view
             .challenge
@@ -519,8 +555,8 @@ impl Accounts {
             inner.session = Some(Session {
                 developer,
                 identity: None,
-                profiles: Vec::new(),
             });
+            inner.profiles.clear();
             inner.expires_at = Some(Instant::now() + SESSION_LIFETIME);
             inner.view = View {
                 stage: Stage::SignedIn,
@@ -559,18 +595,25 @@ impl Accounts {
     /// Choose which of the account's teams to work with.
     ///
     /// Local only. Identifiers are derived from the team, so a plan prepared for one says nothing
-    /// about another and callers invalidate preparation when this changes.
+    /// about another: changing the team discards any profiles already obtained, and the interface
+    /// clears the preparation it was showing.
     ///
     /// # Errors
     ///
     /// Fails without a session, or if the identifier names no team this account belongs to.
-    pub fn select_team(&self, id: String) -> Result<View, String> {
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+    pub fn select_team(&self, id: String) -> OperationResult<View> {
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         inner.expire();
         if inner.session.is_none() || !inner.view.teams.iter().any(|team| team.id == id) {
-            return Err("Select a team returned by the current Apple account session.".into());
+            return Err(OperationError::new(
+                ErrorCode::AuthenticationRequired,
+                "Select a team returned by the current Apple account session.",
+            ));
         }
-        inner.view.selected_team = Some(id);
+        inner.retarget(id);
         Ok(inner.view.clone())
     }
     /// Ask Apple for the account's teams again.
@@ -583,13 +626,15 @@ impl Accounts {
     ///
     /// Fails if a refresh is already running, or if the session cannot be refreshed — in which
     /// case the returned view already reflects being signed out.
-    pub async fn refresh_teams(&self) -> Result<View, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Team refresh is already running.")?;
+    pub async fn refresh_teams(&self) -> OperationResult<View> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Team refresh is already running.")
+        })?;
         let (generation, mut developer) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            let mut inner = self
+                .0
+                .lock()
+                .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
             inner.expire();
             let session = inner
                 .session
@@ -599,7 +644,10 @@ impl Accounts {
         };
         let result =
             tokio::time::timeout(Duration::from_secs(60), read_teams(&mut developer)).await;
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         inner.expire();
         if inner.generation != generation {
             return Ok(inner.view.clone());
@@ -940,7 +988,8 @@ mod tests {
             manager
                 .request_certificate(true)
                 .await
-                .is_err_and(|m| m.contains("Sign in"))
+                .is_err_and(|error| error.code == ErrorCode::AuthenticationRequired
+                    && error.message.contains("Sign in"))
         );
         {
             let mut inner = manager.0.lock().unwrap();
@@ -952,7 +1001,8 @@ mod tests {
             manager
                 .request_certificate(true)
                 .await
-                .is_err_and(|m| m.contains("Sign in"))
+                .is_err_and(|error| error.code == ErrorCode::AuthenticationRequired
+                    && error.message.contains("Sign in"))
         );
     }
     #[tokio::test]
@@ -965,7 +1015,8 @@ mod tests {
             manager
                 .register_device(1, true)
                 .await
-                .is_err_and(|m| m.contains("Sign in"))
+                .is_err_and(|error| error.code == ErrorCode::AuthenticationRequired
+                    && error.message.contains("Sign in"))
         );
         {
             let mut inner = manager.0.lock().unwrap();
@@ -986,7 +1037,8 @@ mod tests {
             manager
                 .register_device(1, true)
                 .await
-                .is_err_and(|m| m.contains("Sign in"))
+                .is_err_and(|error| error.code == ErrorCode::AuthenticationRequired
+                    && error.message.contains("Sign in"))
         );
     }
     #[test]
@@ -1052,6 +1104,48 @@ mod tests {
                 .is_err()
         );
     }
+    #[test]
+    /// Choosing a different team discards profiles obtained for the previous one, and losing the
+    /// session discards them too.
+    ///
+    /// Identifiers are derived from the team, so those profiles describe identifiers the new team
+    /// will never produce. Re-selecting the same team is not a change and leaves them alone.
+    fn changing_the_team_invalidates_prepared_provisioning() {
+        let profile = || crate::provisioning::ProfileOutcome {
+            identifier: "com.example.app.team1".into(),
+            expires: "2099-01-01T00:00:00Z".into(),
+            expires_unix: 4_070_908_800,
+            uuid: "synthetic".into(),
+            encoded: vec![],
+        };
+        let mut inner = Inner {
+            generation: "one".into(),
+            view: View::default(),
+            task: None,
+            response: None,
+            session: None,
+            expires_at: None,
+            retry_at: None,
+            profiles: vec![profile()],
+        };
+        inner.view.selected_team = Some("TEAM1".into());
+
+        inner.retarget("TEAM1".into());
+        assert_eq!(inner.profiles.len(), 1, "the same team is not a change");
+
+        inner.retarget("TEAM2".into());
+        assert!(
+            inner.profiles.is_empty(),
+            "profiles for the previous team must not survive the change"
+        );
+
+        // And signing out discards them as well: they were obtained under that session.
+        inner.profiles = vec![profile()];
+        inner.clear("Signed out locally.");
+        assert!(inner.profiles.is_empty());
+        assert_eq!(inner.view.selected_team, None);
+    }
+
     #[tokio::test]
     /// Signing out cancels a waiting two-factor prompt and clears the account and team, leaving no
     /// worker still expecting an answer.

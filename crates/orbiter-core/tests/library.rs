@@ -772,3 +772,72 @@ fn history_is_bounded_and_an_unfinished_attempt_is_never_the_one_dropped() {
         Stage::Failed
     );
 }
+
+#[test]
+/// Two imports of the same bytes racing each other produce one version, not two.
+///
+/// Both copy and hash outside the metadata lock, so they genuinely overlap; only the manifest half
+/// is serialised. Whichever arrives second must recognise the bytes already saved rather than
+/// creating a duplicate version of the same build.
+///
+/// Uses two handles on one library, which is the only supported arrangement: see
+/// [`Library`]'s own documentation for why two independently constructed libraries over one
+/// directory would not coordinate.
+fn concurrent_imports_of_the_same_bytes_produce_one_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let first = fixture("one");
+    let second = fixture("one");
+    // Identical content, so identical bytes and therefore the same artifact.
+    assert_eq!(
+        fs::read(first.path()).unwrap(),
+        fs::read(second.path()).unwrap()
+    );
+
+    // Two handles on one library, which is what two commands hold: the runtime shares one
+    // library per directory and never constructs a second.
+    let other = lib.clone();
+    let (left, right) = std::thread::scope(|scope| {
+        let a = scope.spawn(|| other.import(first.path()));
+        let b = scope.spawn(|| lib.import(second.path()));
+        (a.join().unwrap(), b.join().unwrap())
+    });
+
+    let left = left.expect("the first import succeeds");
+    let right = right.expect("the second import succeeds");
+    assert_eq!(left.artifact_id, right.artifact_id);
+    assert!(
+        left.duplicate ^ right.duplicate,
+        "exactly one of the two is the import and the other recognises it"
+    );
+    let snapshot = lib.snapshot().expect("the library is readable");
+    assert_eq!(snapshot.apps.len(), 1);
+    assert_eq!(snapshot.artifacts.len(), 1);
+}
+
+#[test]
+/// Two imports of different bytes racing each other produce two versions under one app, and
+/// neither loses its file to the other.
+fn concurrent_imports_of_different_bytes_keep_both() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let first = fixture("one");
+    let second = fixture("two");
+
+    let other = lib.clone();
+    let (left, right) = std::thread::scope(|scope| {
+        let a = scope.spawn(|| other.import(first.path()));
+        let b = scope.spawn(|| lib.import(second.path()));
+        (a.join().unwrap(), b.join().unwrap())
+    });
+    let left = left.expect("the first import succeeds");
+    let right = right.expect("the second import succeeds");
+    assert_ne!(left.artifact_id, right.artifact_id);
+    assert_eq!(left.app_id, right.app_id);
+
+    let restarted = Library::new(dir.path().into());
+    assert_eq!(restarted.snapshot().unwrap().artifacts.len(), 2);
+    // Both files survive: neither import published over the other's bytes.
+    assert!(restarted.open(&left.artifact_id).is_ok());
+    assert!(restarted.open(&right.artifact_id).is_ok());
+}

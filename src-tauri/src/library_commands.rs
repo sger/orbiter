@@ -9,6 +9,7 @@
 //! Mac; the app on a tester's device is unaffected.
 
 use super::*;
+use crate::failure::Failure;
 use orbiter_core::{
     application::{installation::Acknowledgement, runtime::Runtime, signing::Retained},
     domain::identifiers::{AppId, ArtifactId, UsbDeviceId},
@@ -25,7 +26,7 @@ use orbiter_core::{
 ///
 /// Fails only if the runtime is missing from Tauri's managed state, which would mean startup did
 /// not complete.
-pub fn storage(app: &tauri::AppHandle) -> Result<Library, String> {
+pub fn storage(app: &tauri::AppHandle) -> Result<Library, Failure> {
     Ok(runtime(app)?.library())
 }
 
@@ -34,7 +35,7 @@ pub fn storage(app: &tauri::AppHandle) -> Result<Library, String> {
 /// # Errors
 ///
 /// Fails if startup did not register it.
-pub fn runtime(app: &tauri::AppHandle) -> Result<Runtime, String> {
+pub fn runtime(app: &tauri::AppHandle) -> Result<Runtime, Failure> {
     Ok(app.state::<Runtime>().inner().clone())
 }
 #[tauri::command]
@@ -50,11 +51,12 @@ pub fn runtime(app: &tauri::AppHandle) -> Result<Runtime, String> {
 /// Fails if the manifest is unreadable, damaged, or written by a newer Orbiter. A damaged library
 /// is reported rather than replaced with an empty one: silently starting over would look like
 /// every saved build had vanished.
-pub async fn library_list(app: tauri::AppHandle) -> Result<Snapshot, String> {
+pub async fn library_list(app: tauri::AppHandle) -> Result<Snapshot, Failure> {
     let library = storage(&app)?;
     tokio::task::spawn_blocking(move || library.snapshot())
         .await
         .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
 }
 #[tauri::command]
 /// Copy a local IPA into the library and record it as a saved version.
@@ -70,11 +72,12 @@ pub async fn library_list(app: tauri::AppHandle) -> Result<Snapshot, String> {
 ///
 /// Fails if the file is missing, unreadable, larger than 2 GiB, not a valid IPA, or if the library
 /// cannot be written.
-pub async fn library_import(path: String, app: tauri::AppHandle) -> Result<Imported, String> {
+pub async fn library_import(path: String, app: tauri::AppHandle) -> Result<Imported, Failure> {
     let library = storage(&app)?;
     tokio::task::spawn_blocking(move || library.import(&PathBuf::from(path)))
         .await
         .map_err(|_| "Import worker stopped.")?
+        .map_err(Into::into)
 }
 /// Where the seven days stand for one saved build. The raw team identifier is hashed here, at the
 /// boundary: the library has never seen one and must not start.
@@ -83,32 +86,35 @@ pub async fn library_expiry(
     artifact_id: String,
     team_id: Option<String>,
     app: tauri::AppHandle,
-) -> Result<Option<Expiry>, String> {
+) -> Result<Option<Expiry>, Failure> {
     let library = storage(&app)?;
     let tag = team_id.as_deref().map(orbiter_core::renewal::tag);
     let artifact_id = ArtifactId::parse(&artifact_id)?;
     tokio::task::spawn_blocking(move || library.expiry(&artifact_id, tag.as_deref()))
         .await
         .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
 }
 /// One app icon's bytes. Fetched per hash and cached in the window, so a library of many apps
 /// does not re-send every icon on every refresh.
 #[tauri::command]
-pub async fn library_icon(sha: String, app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn library_icon(sha: String, app: tauri::AppHandle) -> Result<Option<String>, Failure> {
     let library = storage(&app)?;
     tokio::task::spawn_blocking(move || library.icon(&sha))
         .await
         .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
 }
 /// Delete managed files no record points at. Always on request; never on a timer or at startup.
 #[tauri::command]
-pub async fn library_reclaim(app: tauri::AppHandle) -> Result<u64, String> {
+pub async fn library_reclaim(app: tauri::AppHandle) -> Result<u64, Failure> {
     // Held for the whole sweep: a file an installation is reading must not be reclaimed.
     let _gate = runtime(&app)?.installations().exclude()?;
     let library = storage(&app)?;
     tokio::task::spawn_blocking(move || library.reclaim())
         .await
         .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
 }
 #[tauri::command]
 /// Verify a saved version and return its metadata, inspection report and managed path.
@@ -119,12 +125,13 @@ pub async fn library_reclaim(app: tauri::AppHandle) -> Result<u64, String> {
 /// # Errors
 ///
 /// Fails if the artifact is unknown, has been removed, or no longer matches its recorded hash.
-pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<Opened, String> {
+pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<Opened, Failure> {
     let library = storage(&app)?;
     let artifact_id = ArtifactId::parse(&artifact_id)?;
     tokio::task::spawn_blocking(move || library.open(&artifact_id))
         .await
         .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
 }
 #[tauri::command]
 /// Remove one saved version, or an entire app with its history.
@@ -144,7 +151,7 @@ pub async fn library_remove(
     app_id: String,
     artifact_id: Option<String>,
     app: tauri::AppHandle,
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let installations = runtime(&app)?.installations();
     // Held for the whole removal: a file must not disappear while a review points at it, and an
     // installation must not begin against something that is being deleted.
@@ -158,6 +165,7 @@ pub async fn library_remove(
     tokio::task::spawn_blocking(move || library.remove(&app_id, artifact_id.as_ref()))
         .await
         .map_err(|_| "Library worker stopped.")?
+        .map_err(Into::into)
 }
 /// Review installing one saved artifact on one connected phone.
 ///
@@ -174,7 +182,7 @@ pub async fn library_prepare_install(
     artifact_id: String,
     device_id: u32,
     app: tauri::AppHandle,
-) -> Result<Review, String> {
+) -> Result<Review, Failure> {
     let artifact_id = ArtifactId::parse(&artifact_id)?;
     runtime(&app)?
         .installations()
@@ -199,7 +207,7 @@ pub async fn library_prepare_provisioning(
     acknowledged: bool,
     watch: String,
     app: tauri::AppHandle,
-) -> Result<orbiter_core::accounts::Preparation, String> {
+) -> Result<orbiter_core::accounts::Preparation, Failure> {
     let artifact_id = ArtifactId::parse(&artifact_id)?;
     runtime(&app)?
         .signing()
@@ -232,7 +240,7 @@ pub async fn library_sign(
     marker: String,
     progress: Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
-) -> Result<Retained, String> {
+) -> Result<Retained, Failure> {
     let artifact_id = ArtifactId::parse(&artifact_id)?;
     let sink = Arc::new(move |step| {
         // A dropped channel means the window went away; the run finishes regardless.

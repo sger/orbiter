@@ -1,6 +1,7 @@
 //! Portal writes on the signed-in account's team. Registration is the first operation in Orbiter
 //! that changes state at Apple rather than only reading it, so it is explicit, acknowledged, and
 //! reports only what it did — never the device identifier it sent.
+use crate::domain::errors::{ErrorCode, OperationError};
 use isideload::dev::{
     app_ids::{AppId, AppIdsApi},
     developer_session::DeveloperSession,
@@ -33,17 +34,24 @@ pub struct Outcome {
 }
 
 /// Reasons a registration is refused before any request is made.
-pub fn refusal(acknowledged: bool, team_selected: bool, signed_in: bool) -> Option<&'static str> {
+pub fn refusal(acknowledged: bool, team_selected: bool, signed_in: bool) -> Option<OperationError> {
     if !signed_in {
-        return Some("Sign in to Apple before registering an iPhone.");
+        return Some(OperationError::new(
+            ErrorCode::AuthenticationRequired,
+            "Sign in to Apple before registering an iPhone.",
+        ));
     }
     if !team_selected {
-        return Some("Select the signing team that should register this iPhone.");
+        return Some(OperationError::new(
+            ErrorCode::AuthenticationRequired,
+            "Select the signing team that should register this iPhone.",
+        ));
     }
     if !acknowledged {
-        return Some(
+        return Some(OperationError::new(
+            ErrorCode::AcknowledgementRequired,
             "Registering writes this iPhone to the selected team at Apple. A free personal team allows three devices; a paid team consumes one of its 100 slots for the membership year, and removing the device later does not return that slot. Acknowledge before continuing.",
-        );
+        ));
     }
     None
 }
@@ -135,12 +143,17 @@ mod tests {
     /// Registering a device needs a session, a chosen team and an acknowledgement, and says which
     /// one is missing rather than failing generically.
     fn registration_is_refused_until_it_is_acknowledged_on_a_chosen_team() {
-        assert!(refusal(true, true, false).is_some_and(|m| m.contains("Sign in")));
-        assert!(refusal(true, false, true).is_some_and(|m| m.contains("Select the signing team")));
+        let no_session = refusal(true, true, false).expect("a session is required");
+        assert_eq!(no_session.code, ErrorCode::AuthenticationRequired);
+        assert!(no_session.message.contains("Sign in"));
+        let no_team = refusal(true, false, true).expect("a team is required");
+        assert_eq!(no_team.code, ErrorCode::AuthenticationRequired);
+        assert!(no_team.message.contains("Select the signing team"));
         let unacknowledged = refusal(false, true, true).expect("acknowledgement required");
         // The consequence is stated before the write, not after it.
-        assert!(unacknowledged.contains("three devices"));
-        assert!(unacknowledged.contains("membership year"));
+        assert_eq!(unacknowledged.code, ErrorCode::AcknowledgementRequired);
+        assert!(unacknowledged.message.contains("three devices"));
+        assert!(unacknowledged.message.contains("membership year"));
         assert!(refusal(true, true, true).is_none());
     }
 
@@ -157,13 +170,19 @@ mod tests {
     /// Reserving app identifiers needs its own acknowledgement: ten per seven days, and an
     /// identifier no other team can ever reuse.
     fn provisioning_is_refused_until_the_identifier_budget_is_acknowledged() {
-        assert!(app_id_refusal(true, true, false).is_some_and(|m| m.contains("Sign in")));
-        assert!(
-            app_id_refusal(true, false, true)
-                .is_some_and(|m| m.contains("Select the signing team"))
-        );
+        let no_session = app_id_refusal(true, true, false).expect("a session is required");
+        assert_eq!(no_session.code, ErrorCode::AuthenticationRequired);
+        assert!(no_session.message.contains("Sign in"));
+        let no_team = app_id_refusal(true, false, true).expect("a team is required");
+        assert_eq!(no_team.code, ErrorCode::AuthenticationRequired);
+        assert!(no_team.message.contains("Select the signing team"));
         let unacknowledged = app_id_refusal(false, true, true).expect("acknowledgement required");
-        assert!(unacknowledged.contains("ten identifiers per seven days"));
+        assert_eq!(unacknowledged.code, ErrorCode::AcknowledgementRequired);
+        assert!(
+            unacknowledged
+                .message
+                .contains("ten identifiers per seven days")
+        );
         assert!(app_id_refusal(true, true, true).is_none());
     }
 
@@ -203,17 +222,24 @@ pub fn app_id_refusal(
     acknowledged: bool,
     team_selected: bool,
     signed_in: bool,
-) -> Option<&'static str> {
+) -> Option<OperationError> {
     if !signed_in {
-        return Some("Sign in to Apple before provisioning.");
+        return Some(OperationError::new(
+            ErrorCode::AuthenticationRequired,
+            "Sign in to Apple before provisioning.",
+        ));
     }
     if !team_selected {
-        return Some("Select the signing team to provision on.");
+        return Some(OperationError::new(
+            ErrorCode::AuthenticationRequired,
+            "Select the signing team to provision on.",
+        ));
     }
     if !acknowledged {
-        return Some(
+        return Some(OperationError::new(
+            ErrorCode::AcknowledgementRequired,
             "Provisioning registers new app identifiers on the team and downloads their profiles. A free personal team may register only ten identifiers per seven days, and an identifier cannot be reused by another team afterwards. Acknowledge before continuing.",
-        );
+        ));
     }
     None
 }

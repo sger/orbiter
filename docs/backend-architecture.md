@@ -210,6 +210,32 @@ The fakes live beside the tests that use them. Each asserts what the *service* d
 boundary reports — never that a boundary was called in a particular way, which would only mirror
 the implementation back at itself.
 
+## Errors at the IPC boundary
+
+Every command returns `Failure`: a stable `code` plus the sentence a person reads. The internal
+cause is logged and never serialised — it can name a path on someone's disk, and the window may be
+photographed.
+
+Codes are constructed where the failure is created, not classified from prose at the boundary. The
+refusal helpers in `provisioning`, `certificates` and the account gates each build their own
+`OperationError`, so the code that reaches the window is the one the module that knew the reason
+chose. `From<String> for OperationError` exists as the bridge for internals that still return a
+sentence; everything arriving that way is `internal`, which is the honest answer — nobody has
+classified it.
+
+The frontend reads `code` through `src/ipc/failure.ts` and never parses the message.
+
+## Multiple writers
+
+One `Library` per directory per process, shared by cloning; the runtime enforces it. Two
+independently constructed libraries over one directory do **not** coordinate — their locks and
+lease tables are separate — and concurrent imports through them can produce duplicate versions of
+one build.
+
+**Multiple Orbiter processes over one library are not supported and not guarded against.** There is
+no lock file. This is the documented choice the storage note allows; a second writer would need
+real cross-process locking, which is one of the things that would make SQLite worthwhile.
+
 ## Documentation audit
 
 ```

@@ -67,13 +67,13 @@ async fn inspect_ipa(
     path: String,
     progress: Channel<&'static str>,
     state: State<'_, Inspection>,
-) -> Result<orbiter_core::Report, String> {
+) -> Result<orbiter_core::Report, Failure> {
     if state
         .busy
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        return Err("An inspection is already running.".into());
+        return Err(Failure::from("An inspection is already running."));
     }
     state.cancel.store(false, Ordering::SeqCst);
     let state = state.inner().clone();
@@ -88,10 +88,13 @@ async fn inspect_ipa(
             success = result.is_ok(),
             stage = "finished"
         );
-        result.map_err(|e| e.to_string())
+        // Inspection's own error already classifies itself: cancelled, a limit, or a malformed
+        // archive each reach the window as a different code.
+        result.map_err(orbiter_core::domain::errors::OperationError::from)
     })
     .await
-    .map_err(|_| "Inspection worker stopped. Retry with a fresh IPA.".to_string())?
+    .map_err(|_| internal("Inspection worker stopped. Retry with a fresh IPA."))?
+    .map_err(Into::into)
 }
 /// Ask the running inspection to stop at its next boundary.
 ///
@@ -129,7 +132,7 @@ fn installations(app: &tauri::AppHandle) -> Result<InstallationService, Failure>
 /// # Errors
 ///
 /// Fails if the platform's application data directory cannot be located.
-fn renewal_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn renewal_file(app: &tauri::AppHandle) -> Result<PathBuf, Failure> {
     Ok(app
         .path()
         .app_data_dir()
@@ -142,7 +145,7 @@ fn renewal_status(
     team_id: Option<String>,
     identifier: Option<String>,
     app: tauri::AppHandle,
-) -> Result<Option<orbiter_core::renewal::Status>, String> {
+) -> Result<Option<orbiter_core::renewal::Status>, Failure> {
     Ok(orbiter_core::renewal::status(
         &renewal_file(&app)?,
         team_id.as_deref(),
@@ -152,8 +155,8 @@ fn renewal_status(
 }
 /// Forget every remembered build. Nothing on any phone changes.
 #[tauri::command]
-fn renewal_forget(app: tauri::AppHandle) -> Result<(), String> {
-    orbiter_core::renewal::forget(&renewal_file(&app)?)
+fn renewal_forget(app: tauri::AppHandle) -> Result<(), Failure> {
+    Ok(orbiter_core::renewal::forget(&renewal_file(&app)?)?)
 }
 /// Review installing an IPA chosen by path.
 ///
@@ -280,7 +283,7 @@ async fn start_device_log(
     superseded: Vec<String>,
     progress: Channel<orbiter_core::diagnostics::LogLine>,
     state: State<'_, LogCapture>,
-) -> Result<orbiter_core::diagnostics::Summary, String> {
+) -> Result<orbiter_core::diagnostics::Summary, Failure> {
     let _gate = state
         .gate
         .clone()
@@ -305,7 +308,7 @@ async fn start_device_log(
         success = result.is_ok(),
         matched = result.as_ref().map(|s| s.matched).unwrap_or(0)
     );
-    result
+    Ok(result?)
 }
 /// Stop the running device-log capture at its next line.
 ///
@@ -322,8 +325,8 @@ fn stop_device_log(state: State<'_, LogCapture>) {
 #[tauri::command]
 fn account_status(
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::accounts::View, String> {
-    state.status()
+) -> Result<orbiter_core::accounts::View, Failure> {
+    Ok(state.status()?)
 }
 /// Sign in to Apple with an email, a password, and explicit consent.
 ///
@@ -344,8 +347,8 @@ async fn account_sign_in(
     password: String,
     consent: bool,
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::accounts::View, String> {
-    state.start(email, password, consent)
+) -> Result<orbiter_core::accounts::View, Failure> {
+    Ok(state.start(email, password, consent)?)
 }
 /// Answer a two-factor challenge, or ask for the code to be sent another way.
 ///
@@ -361,8 +364,8 @@ fn account_answer(
     challenge_id: String,
     answer: orbiter_core::accounts::Answer,
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::accounts::View, String> {
-    state.answer(challenge_id, answer)
+) -> Result<orbiter_core::accounts::View, Failure> {
+    Ok(state.answer(challenge_id, answer)?)
 }
 /// Sign out, clearing the session from memory.
 ///
@@ -371,8 +374,8 @@ fn account_answer(
 #[tauri::command]
 fn account_sign_out(
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::accounts::View, String> {
-    state.sign_out()
+) -> Result<orbiter_core::accounts::View, Failure> {
+    Ok(state.sign_out()?)
 }
 /// Choose which of the signed-in account's teams to work with.
 ///
@@ -386,8 +389,8 @@ fn account_sign_out(
 fn account_select_team(
     id: String,
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::accounts::View, String> {
-    state.select_team(id)
+) -> Result<orbiter_core::accounts::View, Failure> {
+    Ok(state.select_team(id)?)
 }
 /// Register a connected iPhone on the selected team.
 ///
@@ -405,8 +408,8 @@ async fn account_register_device(
     device_id: u32,
     acknowledged: bool,
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::provisioning::Outcome, String> {
-    state.register_device(device_id, acknowledged).await
+) -> Result<orbiter_core::provisioning::Outcome, Failure> {
+    Ok(state.register_device(device_id, acknowledged).await?)
 }
 /// Obtain a development certificate for the selected team, reusing one where possible.
 ///
@@ -423,8 +426,8 @@ async fn account_register_device(
 async fn account_request_certificate(
     acknowledged: bool,
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::certificates::Outcome, String> {
-    state.request_certificate(acknowledged).await
+) -> Result<orbiter_core::certificates::Outcome, Failure> {
+    Ok(state.request_certificate(acknowledged).await?)
 }
 /// Reserve app identifiers and download profiles for an IPA chosen by path.
 ///
@@ -445,7 +448,7 @@ async fn account_prepare_provisioning(
     acknowledged: bool,
     watch: String,
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::accounts::Preparation, String> {
+) -> Result<orbiter_core::accounts::Preparation, Failure> {
     state
         .prepare_provisioning(
             std::path::PathBuf::from(path),
@@ -453,6 +456,7 @@ async fn account_prepare_provisioning(
             orbiter_core::plan::WatchChoice::parse(&watch),
         )
         .await
+        .map_err(Into::into)
 }
 /// Withdraw the selected team's development certificates. The interface offers this only when the
 /// team's slots are full and none of them can sign on this Mac.
@@ -460,7 +464,7 @@ async fn account_prepare_provisioning(
 async fn account_withdraw_certificates(
     acknowledged: bool,
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<String, String> {
+) -> Result<String, Failure> {
     tracing::info!(operation = "certificate-withdrawal", stage = "started");
     let result = state.withdraw_certificates(acknowledged).await;
     tracing::info!(
@@ -468,7 +472,7 @@ async fn account_withdraw_certificates(
         stage = "finished",
         success = result.is_ok()
     );
-    result
+    Ok(result?)
 }
 /// Sign the selected IPA for the signed-in account's team. The signed build is written into the
 /// application's own storage; the IPA the person chose is only ever read.
@@ -479,7 +483,7 @@ async fn account_sign_ipa(
     marker: String,
     progress: tauri::ipc::Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
-) -> Result<orbiter_core::signer::Signed, String> {
+) -> Result<orbiter_core::signer::Signed, Failure> {
     let library = storage(&app)?;
     let artifact_id =
         tokio::task::spawn_blocking(move || library.resolve_or_import(&PathBuf::from(path)))
@@ -503,8 +507,8 @@ async fn account_sign_ipa(
 #[tauri::command]
 async fn account_forget_signing_key(
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<String, String> {
-    state.forget_signing_key().await
+) -> Result<String, Failure> {
+    Ok(state.forget_signing_key().await?)
 }
 /// Ask Apple for the account's teams again.
 ///
@@ -519,8 +523,8 @@ async fn account_forget_signing_key(
 #[tauri::command]
 async fn account_refresh_teams(
     state: State<'_, orbiter_core::accounts::Accounts>,
-) -> Result<orbiter_core::accounts::View, String> {
-    state.refresh_teams().await
+) -> Result<orbiter_core::accounts::View, Failure> {
+    Ok(state.refresh_teams().await?)
 }
 /// Build the runtime, register the IPC surface, and run the desktop application.
 ///

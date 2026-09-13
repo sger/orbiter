@@ -66,3 +66,72 @@ pub fn internal(message: impl Into<String>) -> Failure {
         message: message.into(),
     }
 }
+
+#[cfg(test)]
+/// Checks what crosses to the window and what stays in the log.
+mod tests {
+    use super::*;
+
+    #[test]
+    /// The wire form is a stable code and the sentence a person reads, and nothing else. The
+    /// internal cause is logged, never serialised: it can name a path on someone's disk, and the
+    /// window may be photographed.
+    fn only_the_code_and_the_sentence_cross_to_the_window() {
+        let failure = Failure::from(OperationError::storage_write(
+            "EACCES at /Users/someone/Library/Application Support",
+        ));
+        let json = serde_json::to_string(&failure).expect("a failure serialises");
+        assert_eq!(
+            json,
+            r#"{"code":"storage_write","message":"Cannot save to the library. Check disk space and permissions."}"#
+        );
+        assert!(!json.contains("/Users/"));
+        assert!(!json.contains("EACCES"));
+    }
+
+    #[test]
+    /// Every code reaches the window spelled exactly as the frontend's own union expects, so a
+    /// renamed variant is a compile-time change on one side and a visible failure on the other,
+    /// rather than a silently unmatched string.
+    fn every_code_crosses_with_its_documented_spelling() {
+        for (code, expected) in [
+            (ErrorCode::ArtifactMissing, "artifact_missing"),
+            (ErrorCode::ArtifactChanged, "artifact_changed"),
+            (ErrorCode::OperationInProgress, "operation_in_progress"),
+            (ErrorCode::ReviewStale, "review_stale"),
+            (
+                ErrorCode::AcknowledgementRequired,
+                "acknowledgement_required",
+            ),
+            (ErrorCode::DeviceUnavailable, "device_unavailable"),
+            (ErrorCode::AuthenticationRequired, "authentication_required"),
+            (ErrorCode::StorageRead, "storage_read"),
+            (ErrorCode::StorageWrite, "storage_write"),
+            (ErrorCode::StorageCorrupt, "storage_corrupt"),
+            (
+                ErrorCode::StorageUnsupportedVersion,
+                "storage_unsupported_version",
+            ),
+            (ErrorCode::Cancelled, "cancelled"),
+            (ErrorCode::OutcomeUnknown, "outcome_unknown"),
+            (ErrorCode::InvalidRequest, "invalid_request"),
+            (ErrorCode::Internal, "internal"),
+        ] {
+            let failure = Failure::from(OperationError::new(code, "anything"));
+            let json = serde_json::to_string(&failure).expect("a failure serialises");
+            assert!(
+                json.contains(&format!(r#""code":"{expected}""#)),
+                "{code:?} crossed as {json}"
+            );
+        }
+    }
+
+    #[test]
+    /// A workflow this refactor has not reached yet still crosses as a failure the window can
+    /// render, classified as `internal` — which is the honest answer: nobody has classified it.
+    fn an_unclassified_message_still_crosses_legibly() {
+        let failure = Failure::from("Something specific went wrong.".to_owned());
+        assert_eq!(failure.code, ErrorCode::Internal);
+        assert_eq!(failure.message, "Something specific went wrong.");
+    }
+}

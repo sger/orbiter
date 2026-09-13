@@ -27,6 +27,7 @@
 //! what to check, and the person decides.
 
 use super::{Accounts, Preparation, UNAVAILABLE, hostname};
+use crate::domain::errors::{ErrorCode, OperationError, OperationResult};
 
 impl Accounts {
     /// Register a connected iPhone on the selected team. The first Orbiter operation that writes
@@ -35,20 +36,22 @@ impl Accounts {
         &self,
         device_id: u32,
         acknowledged: bool,
-    ) -> Result<crate::provisioning::Outcome, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
+    ) -> OperationResult<crate::provisioning::Outcome> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Another account operation is already running.")
+        })?;
         let (generation, mut developer, team, free) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            let mut inner = self
+                .0
+                .lock()
+                .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
             inner.expire();
             let signed_in = inner.session.is_some();
             let selected = inner.view.selected_team.clone();
             if let Some(refusal) =
                 crate::provisioning::refusal(acknowledged, selected.is_some(), signed_in)
             {
-                return Err(refusal.into());
+                return Err(refusal);
             }
             let team =
                 selected.ok_or("Select the signing team that should register this iPhone.")?;
@@ -60,10 +63,12 @@ impl Accounts {
                 .and_then(|candidate| candidate.free)
                 // An unestablished membership is treated as the stricter free allowance.
                 .unwrap_or(true);
-            let session = inner
-                .session
-                .as_ref()
-                .ok_or("Sign in before registering an iPhone.")?;
+            let session = inner.session.as_ref().ok_or_else(|| {
+                OperationError::new(
+                    ErrorCode::AuthenticationRequired,
+                    "Sign in before registering an iPhone.",
+                )
+            })?;
             (
                 inner.generation.clone(),
                 session.developer.clone(),
@@ -75,11 +80,14 @@ impl Accounts {
         let (udid, name) = crate::installation::verified_identity(device_id).await?;
         let outcome =
             crate::provisioning::register(&mut developer, &team, &udid, &name, free).await;
-        let inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        let inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         if inner.generation != generation {
             return Err("The account session changed during registration. Check the account at developer.apple.com before retrying.".into());
         }
-        outcome
+        outcome.map_err(OperationError::from)
     }
     /// Register the plan's identifiers on the team and fetch their provisioning profiles.
     ///
@@ -90,20 +98,22 @@ impl Accounts {
         path: std::path::PathBuf,
         acknowledged: bool,
         watch: crate::plan::WatchChoice,
-    ) -> Result<Preparation, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
+    ) -> OperationResult<Preparation> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Another account operation is already running.")
+        })?;
         let (generation, mut developer, team_id, free) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            let mut inner = self
+                .0
+                .lock()
+                .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
             inner.expire();
             let signed_in = inner.session.is_some();
             let selected = inner.view.selected_team.clone();
             if let Some(refusal) =
                 crate::provisioning::app_id_refusal(acknowledged, selected.is_some(), signed_in)
             {
-                return Err(refusal.into());
+                return Err(refusal);
             }
             let team_id = selected.ok_or("Select the signing team to provision on.")?;
             let free = inner
@@ -113,10 +123,12 @@ impl Accounts {
                 .find(|candidate| candidate.id == team_id)
                 .and_then(|candidate| candidate.free)
                 .unwrap_or(true);
-            let session = inner
-                .session
-                .as_ref()
-                .ok_or("Sign in before provisioning.")?;
+            let session = inner.session.as_ref().ok_or_else(|| {
+                OperationError::new(
+                    ErrorCode::AuthenticationRequired,
+                    "Sign in before provisioning.",
+                )
+            })?;
             (
                 inner.generation.clone(),
                 session.developer.clone(),
@@ -164,13 +176,14 @@ impl Accounts {
             profiles
                 .push(crate::provisioning::fetch_profile(&mut developer, &team_id, &app_id).await?);
         }
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         if inner.generation != generation {
             return Err("The account session changed during provisioning. Check developer.apple.com before retrying.".into());
         }
-        if let Some(session) = inner.session.as_mut() {
-            session.profiles = profiles.clone();
-        }
+        inner.profiles = profiles.clone();
         Ok(Preparation {
             app_ids,
             profiles,
@@ -179,13 +192,15 @@ impl Accounts {
     }
     /// Withdraw the selected team's development certificates at Apple. Explicit, acknowledged,
     /// never automatic: every app already signed with them stops launching.
-    pub async fn withdraw_certificates(&self, acknowledged: bool) -> Result<String, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
+    pub async fn withdraw_certificates(&self, acknowledged: bool) -> OperationResult<String> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Another account operation is already running.")
+        })?;
         let (mut developer, team_id) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            let mut inner = self
+                .0
+                .lock()
+                .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
             inner.expire();
             let team_id = inner
                 .view
@@ -198,11 +213,12 @@ impl Accounts {
         let message =
             crate::certificates::withdraw_all(&mut developer, &team_id, acknowledged).await?;
         // This session's identity, if any, rests on a certificate that no longer exists.
-        if let Ok(mut inner) = self.0.lock()
-            && let Some(session) = inner.session.as_mut()
-        {
-            session.identity = None;
-            session.profiles.clear();
+        if let Ok(mut inner) = self.0.lock() {
+            if let Some(session) = inner.session.as_mut() {
+                session.identity = None;
+            }
+            // The profiles were fetched under a certificate that has just been withdrawn.
+            inner.profiles.clear();
         }
         Ok(message)
     }
@@ -221,18 +237,21 @@ impl Accounts {
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         progress: impl FnMut(crate::signer::Progress) + Send + 'static,
     ) -> Result<crate::signer::Signed, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Another account operation is already running.")
+        })?;
         let (team_id, free, identity, profiles) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            let mut inner = self
+                .0
+                .lock()
+                .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
             inner.expire();
-            let team_id = inner
-                .view
-                .selected_team
-                .clone()
-                .ok_or("Select the signing team before signing.")?;
+            let team_id = inner.view.selected_team.clone().ok_or_else(|| {
+                OperationError::new(
+                    ErrorCode::AuthenticationRequired,
+                    "Select the signing team before signing.",
+                )
+            })?;
             let free = inner
                 .view
                 .teams
@@ -240,12 +259,16 @@ impl Accounts {
                 .find(|candidate| candidate.id == team_id)
                 .and_then(|candidate| candidate.free)
                 .unwrap_or(true);
-            let session = inner.session.as_ref().ok_or("Sign in before signing.")?;
-            let identity = session
-                .identity
-                .clone()
-                .ok_or("Get a signing certificate before signing.")?;
-            (team_id, free, identity, session.profiles.clone())
+            let session = inner.session.as_ref().ok_or_else(|| {
+                OperationError::new(ErrorCode::AuthenticationRequired, "Sign in before signing.")
+            })?;
+            let identity = session.identity.clone().ok_or_else(|| {
+                OperationError::new(
+                    ErrorCode::AuthenticationRequired,
+                    "Get a signing certificate before signing.",
+                )
+            })?;
+            (team_id, free, identity, inner.profiles.clone())
         };
         let team_tag = crate::renewal::tag(&team_id);
         // Signing is local and CPU-bound: it reads and writes a whole app bundle and computes
@@ -287,27 +310,31 @@ impl Accounts {
     pub async fn request_certificate(
         &self,
         acknowledged: bool,
-    ) -> Result<crate::certificates::Outcome, String> {
-        let _gate = self
-            .1
-            .try_lock()
-            .map_err(|_| "Another account operation is already running.")?;
+    ) -> OperationResult<crate::certificates::Outcome> {
+        let _gate = self.1.try_lock().map_err(|_| {
+            OperationError::operation_in_progress("Another account operation is already running.")
+        })?;
         let (generation, mut developer, team, existing, stored) = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            let mut inner = self
+                .0
+                .lock()
+                .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
             inner.expire();
             let signed_in = inner.session.is_some();
             let selected = inner.view.selected_team.clone();
             if let Some(refusal) =
                 crate::certificates::refusal(acknowledged, selected.is_some(), signed_in)
             {
-                return Err(refusal.into());
+                return Err(refusal);
             }
             let team = selected.ok_or("Select the signing team the certificate belongs to.")?;
             let email = inner.view.account.clone().unwrap_or_default();
-            let session = inner
-                .session
-                .as_ref()
-                .ok_or("Sign in before requesting a signing certificate.")?;
+            let session = inner.session.as_ref().ok_or_else(|| {
+                OperationError::new(
+                    ErrorCode::AuthenticationRequired,
+                    "Sign in before requesting a signing certificate.",
+                )
+            })?;
             (
                 inner.generation.clone(),
                 session.developer.clone(),
@@ -350,7 +377,10 @@ impl Accounts {
         let machine = hostname();
         let (identity, outcome) =
             crate::certificates::ensure(&mut developer, &team, &machine, &key).await?;
-        let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+        let mut inner = self
+            .0
+            .lock()
+            .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
         if inner.generation != generation {
             return Err("The account session changed while the certificate was issued. Check developer.apple.com before requesting another.".into());
         }
@@ -360,9 +390,12 @@ impl Accounts {
         Ok(outcome)
     }
     /// Remove this account and team's stored signing key from this Mac's Keychain.
-    pub async fn forget_signing_key(&self) -> Result<String, String> {
+    pub async fn forget_signing_key(&self) -> OperationResult<String> {
         let stored = {
-            let mut inner = self.0.lock().map_err(|_| UNAVAILABLE)?;
+            let mut inner = self
+                .0
+                .lock()
+                .map_err(|_| OperationError::new(ErrorCode::Internal, UNAVAILABLE))?;
             inner.expire();
             let team = inner
                 .view

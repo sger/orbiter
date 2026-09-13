@@ -44,7 +44,10 @@ pub enum ErrorCode {
     AcknowledgementRequired,
     /// No usable phone: absent, locked, unpaired, or not the reviewed one.
     DeviceUnavailable,
-    /// An Apple account session is required and is missing or expired.
+    /// The Apple account is not set up far enough: no session, an expired one, or no team chosen.
+    ///
+    /// One code for all three because they lead to the same place — back to the account step —
+    /// and the message says which of them it is.
     AuthenticationRequired,
     /// Reading the library's own storage failed.
     StorageRead,
@@ -213,6 +216,26 @@ impl From<OperationError> for String {
     /// loses the code, so a command that has been converted should return the error itself.
     fn from(error: OperationError) -> Self {
         error.message
+    }
+}
+
+impl From<String> for OperationError {
+    /// Carry a message from code that has not been classified yet.
+    ///
+    /// Makes `?` work on the many internal helpers that still return a sentence, so converting a
+    /// workflow is a signature change rather than a rewrite of every call site. The result is
+    /// [`ErrorCode::Internal`], which is the honest answer: this failure has no classification.
+    ///
+    /// Sites whose code a caller actually acts on construct the error directly instead.
+    fn from(message: String) -> Self {
+        Self::internal(message)
+    }
+}
+
+impl From<&str> for OperationError {
+    /// Carry a borrowed message, as above.
+    fn from(message: &str) -> Self {
+        Self::internal(message)
     }
 }
 
