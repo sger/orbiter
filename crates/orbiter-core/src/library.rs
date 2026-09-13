@@ -23,6 +23,11 @@ static PINS: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
 const SCHEMA: u32 = 2;
 const MAX_IPA: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_MANIFEST: u64 = 64 * 1024 * 1024;
+/// How much installation history is kept. Without a bound the manifest grows until it hits its
+/// own ceiling, and the only way out is removing whole apps — a wall, reached silently, years of
+/// weekly re-signs away. Trimming is per app first so one busy app cannot crowd out the rest.
+const MAX_ATTEMPTS_PER_APP: usize = 200;
+const MAX_ATTEMPTS: usize = 2_000;
 type Result<T> = std::result::Result<T, String>;
 fn now() -> i64 {
     crate::renewal::now_unix(std::time::SystemTime::now())
@@ -874,6 +879,7 @@ impl Library {
                 last_seen_unix: now(),
             });
         }
+        trim_attempts(&mut m, &artifact.app_id);
         m.attempts.push(Attempt {
             id: job_id.into(),
             app_id: artifact.app_id.clone(),
@@ -1081,4 +1087,40 @@ fn managed_hash(name: &std::ffi::OsStr) -> Option<&str> {
 }
 fn managed_name(name: &std::ffi::OsStr) -> bool {
     managed_hash(name).is_some()
+}
+
+/// Drop the oldest finished attempts, for this app and then overall.
+///
+/// Only terminal ones: an attempt still running is the record of something happening right now,
+/// and losing it would leave an install with no history to update. Oldest first, because the
+/// question history answers — what is on this tester's phone, and when does it stop working — is
+/// about the recent past.
+fn trim_attempts(m: &mut Manifest, app_id: &str) {
+    let mut drop_oldest = |keep: usize, matching: Option<&str>| {
+        let mut finished: Vec<(i64, String)> = m
+            .attempts
+            .iter()
+            .filter(|a| matching.is_none_or(|id| a.app_id == id))
+            .filter(|a| a.stage.terminal())
+            .map(|a| (a.started_unix, a.id.clone()))
+            .collect();
+        let total = m
+            .attempts
+            .iter()
+            .filter(|a| matching.is_none_or(|id| a.app_id == id))
+            .count();
+        // One new attempt is about to be pushed, so make room for it as well.
+        let excess = (total + 1).saturating_sub(keep).min(finished.len());
+        if excess == 0 {
+            return;
+        }
+        finished.sort();
+        let doomed: BTreeSet<&str> = finished[..excess]
+            .iter()
+            .map(|(_, id)| id.as_str())
+            .collect();
+        m.attempts.retain(|a| !doomed.contains(a.id.as_str()));
+    };
+    drop_oldest(MAX_ATTEMPTS_PER_APP, Some(app_id));
+    drop_oldest(MAX_ATTEMPTS, None);
 }

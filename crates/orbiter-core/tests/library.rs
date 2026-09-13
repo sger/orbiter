@@ -662,3 +662,42 @@ fn an_import_that_cannot_be_recorded_leaves_no_bytes_behind() {
     assert_eq!(after.unreferenced_bytes, 0);
     assert_eq!(after.artifacts.len(), 1);
 }
+
+#[test]
+fn history_is_bounded_and_an_unfinished_attempt_is_never_the_one_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let f = fixture("one");
+    let imported = lib.import(f.path()).unwrap();
+    let artifact = lib.snapshot().unwrap().artifacts.pop().unwrap();
+    assert_eq!(artifact.id, imported.artifact_id);
+
+    // One attempt left running, then far more finished ones than the library keeps.
+    lib.begin(&artifact, "running", "udid", "Tester phone")
+        .unwrap();
+    for n in 0..205 {
+        let job = format!("job-{n}");
+        lib.begin(&artifact, &job, "udid", "Tester phone").unwrap();
+        lib.update(&status(&job, Stage::Installed)).unwrap();
+    }
+    let attempts = lib.snapshot().unwrap().attempts;
+    assert!(attempts.len() <= 200, "kept {}", attempts.len());
+    // The one still in flight survives: it is the record of something happening right now, and
+    // an install with no row to update would have nowhere to report its outcome.
+    assert!(attempts.iter().any(|a| a.id == "running"));
+    assert!(!attempts.iter().any(|a| a.id == "job-0"));
+    assert!(attempts.iter().any(|a| a.id == "job-204"));
+    // And it can still finish.
+    lib.update(&status("running", Stage::Transferring)).unwrap();
+    lib.update(&status("running", Stage::Failed)).unwrap();
+    assert_eq!(
+        lib.snapshot()
+            .unwrap()
+            .attempts
+            .iter()
+            .find(|a| a.id == "running")
+            .unwrap()
+            .stage,
+        Stage::Failed
+    );
+}
