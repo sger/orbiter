@@ -98,6 +98,10 @@ pub fn tag(team_id: &str) -> String {
         .collect()
 }
 
+/// Seconds since the epoch, with a clock set before 1970 reported as zero.
+///
+/// Zero is treated as "unknown" everywhere downstream rather than as 1970: a machine whose clock
+/// is that wrong cannot support a countdown, and a wrong one is worse than none.
 pub fn now_unix(now: SystemTime) -> i64 {
     match now.duration_since(UNIX_EPOCH) {
         Ok(since) => since.as_secs() as i64,
@@ -106,6 +110,7 @@ pub fn now_unix(now: SystemTime) -> i64 {
     }
 }
 
+/// Where a legacy record's seven days stand. See [`standing_at`] for the arithmetic.
 pub fn standing(record: &Record, now: SystemTime) -> Standing {
     standing_at(record.expires_unix, now)
 }
@@ -130,6 +135,11 @@ pub fn standing_at(expires_unix: i64, now: SystemTime) -> Standing {
     }
 }
 
+/// Whether a legacy record is about the team and build on screen.
+///
+/// `team_tag` is an already-derived tag, never a raw team identifier: this module has never seen
+/// one and must not start. With nothing selected the answer is [`Bearing::Unknown`], which shows
+/// the countdown — the record is all there is to go on, and it was written by this same Mac.
 pub fn bearing(record: &Record, team_tag: Option<&str>, identifier: Option<&str>) -> Bearing {
     match (team_tag, identifier) {
         (Some(team), _) if team != record.team_tag => Bearing::OtherTeam,
@@ -187,6 +197,11 @@ pub fn urgent(standing: Standing, bearing: Bearing) -> bool {
     )
 }
 
+/// Read the legacy file, answering "nothing is known" for every failure.
+///
+/// Infallible by design: a note about when something expires must never be the reason the
+/// application will not open. A missing, oversized, unreadable or malformed file all yield an
+/// empty ledger rather than an error.
 fn read(path: &Path) -> Ledger {
     // A record of when something expires must never be the reason the app will not open. Every
     // failure here is the same answer: nothing is known.
@@ -256,12 +271,14 @@ pub fn status(
 }
 
 #[cfg(test)]
+/// Checks the day arithmetic, the wording, and that the legacy record names nobody.
 mod tests {
     use super::*;
     use std::time::Duration;
 
     const TEAM: &str = "T8B3X5UL5W";
 
+    /// A fixed instant, so a boundary case can be stood on exactly rather than approached.
     fn at(unix: i64) -> SystemTime {
         UNIX_EPOCH + Duration::from_secs(unix as u64)
     }
@@ -271,6 +288,7 @@ mod tests {
     fn seed(path: &Path, records: Vec<Record>) {
         std::fs::write(path, serde_json::to_vec(&Ledger { records }).unwrap()).unwrap();
     }
+    /// A record for one team and build, expiring at the given instant and installed a week before.
     fn record(expires_unix: i64) -> Record {
         Record {
             team_tag: tag(TEAM),
@@ -283,6 +301,8 @@ mod tests {
     }
 
     #[test]
+    /// Six and a half days left reads as six. A person planning around the number must never be
+    /// told they have longer than they do.
     fn a_part_day_never_rounds_up() {
         let now = at(1_000_000);
         // Six and a half days left is six, not seven: a person planning around the number must
@@ -296,6 +316,8 @@ mod tests {
     }
 
     #[test]
+    /// Under twenty-four hours is "today"; exactly at the expiry second is already expired,
+    /// because calling the boundary "today" would promise a launch that will not happen.
     fn the_last_day_and_the_boundary() {
         let now = at(1_000_000);
         assert_eq!(
@@ -319,6 +341,7 @@ mod tests {
     }
 
     #[test]
+    /// The stored form contains no team identifier, no path and no address — only a derived tag.
     fn the_record_names_no_one() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
@@ -334,6 +357,8 @@ mod tests {
     }
 
     #[test]
+    /// Malformed and oversized files both yield nothing rather than an error, and a readable file
+    /// written over the damage is read rather than the damage being remembered.
     fn a_damaged_file_is_silence_not_a_failure() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
@@ -347,6 +372,8 @@ mod tests {
     }
 
     #[test]
+    /// A record about a different build or a different team produces a sentence with no day count
+    /// in it: a reassuring "5 days left" about something else is worse than silence.
     fn a_record_about_another_build_shows_no_countdown() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
@@ -380,6 +407,8 @@ mod tests {
     }
 
     #[test]
+    /// Only a record about the build on screen becomes urgent; one about another team is reported
+    /// quietly, because it is not something this screen can act on.
     fn only_the_build_on_screen_becomes_urgent() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");
@@ -397,6 +426,7 @@ mod tests {
     }
 
     #[test]
+    /// Forgetting removes everything and is safe to repeat, so a second click is not an error.
     fn forgetting_is_complete_and_repeatable() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("renewal.json");

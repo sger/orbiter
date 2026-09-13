@@ -28,20 +28,39 @@ pub fn account(email: &str, team_id: &str) -> String {
     format!("orbiter-signing-key-{:x}", digest.finalize())
 }
 
+/// Nul-terminate an account name for the Objective-C shim.
+///
+/// The shim reads a C string; the terminator is added here rather than relying on the caller.
 fn terminated(account: &str) -> Vec<u8> {
     let mut bytes = account.as_bytes().to_vec();
     bytes.push(0);
     bytes
 }
 
+/// Storing a signing key is macOS-only; elsewhere this reports that rather than pretending.
+///
+/// # Errors
+///
+/// Always fails, with a message naming the reason.
 #[cfg(not(target_os = "macos"))]
 pub fn store(_: &str, _: &[u8]) -> Result<(), String> {
     Err("Signing keys can only be stored on macOS.".into())
 }
+/// Reading a signing key is macOS-only.
+///
+/// # Errors
+///
+/// Always fails. Deliberately an error rather than `Ok(None)`: "there is no key here" and "this
+/// platform cannot hold one" lead to different next steps.
 #[cfg(not(target_os = "macos"))]
 pub fn load(_: &str) -> Result<Option<Vec<u8>>, String> {
     Err("Signing keys can only be read on macOS.".into())
 }
+/// Removing a signing key is macOS-only.
+///
+/// # Errors
+///
+/// Always fails, with a message naming the reason.
 #[cfg(not(target_os = "macos"))]
 pub fn forget(_: &str) -> Result<(), String> {
     Err("Signing keys can only be removed on macOS.".into())
@@ -85,6 +104,15 @@ pub fn load(account: &str) -> Result<Option<Vec<u8>>, String> {
 
 /// Remove this account's stored signing key. Absent is success.
 #[cfg(target_os = "macos")]
+/// Remove a stored signing key from the Keychain.
+///
+/// Removing the key does not revoke the certificate Apple issued for it: that still exists and
+/// still counts against the team's allowance. Callers say so rather than implying the slot is free.
+///
+/// # Errors
+///
+/// Fails if the account name contains a nul, or if the Keychain refuses. Removing a key that is
+/// not there succeeds.
 pub fn forget(account: &str) -> Result<(), String> {
     let name = terminated(account);
     // SAFETY: the name is a live, NUL-terminated buffer.
@@ -96,10 +124,13 @@ pub fn forget(account: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
+/// Checks that a key is scoped to one account and team, and that the scoping names neither.
 mod tests {
     use super::*;
 
     #[test]
+    /// Two accounts, or one account on two teams, get different Keychain entries — and the entry
+    /// name contains neither the email address nor the team identifier it was derived from.
     fn accounts_are_derived_per_apple_account_and_team_and_disclose_neither() {
         let one = account("Person@example.invalid", "T8B3X5UL5W");
         // Case and surrounding space are not a different account.
@@ -115,6 +146,10 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     #[ignore = "Writes and removes one item in this Mac's login Keychain"]
+    /// A stored key reads back byte for byte and is gone after being forgotten.
+    ///
+    /// Ignored by default: it writes to the real login Keychain and may prompt for authorisation,
+    /// which is not something a test run should do without being asked.
     fn a_stored_key_survives_and_can_be_forgotten() {
         let account = account("orbiter-test@example.invalid", "TESTTEAM01");
         let key = b"synthetic-key-material".to_vec();

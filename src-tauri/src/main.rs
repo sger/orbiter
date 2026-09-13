@@ -1,3 +1,21 @@
+//! The desktop shell: Tauri startup, dependency construction, and the IPC surface.
+//!
+//! Every command here is an adapter. It decodes its inputs, validates identifiers at this
+//! boundary, calls an application service, and maps the result — including turning a structured
+//! backend failure into the `{ code, message }` the window switches on. No workflow lives in this
+//! file; that is the point of [`orbiter_core::application`].
+//!
+//! # Acknowledgements
+//!
+//! Commands that mutate something outside this Mac — an Apple account, an iPhone — take their own
+//! acknowledgement and refuse without it. Nothing here spends one of a free team's small, mostly
+//! irreversible allowances on Orbiter's initiative.
+//!
+//! # Startup
+//!
+//! One [`Runtime`] is built from the platform's application data directory, reconciled against
+//! whatever the last run left behind, and registered. Everything else takes a handle to it.
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod failure;
 mod library_commands;
@@ -26,10 +44,24 @@ struct Inspection {
 }
 struct Release(Arc<AtomicBool>);
 impl Drop for Release {
+    /// Let the next inspection start, whether this one finished, failed or panicked.
+    ///
+    /// Clearing the flag by `Drop` rather than at the end of the command is what makes a panicking
+    /// inspection leave the app usable instead of permanently busy.
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
     }
 }
+/// Inspect one local IPA and report what is in it.
+///
+/// Purely local: the chosen file is read and never written, no Apple service is contacted, and no
+/// credential is touched. Progress names completed boundaries rather than a fabricated percentage.
+/// One inspection at a time; a second is refused rather than queued.
+///
+/// # Errors
+///
+/// Fails if another inspection is running, if the archive is malformed or exceeds an inspection
+/// limit, or if [`cancel_inspection`] was called.
 #[tauri::command]
 async fn inspect_ipa(
     path: String,
@@ -61,10 +93,20 @@ async fn inspect_ipa(
     .await
     .map_err(|_| "Inspection worker stopped. Retry with a fresh IPA.".to_string())?
 }
+/// Ask the running inspection to stop at its next boundary.
+///
+/// Takes effect between archive entries, so it is prompt without leaving a half-read report.
+/// Calling it when nothing is running is harmless.
 #[tauri::command]
 fn cancel_inspection(state: State<'_, Inspection>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
+/// List the iPhones this Mac can see right now.
+///
+/// Read-only: it reports what the local device service finds and which pairings already exist. It
+/// pairs nothing and contacts no Apple service. Never fails — an unreachable device service is
+/// part of the report, because "no iPhone is plugged in" and "this Mac cannot talk to iPhones" are
+/// different answers and a person needs to tell them apart.
 #[tauri::command]
 async fn discover_devices() -> orbiter_core::devices::Discovery {
     orbiter_core::devices::discover().await
@@ -265,16 +307,37 @@ async fn start_device_log(
     );
     result
 }
+/// Stop the running device-log capture at its next line.
+///
+/// Harmless when no capture is running. Nothing was written to disk, so there is nothing to clean
+/// up.
 #[tauri::command]
 fn stop_device_log(state: State<'_, LogCapture>) {
     state.cancel.store(true, Ordering::SeqCst);
 }
+/// What the Apple account session currently is: signed out, awaiting a challenge, or signed in.
+///
+/// Local only — it reports state this process already holds and contacts nothing. Reading it also
+/// expires a session that has passed its lifetime, so a stale view is never returned.
 #[tauri::command]
 fn account_status(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
     state.status()
 }
+/// Sign in to Apple with an email, a password, and explicit consent.
+///
+/// **Contacts Apple.** The password exists only for the duration of this request and is zeroized
+/// afterwards; it is never stored, logged, or returned. Consent is required because the request
+/// goes to Apple directly using this Mac's own authentication support.
+///
+/// Returns the next state: signed in, or a two-factor challenge to answer.
+///
+/// # Errors
+///
+/// Fails on rejected credentials, on Apple throttling this Mac (in which case a local hold is
+/// applied before retrying), or when local authentication support is unavailable. Apple's own
+/// responses are redacted before they appear in any message.
 #[tauri::command]
 async fn account_sign_in(
     email: String,
@@ -284,6 +347,15 @@ async fn account_sign_in(
 ) -> Result<orbiter_core::accounts::View, String> {
     state.start(email, password, consent)
 }
+/// Answer a two-factor challenge, or ask for the code to be sent another way.
+///
+/// A verification code is treated exactly as a password: used once, zeroized, never stored.
+/// Answering a challenge that is no longer the current one is refused rather than applied to
+/// whatever challenge replaced it. The Apple request itself is made by the waiting sign-in.
+///
+/// # Errors
+///
+/// Fails on an unknown challenge, or if the session was cleared while the challenge was open.
 #[tauri::command]
 fn account_answer(
     challenge_id: String,
@@ -292,12 +364,24 @@ fn account_answer(
 ) -> Result<orbiter_core::accounts::View, String> {
     state.answer(challenge_id, answer)
 }
+/// Sign out, clearing the session from memory.
+///
+/// Local only. Nothing is revoked at Apple: a certificate this session obtained still exists, and
+/// a signed build already produced still works. Signing out only forgets the session.
 #[tauri::command]
 fn account_sign_out(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
     state.sign_out()
 }
+/// Choose which of the signed-in account's teams to work with.
+///
+/// Local only. Changing the team invalidates any prepared provisioning, because identifiers are
+/// derived from the team and a plan made for one says nothing about another.
+///
+/// # Errors
+///
+/// Fails if no session exists or the identifier names no team the account belongs to.
 #[tauri::command]
 fn account_select_team(
     id: String,
@@ -305,6 +389,17 @@ fn account_select_team(
 ) -> Result<orbiter_core::accounts::View, String> {
     state.select_team(id)
 }
+/// Register a connected iPhone on the selected team.
+///
+/// **Contacts Apple and mutates remote state**, so it refuses without an acknowledgement: a free
+/// personal team may register only three devices and a registration cannot be undone from here.
+/// Returns no device identifier — the phone's UDID is used to make the request and never returned
+/// or stored.
+///
+/// # Errors
+///
+/// Fails without an acknowledgement, a session, a selected team or a verified phone, and when
+/// Apple refuses — including when the team's device allowance is already full.
 #[tauri::command]
 async fn account_register_device(
     device_id: u32,
@@ -313,6 +408,17 @@ async fn account_register_device(
 ) -> Result<orbiter_core::provisioning::Outcome, String> {
     state.register_device(device_id, acknowledged).await
 }
+/// Obtain a development certificate for the selected team, reusing one where possible.
+///
+/// **Contacts Apple and may mutate remote state**, so it refuses without an acknowledgement: a
+/// free personal team has very few certificate slots and issuing one can leave the team unable to
+/// issue another. The private key is generated on this Mac and stays in its Keychain; only a
+/// certificate signing request is sent.
+///
+/// # Errors
+///
+/// Fails without an acknowledgement or a session, and when Apple refuses — notably when the team
+/// already holds an active certificate, which [`account_withdraw_certificates`] exists to resolve.
 #[tauri::command]
 async fn account_request_certificate(
     acknowledged: bool,
@@ -320,6 +426,19 @@ async fn account_request_certificate(
 ) -> Result<orbiter_core::certificates::Outcome, String> {
     state.request_certificate(acknowledged).await
 }
+/// Reserve app identifiers and download profiles for an IPA chosen by path.
+///
+/// The path-based compatibility entry point: it imports the file into the library first, then runs
+/// the same artifact-based preparation as [`library_prepare_provisioning`], so the two cannot
+/// diverge.
+///
+/// **Contacts Apple and mutates remote state**; see the artifact-based command for the
+/// acknowledgement and allowances involved.
+///
+/// # Errors
+///
+/// Returns the same failures as [`library_prepare_provisioning`], plus any failure to read or
+/// import the chosen file.
 #[tauri::command]
 async fn account_prepare_provisioning(
     path: String,
@@ -372,18 +491,48 @@ async fn account_sign_ipa(
             .signed,
     )
 }
+/// Remove this Mac's stored signing key from the Keychain.
+///
+/// Local only. The certificate Apple issued for that key still exists and still counts against the
+/// team's allowance; this forgets the private half, which is why the message says so rather than
+/// implying the slot was freed.
+///
+/// # Errors
+///
+/// Fails if no key is stored for the current account and team, or if the Keychain refuses.
 #[tauri::command]
 async fn account_forget_signing_key(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<String, String> {
     state.forget_signing_key().await
 }
+/// Ask Apple for the account's teams again.
+///
+/// **Contacts Apple** but mutates nothing. A session that can no longer be refreshed is cleared
+/// along with the team selection, so the interface shows a signed-out state rather than acting on
+/// a session that has quietly stopped working.
+///
+/// # Errors
+///
+/// Fails if a refresh is already running, or if the session cannot be refreshed — in which case
+/// the returned view already reflects being signed out.
 #[tauri::command]
 async fn account_refresh_teams(
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::accounts::View, String> {
     state.refresh_teams().await
 }
+/// Build the runtime, register the IPC surface, and run the desktop application.
+///
+/// Startup order matters: the runtime is constructed and reconciled against whatever the last run
+/// left behind *before* any command can be invoked, so no installation can begin against state
+/// that has not been recovered. A library that cannot be reconciled is reported and the
+/// application still opens — refusing to start would leave a person with no way to see why.
+///
+/// # Panics
+///
+/// Panics if Tauri itself cannot start, which means the webview or the application context is
+/// unavailable and there is nothing to degrade to.
 fn main() {
     use tracing_subscriber::prelude::*;
     // Never format upstream authentication reports: they may contain credentials.

@@ -1,3 +1,13 @@
+//! IPC for the saved-IPA library.
+//!
+//! Adapters, like every command in this crate: decode, validate identifiers at the boundary, call
+//! an application service or the library, map the result. Commands that touch managed files take
+//! the installation gate first, so nothing can be deleted or reclaimed while a review points at it
+//! or an installation is reading it.
+//!
+//! Nothing here uninstalls anything from a phone. Removing a saved file removes a copy on this
+//! Mac; the app on a tester's device is unaffected.
+
 use super::*;
 use orbiter_core::{
     application::{installation::Acknowledgement, runtime::Runtime, signing::Retained},
@@ -28,6 +38,18 @@ pub fn runtime(app: &tauri::AppHandle) -> Result<Runtime, String> {
     Ok(app.state::<Runtime>().inner().clone())
 }
 #[tauri::command]
+/// Everything the library holds: apps, saved versions, remembered devices, history, expiry and
+/// storage use.
+///
+/// Read-only and local. Returns the whole picture in one payload because the window renders it as
+/// one screen; icons are deliberately *not* included, and are fetched per hash by
+/// [`library_icon`] so a refresh does not re-send them.
+///
+/// # Errors
+///
+/// Fails if the manifest is unreadable, damaged, or written by a newer Orbiter. A damaged library
+/// is reported rather than replaced with an empty one: silently starting over would look like
+/// every saved build had vanished.
 pub async fn library_list(app: tauri::AppHandle) -> Result<Snapshot, String> {
     let library = storage(&app)?;
     tokio::task::spawn_blocking(move || library.snapshot())
@@ -35,6 +57,19 @@ pub async fn library_list(app: tauri::AppHandle) -> Result<Snapshot, String> {
         .map_err(|_| "Library worker stopped.")?
 }
 #[tauri::command]
+/// Copy a local IPA into the library and record it as a saved version.
+///
+/// The chosen file is only ever read. Bytes decide identity: importing the same file twice returns
+/// the existing version and repairs a damaged managed copy, while different bytes are a new
+/// version even when the version and build labels match.
+///
+/// Copying, hashing and inspecting happen on a blocking thread and outside the metadata lock, so a
+/// multi-gigabyte import does not freeze the rest of the library.
+///
+/// # Errors
+///
+/// Fails if the file is missing, unreadable, larger than 2 GiB, not a valid IPA, or if the library
+/// cannot be written.
 pub async fn library_import(path: String, app: tauri::AppHandle) -> Result<Imported, String> {
     let library = storage(&app)?;
     tokio::task::spawn_blocking(move || library.import(&PathBuf::from(path)))
@@ -76,6 +111,14 @@ pub async fn library_reclaim(app: tauri::AppHandle) -> Result<u64, String> {
         .map_err(|_| "Library worker stopped.")?
 }
 #[tauri::command]
+/// Verify a saved version and return its metadata, inspection report and managed path.
+///
+/// Re-hashes the managed copy before reporting anything, so a file that changed on disk is refused
+/// rather than described. Opening an original also refreshes the app's cached icon.
+///
+/// # Errors
+///
+/// Fails if the artifact is unknown, has been removed, or no longer matches its recorded hash.
 pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<Opened, String> {
     let library = storage(&app)?;
     let artifact_id = ArtifactId::parse(&artifact_id)?;
@@ -84,6 +127,19 @@ pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<
         .map_err(|_| "Library worker stopped.")?
 }
 #[tauri::command]
+/// Remove one saved version, or an entire app with its history.
+///
+/// Removing a version removes that original and the signed builds made from it while keeping their
+/// installation history as tombstones; removing an app removes its files *and* its history, which
+/// is why the interface asks first. **Nothing is uninstalled from any phone.**
+///
+/// Holds the installation gate for the whole removal and invalidates a review that pointed at what
+/// is going, so a file cannot disappear from under an operation.
+///
+/// # Errors
+///
+/// Fails if an installation is running, if the app or version is not in this library, or if a file
+/// is currently leased by another operation.
 pub async fn library_remove(
     app_id: String,
     artifact_id: Option<String>,
