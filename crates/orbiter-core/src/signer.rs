@@ -69,6 +69,7 @@ impl Log {
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Signed {
+    pub team_tag: Option<String>,
     /// The new IPA. The original is untouched.
     pub path: String,
     pub identifier: String,
@@ -601,7 +602,8 @@ fn run(
         .file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
         .unwrap_or_else(|| "app".into());
-    let output = out_dir.join(format!("{name}-{}.ipa", plan.team_id));
+    // Each operation owns its output until the library has durably retained it.
+    let output = out_dir.join(format!("{name}-{}.ipa", uuid::Uuid::new_v4()));
     repackage(root, &output, cancel, progress)?;
     log.note(format!(
         "{} MB written",
@@ -614,6 +616,7 @@ fn run(
     // from that one profile rather than being chosen independently.
     let earliest = profiles.iter().min_by_key(|profile| profile.expires_unix);
     Ok(Signed {
+        team_tag: None,
         path: output.to_string_lossy().to_string(),
         identifier: plan.new_main_identifier.clone(),
         expires: earliest.map(|p| p.expires.clone()).unwrap_or_default(),

@@ -41,6 +41,8 @@ pub struct Review {
 /// Sensitive binding stays only in Rust memory; no Debug or serialization implementation.
 pub struct PreparedInstall {
     pub review: Review,
+    pub library_artifact: Option<crate::library::Artifact>,
+    pub library_lease: Option<crate::library::Lease>,
     snapshot: tempfile::TempDir,
     device_id: u32,
     udid: String,
@@ -306,6 +308,8 @@ pub async fn prepare(path: PathBuf, device_id: u32) -> Result<PreparedInstall, S
         notes.push("The Watch app stays included. Authorization and behavior on a paired Watch have not been verified.".into());
     }
     Ok(PreparedInstall {
+        library_artifact: None,
+        library_lease: None,
         review: Review {
             token: uuid::Uuid::new_v4().to_string(),
             app_name: main.name.clone(),
@@ -757,6 +761,8 @@ mod fixture_tests {
         let f = fixture();
         let (dir, r, hash) = snapshot(f.path()).unwrap();
         let plan = PreparedInstall {
+            library_artifact: None,
+            library_lease: None,
             review: Review {
                 token: uuid::Uuid::new_v4().to_string(),
                 app_name: "Synthetic".into(),
@@ -781,5 +787,24 @@ mod fixture_tests {
         assert_eq!(result.stage, Stage::Cancelled);
         assert_eq!(result.transferred_bytes, 0);
         assert!(!result.cleanup_pending);
+    }
+}
+
+impl PreparedInstall {
+    pub fn record_library_attempt(&self, library: &crate::library::Library) -> Result<(), String> {
+        if let Some(artifact) = &self.library_artifact {
+            if artifact.sha256 != self.review.sha256 {
+                return Err(
+                    "Reviewed bytes do not match the library artifact. Import it again.".into(),
+                );
+            }
+            library.begin(
+                artifact,
+                &self.review.token,
+                &self.udid,
+                &self.review.device_name,
+            )?;
+        }
+        Ok(())
     }
 }

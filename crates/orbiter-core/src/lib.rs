@@ -1,9 +1,11 @@
 pub mod accounts;
+mod app_icon;
 pub mod certificates;
 pub mod devices;
 pub mod diagnostics;
 pub mod installation;
 pub mod keychain;
+pub mod library;
 pub mod local_anisette;
 mod macho;
 pub mod plan;
@@ -522,8 +524,7 @@ fn icon<R: Read + Seek>(
                 continue;
             }
             let bytes = read(z, &name, 2 * 1024 * 1024, cancel, budget)?;
-            // Only standard PNG; iOS CgBI and asset catalogs need a future decoder.
-            if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.get(12..16) == Some(b"IHDR") {
+            if let Some(bytes) = app_icon::normalize(bytes) {
                 return Ok(Some(format!(
                     "data:image/png;base64,{}",
                     base64::engine::general_purpose::STANDARD.encode(bytes)

@@ -8,15 +8,21 @@ import {
   installationStatus,
   isTauri,
   prepareInstall,
+  libraryPrepareInstall,
+  libraryChanged,
 } from "../../ipc/commands";
 import type { Job, Review } from "../../types";
 import { ArrowRight, LoaderCircle } from "lucide-react";
 export function InstallSigned({
+  paused = false,
+  artifactId,
   path,
   signed,
   deviceId,
   onBusy,
 }: {
+  paused?: boolean;
+  artifactId?: string;
   path: string | null;
   /// True when `path` is the build Orbiter just signed rather than the chosen IPA.
   signed: boolean;
@@ -47,7 +53,7 @@ export function InstallSigned({
       generation.current++;
       discard();
     };
-  }, [path, deviceId]);
+  }, [path, deviceId, artifactId]);
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
@@ -86,7 +92,7 @@ export function InstallSigned({
     };
   }, [onBusy]);
   async function prepare() {
-    if (!path || deviceId === null) return;
+    if (paused || !path || deviceId === null) return;
     const version = ++generation.current;
     discard();
     setReview(null);
@@ -96,7 +102,9 @@ export function InstallSigned({
     setPreparing(true);
     onBusy(true);
     try {
-      const next = await prepareInstall(path, deviceId);
+      const next = await (artifactId
+        ? libraryPrepareInstall(artifactId, deviceId)
+        : prepareInstall(path, deviceId));
       if (generation.current !== version) {
         void discardInstall(next.token);
         return;
@@ -109,10 +117,11 @@ export function InstallSigned({
       operation.current = false;
       setPreparing(false);
       onBusy(false);
+      libraryChanged();
     }
   }
   async function install() {
-    if (!review || !accepted || review.blockers.length) return;
+    if (paused || !review || !accepted || review.blockers.length) return;
     operation.current = true;
     setWorking(true);
     onBusy(true);
@@ -132,6 +141,7 @@ export function InstallSigned({
       operation.current = false;
       setWorking(false);
       onBusy(false);
+      libraryChanged();
       setReview(null);
       current.current = null;
       setAccepted(false);
@@ -169,7 +179,12 @@ export function InstallSigned({
         <button
           className="review-button"
           disabled={
-            !isTauri() || !path || deviceId === null || preparing || working
+            paused ||
+            !isTauri() ||
+            !path ||
+            deviceId === null ||
+            preparing ||
+            working
           }
           onClick={prepare}
         >
@@ -228,7 +243,7 @@ export function InstallSigned({
                 </Checkbox>
                 <button
                   className="review-button"
-                  disabled={!accepted || working}
+                  disabled={paused || !accepted || working}
                   onClick={install}
                 >
                   {signed ? "Install signed IPA" : "Install unchanged IPA"}{" "}

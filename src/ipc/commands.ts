@@ -122,3 +122,43 @@ export const startDeviceLog = (
     progress,
   });
 export const stopDeviceLog = () => invoke("stop_device_log");
+
+import type {
+  LibrarySnapshot,
+  Imported,
+  Opened,
+  Artifact,
+} from "../features/library/types";
+export const libraryChanged = () =>
+  window.dispatchEvent(new Event("library-changed"));
+export const libraryList = () => invoke<LibrarySnapshot>("library_list");
+export const libraryImport = (path: string) =>
+  invoke<Imported>("library_import", { path });
+export const libraryOpen = (artifactId: string) =>
+  invoke<Opened>("library_open", { artifactId });
+export const libraryRemove = (appId: string, artifactId: string | null) =>
+  invoke<void>("library_remove", { appId, artifactId });
+export const libraryPrepareInstall = (artifactId: string, deviceId: number) =>
+  invoke<Review>("library_prepare_install", { artifactId, deviceId });
+export const libraryPrepareProvisioning = (
+  artifactId: string,
+  acknowledged: boolean,
+  watch: WatchChoice,
+) =>
+  invoke<Preparation>("library_prepare_provisioning", {
+    artifactId,
+    acknowledged,
+    watch,
+  });
+export const librarySign = (
+  artifactId: string,
+  watch: WatchChoice,
+  marker: string,
+  progress: Channel<SigningProgress>,
+) =>
+  invoke<{ signed: Signed; artifact: Artifact }>("library_sign", {
+    artifactId,
+    watch,
+    marker,
+    progress,
+  });

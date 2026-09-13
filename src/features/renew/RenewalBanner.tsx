@@ -35,7 +35,11 @@ export function RenewalBanner({
       data-bearing={renewal.bearing}
     >
       {urgent ? <CircleAlert size={17} /> : <CalendarClock size={17} />}
-      <p>{renewal.sentence}</p>
+      <p>
+        <strong>Legacy renewal information. </strong>
+        {renewal.sentence} Device and saved version are not known for this
+        record.
+      </p>
       {urgent && canResign && (
         <button className="primary" onClick={onResign}>
           Re-sign now

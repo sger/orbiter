@@ -38,7 +38,11 @@ export function Rail({
       href={routeHref(item.id)}
       title={item.label}
       aria-label={item.label}
-      aria-current={route === item.id ? "page" : undefined}
+      aria-current={
+        route === item.id || (item.id === "ipas" && route.startsWith("ipas/"))
+          ? "page"
+          : undefined
+      }
     >
       {item.icon}
       {expanded && <span>{item.label}</span>}

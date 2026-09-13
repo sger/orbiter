@@ -1,3 +1,5 @@
+import { AppIcon } from "../library/AppIcon";
+import type { Opened } from "../library/types";
 import { Compatibility } from "./Compatibility";
 import { SigningPanel } from "./SigningPanel";
 import { useSigning } from "./useSigning";
@@ -6,7 +8,6 @@ import { useInspection } from "./useInspection";
 import { Accounts } from "../team/Accounts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Box,
   Check,
   ChevronDown,
   FolderOpen,
@@ -51,13 +52,30 @@ const noTeam: TeamStatus = {
 };
 export function Workspace({
   onAccount,
+  selected,
+  visible = true,
+  onBusy,
+  onChoose,
 }: {
+  selected?: Opened | null;
+  visible?: boolean;
+  onBusy?: (value: boolean) => void;
+  onChoose?: () => void;
   onAccount: (account: string | null) => void;
 }) {
   const [team, setTeam] = useState<TeamStatus>(noTeam);
   useEffect(() => onAccount(team.account), [team.account, onAccount]);
-  const { signed, signing, signError, signStep, invalidate, sign } =
-    useSigning();
+  const {
+    signedArtifactId,
+    signed,
+    signing,
+    signError,
+    signStep,
+    invalidate,
+    sign,
+  } = useSigning(
+    selected?.artifact.source_id ? undefined : selected?.artifact.id,
+  );
   // Stable: Accounts clears the preparation whenever this identity changes, so an inline closure
   // here would wipe the result on every render.
   const prepared = useCallback(
@@ -85,9 +103,18 @@ export function Workspace({
     cancelled,
     ipaPath,
     desktop,
-    choose,
+    choose: chooseFile,
     cancel,
-  } = useInspection(installActive);
+  } = useInspection(installActive, selected, visible);
+  const choose = onChoose ?? chooseFile;
+  const [accountBusy, setAccountBusy] = useState(false);
+  useEffect(() => {
+    onBusy?.(busy || signing || installBusy || accountBusy);
+  }, [busy, signing, installBusy, accountBusy, onBusy]);
+  useEffect(() => {
+    invalidate();
+    setPreparation(null);
+  }, [selected, invalidate]);
   const app = report?.bundles.find((b) => b.path === report.main_path);
   const [help, setHelp] = useState(false);
   const [helpSection, setHelpSection] = useState<string | null>(null);
@@ -131,7 +158,7 @@ export function Workspace({
   return (
     <>
       <h1 className="page-title" tabIndex={-1}>
-        IPAs
+        {selected ? "Signing & installation" : "IPAs"}
       </h1>
       <SigningProgress stages={steps} />
       {!desktop && (
@@ -179,19 +206,7 @@ export function Workspace({
               </button>
             ) : (
               <div className="app-summary">
-                <div className="app-icon">
-                  {report?.icon_data_url ? (
-                    <img
-                      src={report.icon_data_url}
-                      alt="App icon"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
-                    />
-                  ) : (
-                    <Box size={30} />
-                  )}
-                </div>
+                <AppIcon src={report?.icon_data_url ?? null} name={app.name} />
                 <div className="app-title">
                   <h3>{app.name}</h3>
                   <p>
@@ -202,7 +217,7 @@ export function Workspace({
                 <button
                   className="text-button"
                   onClick={choose}
-                  disabled={busy || installBusy}
+                  disabled={busy || installBusy || signing || accountBusy}
                 >
                   Change
                 </button>
@@ -245,20 +260,27 @@ export function Workspace({
                 <span>02</span> Destination & identity
               </h2>
             </div>
-            <Devices onSelect={setDeviceId} paused={installBusy} />
-            <Accounts
-              paused={installBusy}
-              deviceId={deviceId}
-              ipaPath={ipaPath}
-              hasWatchApp={hasWatchApp(report)}
-              onPrepared={prepared}
-              onStatus={setTeam}
-              onHelp={openHelp}
+            <Devices
+              onSelect={setDeviceId}
+              paused={installBusy || signing || accountBusy}
             />
+            <div hidden={!!selected?.artifact.source_id}>
+              <Accounts
+                artifactId={selected?.artifact.id}
+                onBusy={setAccountBusy}
+                paused={installBusy || signing}
+                deviceId={deviceId}
+                ipaPath={ipaPath}
+                hasWatchApp={hasWatchApp(report)}
+                onPrepared={prepared}
+                onStatus={setTeam}
+                onHelp={openHelp}
+              />
+            </div>
             <p className="hint">
-              A different account on the same company team shares that team's
-              device allowance. Personal teams have their own limits and
-              capability restrictions.
+              A different account on the same team shares that team's device
+              allowance. Personal teams have their own limits and capability
+              restrictions.
             </p>
           </section>
         </section>
@@ -314,22 +336,30 @@ export function Workspace({
         onResign={() => void sign(ipaPath!, team.watch, marker)}
         onForget={forgetRenewal}
       />
-      <SigningPanel
-        signing={signing}
-        signed={signed}
-        signError={signError}
-        signStep={signStep}
-        preparation={preparation}
-        app={app}
-        blocked={blocked}
-        desktop={desktop}
-        marker={marker}
-        onMarker={setMarker}
-        onSign={() => void sign(ipaPath!, team.watch, marker)}
-      />
+      <div hidden={!!selected?.artifact.source_id}>
+        <SigningPanel
+          signing={signing}
+          signed={signed}
+          signError={signError}
+          signStep={signStep}
+          preparation={preparation}
+          app={app}
+          blocked={
+            installBusy || accountBusy
+              ? "Wait for the current operation to finish."
+              : blocked
+          }
+          desktop={desktop}
+          marker={marker}
+          onMarker={setMarker}
+          onSign={() => void sign(ipaPath!, team.watch, marker)}
+        />
+      </div>
       <InstallSigned
+        paused={signing || accountBusy}
+        artifactId={signedArtifactId ?? selected?.artifact.id}
         path={signed ? signed.path : ipaPath}
-        signed={signed !== null}
+        signed={signed !== null || !!selected?.artifact.source_id}
         deviceId={deviceId}
         onBusy={installationBusy}
       />

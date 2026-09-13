@@ -13,9 +13,14 @@ import {
   inspectIpa,
   isTauri,
 } from "../../ipc/commands";
+import type { Opened } from "../library/types";
 import type { Report } from "../../types";
 
-export function useInspection(installActive: RefObject<boolean>) {
+export function useInspection(
+  installActive: RefObject<boolean>,
+  selected?: Opened | null,
+  enabled = true,
+) {
   const [report, setReport] = useState<Report | null>(null),
     [busy, setBusy] = useState(false),
     [stage, setStage] = useState(""),
@@ -48,7 +53,13 @@ export function useInspection(installActive: RefObject<boolean>) {
     }
   }, []);
   useEffect(() => {
-    if (!desktop) return;
+    setReport(selected?.report ?? null);
+    setIpaPath(selected?.path ?? null);
+    setError("");
+    setStage(selected ? "Saved IPA verified" : "");
+  }, [selected]);
+  useEffect(() => {
+    if (!enabled || selected || !desktop) return;
     let disposed = false;
     let cleanup: (() => void) | undefined;
     getCurrentWebview()
@@ -72,7 +83,7 @@ export function useInspection(installActive: RefObject<boolean>) {
       disposed = true;
       cleanup?.();
     };
-  }, [desktop, inspect]);
+  }, [desktop, inspect, enabled, selected]);
   async function choose() {
     try {
       const p = await open({

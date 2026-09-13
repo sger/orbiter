@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { libraryPrepareProvisioning } from "../../ipc/commands";
 import { TextField } from "../../components/ui/TextField";
 import { Checkbox } from "../../components/ui/Checkbox";
 import {
@@ -19,6 +21,8 @@ import type { Preparation, TeamStatus, WatchChoice } from "../../types";
 
 import { useAccounts } from "./useAccounts";
 export function Accounts({
+  artifactId,
+  onBusy,
   paused,
   deviceId,
   ipaPath,
@@ -27,6 +31,8 @@ export function Accounts({
   onStatus,
   onHelp,
 }: {
+  artifactId?: string;
+  onBusy?: (value: boolean) => void;
   paused: boolean;
   deviceId: number | null;
   ipaPath: string | null;
@@ -91,6 +97,9 @@ export function Accounts({
     reason,
     command,
   } = useAccounts({ paused, deviceId, ipaPath, onPrepared, onStatus });
+  useEffect(() => {
+    onBusy?.(busy || registering || certBusy || provBusy);
+  }, [busy, registering, certBusy, provBusy, onBusy]);
   // Emphasize the earliest unfinished action that can actually run now.
   // This changes presentation only; acknowledgement and backend gates stay intact.
   const nextAction =
@@ -632,7 +641,10 @@ export function Accounts({
                     setProvBusy(true);
                     setProvError(null);
                     setPreparation(null);
-                    prepareProvisioning(ipaPath!, provAck, watch)
+                    (artifactId
+                      ? libraryPrepareProvisioning(artifactId, provAck, watch)
+                      : prepareProvisioning(ipaPath!, provAck, watch)
+                    )
                       .then((result) => {
                         if (!mounted.current) return;
                         setPreparation(result);

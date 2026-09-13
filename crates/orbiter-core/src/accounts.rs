@@ -695,7 +695,7 @@ impl Accounts {
         let team_tag = crate::renewal::tag(&team_id);
         // Signing is local and CPU-bound: it reads and writes a whole app bundle and computes
         // hashes over every file, so it never runs on the async runtime's threads.
-        let (signed, app_name) = tokio::task::spawn_blocking(move || {
+        let (mut signed, app_name) = tokio::task::spawn_blocking(move || {
             let report =
                 crate::inspect(&path, &cancel, |_| {}).map_err(|error| error.to_string())?;
             let plan = crate::plan::build(
@@ -730,6 +730,7 @@ impl Accounts {
         })
         .await
         .map_err(|_| "Signing stopped unexpectedly.".to_string())??;
+        signed.team_tag = Some(team_tag.clone());
         // Held, not written: the seven days only become worth showing once the build reaches a
         // phone, and installing is a separate click that may never come.
         if let Ok(mut inner) = self.0.lock() {

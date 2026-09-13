@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod library_commands;
+use library_commands::*;
 use orbiter_core::installation::{
     self, PreparedInstall, Review,
     job::{self, Control, JobStatus},
@@ -115,25 +117,15 @@ fn renewal_forget(app: tauri::AppHandle) -> Result<(), String> {
 async fn prepare_install(
     path: String,
     device_id: u32,
+    app: tauri::AppHandle,
     state: State<'_, Installations>,
 ) -> Result<Review, String> {
-    let _gate = state
-        .gate
-        .clone()
-        .try_lock_owned()
-        .map_err(|_| "Another installation operation is in progress.")?;
-    state
-        .plan
-        .lock()
-        .map_err(|_| "Installation state unavailable.")?
-        .take();
-    let plan = installation::prepare(path.into(), device_id).await?;
-    let review = plan.review.clone();
-    *state
-        .plan
-        .lock()
-        .map_err(|_| "Installation state unavailable.")? = Some(plan);
-    Ok(review)
+    let library = storage(&app)?;
+    let artifact_id =
+        tokio::task::spawn_blocking(move || library.resolve_or_import(&PathBuf::from(path)))
+            .await
+            .map_err(|_| "Library worker stopped.")??;
+    library_prepare_install(artifact_id, device_id, app, state).await
 }
 #[tauri::command]
 fn discard_install(token: String, state: State<'_, Installations>) -> Result<(), String> {
@@ -181,6 +173,9 @@ async fn execute_install(
     };
     // Captured before the plan moves into the worker: what was actually put on the phone, for
     // the renewal record written only if the install reports success.
+    let library = storage(&app)?;
+    let library_backed = plan.library_artifact.is_some();
+    plan.record_library_attempt(&library)?;
     let identifier = plan.review.bundle_id.clone();
     let app_name = plan.review.app_name.clone();
     let location = journal(&app)?;
@@ -204,8 +199,14 @@ async fn execute_install(
         cleanup_pending: false,
     });
     let current = owned.current.clone();
+    let history = library.clone();
     let result = tokio::spawn(async move {
-        installation::execute(plan, control, location, move |status| {
+        installation::execute(plan, control, location, move |mut status| {
+            if let Err(error) = history.update(&status) {
+                status.message.push_str(&format!(
+                    " Installation history could not be saved: {error}"
+                ));
+            }
             if let Ok(mut current) = current.lock() {
                 *current = Some(status.clone());
             }
@@ -215,11 +216,17 @@ async fn execute_install(
     })
     .await;
     match result {
-        Ok(status) => {
+        Ok(mut status) => {
+            if let Err(error) = library.update(&status) {
+                status.message.push_str(&format!(
+                    " Installation history could not be saved: {error}"
+                ));
+            }
             // The moment the seven days start mattering: the build is on a phone. A failed or
             // cancelled install leaves the waiting record untouched, so a later attempt still has
             // it, and a build that never installed is never counted down.
-            if status.stage == job::Stage::Installed
+            if !library_backed
+                && status.stage == job::Stage::Installed
                 && let Some(mut record) = accounts.take_pending_renewal(&identifier)
             {
                 record.app_name = app_name.clone();
@@ -236,6 +243,7 @@ async fn execute_install(
         }
         Err(_) => {
             let recovered = job::recover(&journal(&app)?)?;
+            library.recover(recovered.as_ref())?;
             *owned
                 .current
                 .lock()
@@ -410,42 +418,16 @@ async fn account_sign_ipa(
     app: tauri::AppHandle,
     state: State<'_, orbiter_core::accounts::Accounts>,
 ) -> Result<orbiter_core::signer::Signed, String> {
-    let out_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Cannot locate application storage.")?
-        .join("signed");
-    tracing::info!(operation = "signing", stage = "started");
-    let signed = state
-        .sign_ipa(
-            std::path::PathBuf::from(path),
-            out_dir,
-            orbiter_core::plan::WatchChoice::parse(&watch),
-            // The interface offers a default and a field; the rule about what is usable is here.
-            orbiter_core::signer::marker(&marker),
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            move |step| {
-                // A dropped channel means the window went away; the run finishes regardless.
-                let _ = progress.send(step);
-            },
-        )
-        .await;
-    match &signed {
-        Ok(signed) => {
-            // The same record the interface shows, so a terminal and a screenshot agree.
-            for line in &signed.log {
-                tracing::info!(operation = "signing", detail = %line);
-            }
-            tracing::info!(
-                operation = "signing",
-                stage = "finished",
-                bundles = signed.bundles_signed,
-                removed = signed.removed.len()
-            );
-        }
-        Err(error) => tracing::info!(operation = "signing", stage = "failed", detail = %error),
-    }
-    signed
+    let library = storage(&app)?;
+    let artifact_id =
+        tokio::task::spawn_blocking(move || library.resolve_or_import(&PathBuf::from(path)))
+            .await
+            .map_err(|_| "Library worker stopped.")??;
+    Ok(
+        library_sign(artifact_id, watch, marker, progress, app, state)
+            .await?
+            .signed,
+    )
 }
 #[tauri::command]
 async fn account_forget_signing_key(
@@ -480,7 +462,27 @@ fn main() {
         .manage(Inspection::default())
         .manage(Installations::default())
         .manage(LogCapture::default())
+        .setup(|app| {
+            let result = storage(app.handle()).and_then(|library| {
+                let recovered = job::recover(&journal(app.handle())?).unwrap_or_else(|_| {
+                    tracing::warn!(operation = "library-recovery", "Unreadable installation journal; interrupted library attempts will be marked unknown.");
+                    None
+                });
+                library.recover(recovered.as_ref())
+            });
+            if let Err(error) = result {
+                tracing::warn!(operation = "library-recovery", detail = %error);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            library_list,
+            library_import,
+            library_open,
+            library_remove,
+            library_prepare_install,
+            library_prepare_provisioning,
+            library_sign,
             account_status,
             account_sign_in,
             account_answer,

@@ -1785,3 +1785,291 @@
     transform: none !important;
   }
 }
+
+@layer components {
+  .library-page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding-bottom: 32px;
+  }
+  .library-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 28px;
+  }
+  .library-heading .page-title {
+    margin-bottom: 8px;
+  }
+  .library-heading > div,
+  .library-row > div,
+  .library-version > div {
+    min-width: 0;
+  }
+  .library-heading > button {
+    flex-shrink: 0;
+  }
+  .library-search {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    border-radius: var(--radius-control);
+    padding: 0 14px;
+    margin: 24px 0;
+  }
+  .library-search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    padding: 12px 0;
+  }
+  .library-rows {
+    display: grid;
+    gap: 12px;
+  }
+  .library-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 24px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .library-row:hover {
+    border-color: var(--color-line-strong);
+    background: var(--color-surface-soft);
+  }
+  .library-row h2,
+  .library-confirm h2 {
+    font-size: var(--text-section);
+    font-weight: 650;
+    overflow-wrap: anywhere;
+  }
+  .library-row p {
+    margin-top: 6px;
+  }
+  .library-row .app-icon {
+    flex: 0 0 56px;
+    width: 56px;
+    height: 56px;
+  }
+  .library-wrap {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+  }
+  .library-empty {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    gap: 16px;
+    text-align: center;
+    padding: 64px 32px;
+  }
+  .library-empty h2 {
+    font-size: var(--text-section);
+    font-weight: 650;
+  }
+  .library-tabs {
+    display: flex;
+    gap: 8px;
+    margin: 24px 0;
+    flex-wrap: wrap;
+  }
+  .library-tabs button {
+    border: 1px solid var(--color-line);
+    padding: 9px 16px;
+    border-radius: var(--radius-control);
+  }
+  .library-tabs button[aria-pressed="true"] {
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+  .library-card {
+    padding: 24px;
+  }
+  .library-version {
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 24px 0;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .library-version p {
+    margin-top: 8px;
+  }
+  .library-version details {
+    margin-top: 10px;
+  }
+  .library-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .library-version > .library-actions {
+    flex: 0 0 220px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+  }
+  .library-actions a {
+    margin-top: 0;
+    justify-content: center;
+    text-align: center;
+    text-decoration: none;
+    padding: 10px 14px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-control);
+  }
+  .library-actions a[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .library-storage {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    color: var(--color-ink-soft);
+    margin-top: 24px;
+    font-size: var(--text-caption);
+  }
+  .library-results {
+    padding: 16px 24px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+    margin: 16px 0;
+    overflow-wrap: anywhere;
+  }
+  .library-results li {
+    margin: 8px 0;
+  }
+  .library-confirm {
+    padding: 24px;
+    margin-top: 24px;
+    border-color: var(--color-warning-line);
+  }
+  .library-confirm p {
+    margin: 16px 0;
+  }
+  .library-confirm button {
+    padding: 10px 16px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-control);
+  }
+  @media (max-width: 760px) {
+    .library-heading,
+    .library-version {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .library-version > .library-actions {
+      flex-basis: auto;
+      flex-direction: row;
+    }
+    .library-row {
+      padding: 18px;
+      gap: 14px;
+    }
+  }
+}
+
+@layer components {
+  .library-heading .text-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .library-heading .page-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .library-results a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+
+@layer components {
+  .library-drop-zone {
+    padding: 18px 20px;
+    margin-bottom: 24px;
+    border: 1px dashed var(--color-line-strong);
+    border-radius: var(--radius-panel);
+    color: var(--color-ink-soft);
+    text-align: center;
+    background: var(--color-surface-soft);
+  }
+  .library-page[data-dragging="true"] .library-drop-zone {
+    border-style: solid;
+    border-color: var(--color-focus);
+    background: var(--color-surface-tint);
+    color: var(--color-ink-strong);
+    outline: 2px solid var(--color-focus);
+    outline-offset: 3px;
+  }
+  .library-app-heading {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .library-app-heading > div:last-child {
+    min-width: 0;
+  }
+  .library-icon {
+    flex: 0 0 64px;
+    width: 64px;
+    height: 64px;
+    overflow: hidden;
+    border-radius: 14px;
+  }
+  .library-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+@layer components {
+  .library-version > .library-actions {
+    justify-content: flex-start;
+  }
+  .library-version .library-actions .text-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 14px;
+  }
+  .library-version .library-actions .text-button span {
+    white-space: nowrap;
+  }
+  .library-version .library-actions .text-button svg {
+    flex: none;
+  }
+  .library-results li {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    column-gap: 16px;
+    row-gap: 8px;
+  }
+  .library-import-message {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .library-results a[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

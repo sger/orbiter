@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 
-export type AppRoute = "ipas" | "help" | "settings";
+export type AppRoute = "ipas" | "help" | "settings" | `ipas/${string}`;
 export const routeHref = (route: AppRoute) => `#/${route}`;
 
 function readRoute(): AppRoute {
+  if (/^#\/ipas\/[a-zA-Z0-9/-]+$/.test(window.location.hash))
+    return window.location.hash.slice(2) as AppRoute;
   if (window.location.hash === "#/settings") return "settings";
   return window.location.hash === "#/help" ? "help" : "ipas";
 }

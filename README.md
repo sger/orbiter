@@ -4,7 +4,7 @@ A company IPA desktop workspace for macOS and Windows, built with Rust, Tauri 2,
 
 It exists for one problem: a company team's 100-device allowance is full, so testers outside it cannot install the company build. Orbiter re-signs that build with a tester's own free Apple ID and installs it on their iPhone.
 
-The whole path works and has been run end to end on a physical device: Apple sign-in, device registration, a development certificate whose key stays in this Mac's Keychain, App ID and profile registration, re-signing, installation, and the app launching. **Re-signing on a schedule is not implemented, by design** — a free team's profile expires after seven days, and Orbiter tracks when an installed build runs out and says so, but re-signing is always a click. Nothing here contacts Apple on its own. Federated company accounts are not supported. Windows is unverified.
+The existing signing/install path has previously been run end to end on a physical device: Apple sign-in, device registration, a development certificate whose key stays in this Mac's Keychain, App ID and profile registration, re-signing, installation, and the app launching. **Re-signing on a schedule is not implemented, by design** — a free team's profile expires after seven days, and Orbiter tracks when an installed build runs out and says so, but re-signing is always a click. Nothing here contacts Apple on its own. Federated company accounts are not supported. Windows is unverified.
 
 ## Run
 
@@ -15,7 +15,7 @@ npm ci
 npm run tauri dev
 ```
 
-Choose an IPA or drop one file into the desktop window. The UI reads real metadata through the Rust core. `npm run dev` runs a browser preview; native operations are disabled there. Only real connected-device data is shown; no sample accounts or fabricated results are provided.
+Use **Import IPA** in the IPAs library to save one or more local copies. Open an app to browse versions, installation history, and remembered devices, then open a version to sign or review installation. The UI reads real metadata through the Rust core. `npm run dev` runs a browser preview; native operations are disabled there. Only real connected-device data is shown; no sample accounts or fabricated results are provided.
 
 Run inspection without the desktop shell:
 
@@ -101,3 +101,7 @@ Every step that writes to the Apple account — registering a device, requesting
 ## Device log capture (macOS)
 
 After signing, **Device log → Capture while you reproduce it** streams the connected iPhone's system log and keeps only the lines mentioning the signed build's identifier or app name; every other line the device emits is counted and discarded. Nothing is written to disk, and the capture stops on request, after five minutes, or after 500 matching lines. Use it to see what iOS actually reports when a screen in the re-signed app fails — a denied entitlement, or a service refusing the rewritten bundle identifier — instead of inferring it.
+
+## Persistent app library
+
+The library retains originals and successfully signed outputs in local application storage. History belongs to the reviewed artifact and verified device; it is not a complete inventory of a phone. Removing saved files never uninstalls apps. See [library architecture and verification](docs/app-library.md) for storage, recovery, privacy, and removal behavior. The new import → sign → install → restart → reopen library flow has not yet been validated on a physical device.

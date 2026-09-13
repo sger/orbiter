@@ -39,7 +39,7 @@ const report = {
 test("browser preview keeps native and signing actions unavailable", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/#/ipas/workspace");
   await expect(
     page.getByText("Browser preview.", { exact: false }),
   ).toBeVisible();
@@ -72,6 +72,14 @@ async function nativeMock(
         },
         unregisterCallback: (id: number) => callbacks.delete(id),
         invoke: async (cmd: string, args?: any) => {
+          if (cmd === "library_list")
+            return {
+              apps: [],
+              artifacts: [],
+              devices: [],
+              attempts: [],
+              storage_bytes: 0,
+            };
           if (cmd === "account_status")
             return (
               (window as any).__accountView ?? {
@@ -356,7 +364,7 @@ async function nativeMock(
     },
     { report, mode },
   );
-  await page.goto("/");
+  await page.goto("/#/ipas/workspace");
 }
 test("selected file renders inspection and retains unavailable signing", async ({
   page,
@@ -1440,7 +1448,7 @@ for (const viewport of [
 test("sidebar toggles, follows shortcuts, and preserves the user's choice on resize", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/#/ipas/workspace");
   const sidebar = page.getByRole("complementary", {
     name: "Workspace sidebar",
   });
@@ -1543,7 +1551,7 @@ test("all account dropdowns share geometry and long labels stay within the form"
 test("sidebar accepts additional navigation items without hiding Help or the toggle", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/#/ipas/workspace");
   await page.evaluate(async () => {
     const reactUrl = "/node_modules/.vite/deps/react.js";
     const domUrl = "/node_modules/.vite/deps/react-dom_client.js";
@@ -1602,7 +1610,7 @@ test("app navigation preserves the IPA, form state, and timeline", async ({
   ).toBeFocused();
   await expect(page.getByLabel("Apple account email")).not.toBeVisible();
   await page.goBack();
-  await expect(page).toHaveURL(/#\/ipas$/);
+  await expect(page).toHaveURL(/#\/ipas\/workspace$/);
   await expect(
     page.getByRole("heading", { name: "Synthetic Test App" }),
   ).toBeVisible();

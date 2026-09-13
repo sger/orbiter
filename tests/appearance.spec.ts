@@ -18,7 +18,7 @@ test("appearance defaults to system, reacts to OS changes, and persists an expli
   await page.getByRole("radio", { name: /^Dark/ }).check();
   await page.emulateMedia({ colorScheme: "light" });
   await expect(root).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("link", { name: "IPAs", exact: true }).click();
+  await page.goto("/#/ipas/workspace");
   await expect(root).toHaveAttribute("data-theme", "dark");
   await expect(page.locator(".card.source")).toHaveCSS(
     "background-color",
@@ -40,7 +40,7 @@ for (const mode of ["light", "dark"] as const) {
     page,
   }) => {
     await page.emulateMedia({ colorScheme: mode });
-    await page.goto("/");
+    await page.goto("/#/ipas/workspace");
     const colors = await page
       .locator(".sidebar, .card.source, .text-field input, .select-control")
       .evaluateAll((elements) =>
@@ -122,7 +122,7 @@ test("subtle motion respects the system reduced-motion preference", async ({
     "animation-name",
     "none",
   );
-  await page.getByRole("link", { name: "IPAs", exact: true }).click();
+  await page.goto("/#/ipas/workspace");
   await page.getByRole("button", { name: "What is stored" }).click();
   await expect(page.getByRole("dialog", { name: "Help" })).toHaveCSS(
     "animation-name",
