@@ -166,6 +166,7 @@ pub async fn library_sign(
         .map_err(|_| "Cannot locate application storage.")?
         .join("signed");
     let cleaned_marker = orbiter_core::signer::marker(&marker);
+    tracing::info!(operation = "signing", stage = "started");
     let signed = state
         .sign_ipa(
             path,
@@ -177,7 +178,22 @@ pub async fn library_sign(
                 let _ = progress.send(step);
             },
         )
-        .await?;
+        .await
+        .inspect_err(
+            |error| tracing::info!(operation = "signing", stage = "failed", detail = %error),
+        )?;
+    // The same record the interface shows, so a terminal and a screenshot agree. These lines are
+    // how a signing run is diagnosed after the fact; without them a failure is only ever "it did
+    // not work" by the time anyone asks.
+    for line in &signed.log {
+        tracing::info!(operation = "signing", detail = %line);
+    }
+    tracing::info!(
+        operation = "signing",
+        stage = "finished",
+        bundles = signed.bundles_signed,
+        removed = signed.removed.len()
+    );
     tokio::task::spawn_blocking(move || {
         let artifact = library.retain_signed(
             &artifact_id,
@@ -194,6 +210,7 @@ pub async fn library_sign(
         let _ = std::fs::remove_file(&signed.path);
         let mut signed = signed;
         signed.path = opened.path;
+        tracing::info!(operation = "signing", stage = "retained", artifact = %artifact.id);
         Ok(SavedSigned { signed, artifact })
     })
     .await
