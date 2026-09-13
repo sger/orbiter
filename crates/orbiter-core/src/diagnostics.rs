@@ -4,6 +4,11 @@
 //! whatever personal detail those happen to print. Orbiter does not want that and does not take
 //! it. A capture is explicit, runs only while it is asked to, keeps only lines that mention the
 //! app being diagnosed, holds them in memory, and writes nothing to disk.
+//!
+//! The transport is the syslog relay over usbmuxd. It carries the system and framework messages
+//! about an app, but the app's own `NSLog`/`os_log` output may never reach it — modern iOS routes
+//! those into the unified log (Console.app) instead. The absence of such a line here is therefore
+//! not evidence the code did not run.
 use idevice::{IdeviceError, IdeviceService, provider::UsbmuxdProvider, usbmuxd::UsbmuxdAddr};
 use serde::Serialize;
 use std::{

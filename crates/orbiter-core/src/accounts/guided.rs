@@ -60,6 +60,7 @@ impl Accounts {
                     TeamKind::Paid
                 },
                 watch: Default::default(),
+                injected_dylibs: Vec::new(),
             },
         ))
     }

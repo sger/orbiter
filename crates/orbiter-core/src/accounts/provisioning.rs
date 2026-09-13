@@ -29,6 +29,18 @@
 use super::{Accounts, Preparation, UNAVAILABLE, hostname};
 use crate::domain::errors::{ErrorCode, OperationError, OperationResult};
 
+/// The file names of the libraries to inject, for the plan to name in what it acknowledges. A path
+/// without a readable file name contributes nothing rather than a placeholder.
+fn dylib_names(dylibs: &[std::path::PathBuf]) -> Vec<String> {
+    dylibs
+        .iter()
+        .filter_map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
 impl Accounts {
     /// Register a connected iPhone on the selected team. The first Orbiter operation that writes
     /// to Apple: it requires an explicit acknowledgement and returns no device identifier.
@@ -109,11 +121,12 @@ impl Accounts {
         path: std::path::PathBuf,
         acknowledged: bool,
         watch: crate::plan::WatchChoice,
+        dylibs: Vec<std::path::PathBuf>,
     ) -> OperationResult<Preparation> {
         let _gate = self.1.try_lock().map_err(|_| {
             OperationError::operation_in_progress("Another account operation is already running.")
         })?;
-        self.prepare_provisioning_under_gate(path, acknowledged, watch)
+        self.prepare_provisioning_under_gate(path, acknowledged, watch, dylibs)
             .await
     }
 
@@ -124,6 +137,7 @@ impl Accounts {
         path: std::path::PathBuf,
         acknowledged: bool,
         watch: crate::plan::WatchChoice,
+        dylibs: Vec<std::path::PathBuf>,
     ) -> OperationResult<Preparation> {
         let (generation, mut developer, team_id, free) = {
             let mut inner = self
@@ -175,6 +189,7 @@ impl Accounts {
                     crate::plan::TeamKind::Paid
                 },
                 watch,
+                injected_dylibs: dylib_names(&dylibs),
             },
         );
         if !plan.blockers.is_empty() {
@@ -250,6 +265,7 @@ impl Accounts {
     /// The plan is rebuilt from the same inputs rather than remembered, so the build that is
     /// signed is the build that was reviewed: a different IPA, team, or Watch choice produces a
     /// different plan, and a plan whose profiles were never prepared is refused.
+    #[allow(clippy::too_many_arguments)]
     pub async fn sign_ipa(
         &self,
         path: std::path::PathBuf,
@@ -257,18 +273,20 @@ impl Accounts {
         watch: crate::plan::WatchChoice,
         // Already cleaned by `signer::marker`; `None` leaves every display name alone.
         marker: Option<String>,
+        dylibs: Vec<std::path::PathBuf>,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         progress: impl FnMut(crate::signer::Progress) + Send + 'static,
     ) -> Result<crate::signer::Signed, String> {
         let _gate = self.1.try_lock().map_err(|_| {
             OperationError::operation_in_progress("Another account operation is already running.")
         })?;
-        self.sign_ipa_under_gate(path, out_dir, watch, marker, cancel, progress)
+        self.sign_ipa_under_gate(path, out_dir, watch, marker, dylibs, cancel, progress)
             .await
     }
 
     /// Run the operation while the caller holds the shared account gate.
     /// Preserves the public operation’s validation, side effects, and errors.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn sign_ipa_under_gate(
         &self,
         path: std::path::PathBuf,
@@ -276,6 +294,7 @@ impl Accounts {
         watch: crate::plan::WatchChoice,
         // Already cleaned by `signer::marker`; `None` leaves every display name alone.
         marker: Option<String>,
+        dylibs: Vec<std::path::PathBuf>,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
         progress: impl FnMut(crate::signer::Progress) + Send + 'static,
     ) -> Result<crate::signer::Signed, String> {
@@ -325,6 +344,7 @@ impl Accounts {
                         crate::plan::TeamKind::Paid
                     },
                     watch,
+                    injected_dylibs: dylib_names(&dylibs),
                 },
             );
             crate::signer::sign(
@@ -334,6 +354,7 @@ impl Accounts {
                 &profiles,
                 &identity,
                 marker.as_deref(),
+                &dylibs,
                 &cancel,
                 progress,
             )

@@ -7,11 +7,13 @@ import {
   LoaderCircle,
   Smartphone,
   Upload,
+  X,
 } from "lucide-react";
 import { Checkbox } from "../../components/ui/Checkbox";
 import { Select } from "../../components/ui/Select";
 import { TextField } from "../../components/ui/TextField";
 import { Accounts } from "../team/Accounts";
+import { DeviceLog } from "../diagnose/DeviceLog";
 import { Devices } from "../device/Devices";
 import { AppIcon } from "../library/AppIcon";
 import { useLibraryDrop } from "../library/useLibraryDrop";
@@ -64,6 +66,8 @@ export function GuidedWorkspace({
   const importLock = useRef(false);
   const [watch, setWatch] = useState<WatchChoice>("undecided"),
     [marker, setMarker] = useState("test");
+  // Absolute paths of libraries to inject at re-sign; the plan states this as a consequence.
+  const [dylibs, setDylibs] = useState<string[]>([]);
   const [consents, setConsents] = useState<Consents>(noConsent),
     [accepted, setAccepted] = useState(false);
   const [withdrawAck, setWithdrawAck] = useState(false);
@@ -80,6 +84,7 @@ export function GuidedWorkspace({
     `${accountView?.account ?? ""}/${accountView?.selected_team ?? ""}/${accountView?.stage ?? ""}`,
     watch,
     marker,
+    dylibs,
   );
   const locked = flow.busy || accountBusy || importing;
   useEffect(() => {
@@ -95,6 +100,11 @@ export function GuidedWorkspace({
   const app = item?.report.bundles.find(
     (bundle) => bundle.path === item.report.main_path,
   );
+  // The identifier this build was made from — used to tell the signed build's log lines from the
+  // company build's when both are installed. Empty until an original is selected.
+  const originalIdentifier = selected?.report.bundles.find(
+    (bundle) => bundle.path === selected.report.main_path,
+  )?.identifier;
   const selectedTeam = accountView?.teams.find(
     (team) => team.id === accountView.selected_team,
   );
@@ -508,6 +518,61 @@ export function GuidedWorkspace({
                     Leave empty to keep the original display name. Required
                     capability changes are shown before signing.
                   </p>
+                  {/* Injected libraries load at launch and run with the app's entitlements. This is
+                  stated in the review's consequences too, where it is acknowledged; the control only
+                  chooses them. The original IPA is still never written to. */}
+                  <div className="inject">
+                    <button
+                      className="text-button"
+                      disabled={locked}
+                      onClick={() =>
+                        void (async () => {
+                          const picked = await open({
+                            multiple: true,
+                            directory: false,
+                            filters: [
+                              { name: "Dynamic library", extensions: ["dylib"] },
+                            ],
+                          });
+                          if (!picked) return;
+                          const chosen = Array.isArray(picked) ? picked : [picked];
+                          setDylibs((current) => [
+                            ...current,
+                            ...chosen.filter((path) => !current.includes(path)),
+                          ]);
+                        })()
+                      }
+                    >
+                      Add libraries…
+                    </button>
+                    {dylibs.length === 0 ? (
+                      <span>No libraries injected.</span>
+                    ) : (
+                      <ul className="inject-list">
+                        {dylibs.map((path) => (
+                          <li key={path}>
+                            {path.split(/[\\/]/).pop() ?? path}
+                            <button
+                              aria-label={`Remove ${path.split(/[\\/]/).pop() ?? path}`}
+                              className="text-button"
+                              disabled={locked}
+                              onClick={() =>
+                                setDylibs((current) =>
+                                  current.filter((other) => other !== path),
+                                )
+                              }
+                            >
+                              <X size={13} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <p className="hint">
+                    Optional. Libraries load at launch and run with the app's
+                    entitlements; the review lists this before you sign.
+                  </p>
                 </details>
                 <button
                   className="primary"
@@ -862,6 +927,18 @@ export function GuidedWorkspace({
                     </p>
                   )}
                   <ExpiryLine expiry={expiry} variant="banner" />
+                  {/* The signed build's own log, filtered to it, to answer why a screen in the
+                  re-signed app failed — the whole device log is read and dropped, never shown. */}
+                  {deviceId !== null && app && (
+                    <section className="card diagnostics">
+                      <DeviceLog
+                        deviceId={deviceId}
+                        subjects={[app.identifier, app.name].filter(Boolean)}
+                        superseded={[originalIdentifier ?? ""].filter(Boolean)}
+                        disabled={locked}
+                      />
+                    </section>
+                  )}
                 </>
               )}
               {flow.stage === "result" && flow.job?.stage !== "installed" && (

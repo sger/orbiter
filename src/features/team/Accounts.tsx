@@ -28,6 +28,7 @@ export function Accounts({
   paused,
   deviceId,
   ipaPath,
+  dylibs = [],
   hasWatchApp,
   onPrepared,
   onStatus,
@@ -40,6 +41,8 @@ export function Accounts({
   paused: boolean;
   deviceId: number | null;
   ipaPath: string | null;
+  /// Absolute paths of libraries to inject, so the review's plan states the consequence too.
+  dylibs?: string[];
   /// Whether the selected IPA contains a Watch app, so the choice is only asked when it applies.
   hasWatchApp: boolean;
   onPrepared: (preparation: Preparation | null) => void;
@@ -264,8 +267,8 @@ export function Accounts({
                 );
               }}
             >
-              <label htmlFor="verification-code">Verification code</label>
-              <input
+              <TextField
+                label="Verification code"
                 id="verification-code"
                 inputMode="numeric"
                 autoComplete="one-time-code"
@@ -677,8 +680,13 @@ export function Accounts({
                     setProvError(null);
                     setPreparation(null);
                     (artifactId
-                      ? libraryPrepareProvisioning(artifactId, provAck, watch)
-                      : prepareProvisioning(ipaPath!, provAck, watch)
+                      ? libraryPrepareProvisioning(
+                          artifactId,
+                          provAck,
+                          watch,
+                          dylibs,
+                        )
+                      : prepareProvisioning(ipaPath!, provAck, watch, dylibs)
                     )
                       .then((result) => {
                         if (!mounted.current) return;
