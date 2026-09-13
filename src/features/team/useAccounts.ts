@@ -9,6 +9,7 @@ import type {
   WatchChoice,
 } from "../../types";
 import type { StageState } from "../../state/pipeline";
+import { failure } from "../../ipc/failure";
 const initial: AccountView = {
   stage: "signed_out",
   account: null,
@@ -62,13 +63,16 @@ export function useAccounts({
   const desktop = isTauri();
   // Backend messages are curated and allowlisted, and they name the actual cause — an account
   // limit, a refusal, what to check. Showing a generic sentence instead hides all of it.
+  //
+  // Normalising goes through the shared `failure` helper rather than a second copy of the same
+  // reading, so both wire shapes are understood in one place. The caller's own fallback is kept
+  // for a rejection of neither shape: it names the action that failed, which is more than the
+  // helper's generic sentence could.
   function reason(error: unknown, fallback: string) {
-    const text =
-      typeof error === "string"
-        ? error.trim()
-        : error && typeof error === "object" && "message" in error
-          ? String(error.message)
-          : "";
+    const known =
+      typeof error === "string" ||
+      (!!error && typeof error === "object" && "message" in error);
+    const text = known ? failure(error).message.trim() : "";
     return text ? text.slice(0, 600) : fallback;
   }
   useEffect(() => {
@@ -164,11 +168,11 @@ export function useAccounts({
     try {
       const next = await action();
       if (mounted.current) setView(next);
-    } catch (failure) {
+    } catch (rejection) {
       if (mounted.current)
         setError(
           reason(
-            failure,
+            rejection,
             "The account action did not complete. Check the current status and retry.",
           ),
         );

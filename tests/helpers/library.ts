@@ -157,7 +157,10 @@ export async function mock(page: Page) {
           };
         }
         if (cmd === "account_status") return w.__account ?? signedOut;
-        if (cmd === "account_sign_in")
+        if (cmd === "account_sign_in") {
+          // A sign-in Apple refused in a way Orbiter could not classify. The command resolves
+          // with a failed view rather than rejecting, which is what the real one does.
+          if (w.__signInFailure) return (w.__account = w.__signInFailure);
           return (w.__account = {
             stage: w.__challenge ? "two_factor" : "signed_in",
             account: "test@example.invalid",
@@ -174,6 +177,7 @@ export async function mock(page: Page) {
               },
             ],
           });
+        }
         if (cmd === "account_select_team") {
           w.__account.selected_team = args.id;
           return w.__account;

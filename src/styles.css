@@ -975,6 +975,33 @@
     overflow-x: auto;
   }
 
+  /* What failed, for a person to copy and send. Styled like the signing log: the same quiet,
+     foldable, monospaced shape, because it is the same kind of thing — evidence, not advice. */
+  .diagnostic {
+    margin-top: 10px;
+    font-size: var(--text-label);
+    color: var(--color-ink-soft);
+  }
+  .diagnostic summary {
+    cursor: pointer;
+    padding: 6px 0;
+  }
+  /* A chain of steps that can be longer than the panel, so it wraps rather than stretching it. */
+  .diagnostic code {
+    display: block;
+    padding: 10px 12px;
+    border: 1px solid var(--color-line);
+    border-radius: 6px;
+    background: var(--color-surface-soft);
+    font-size: var(--text-caption);
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+  .diagnostic .hint {
+    margin-top: 4px;
+  }
+
   /* The one manual step iOS still requires after a signed build lands. */
   .install-next {
     margin-top: 12px;

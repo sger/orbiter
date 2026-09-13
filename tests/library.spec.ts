@@ -83,6 +83,54 @@ test("saved version workspace preserves form state across navigation and duplica
   ).toHaveCount(1);
 });
 
+test("an unrecognised sign-in failure offers its technical detail, and only then", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await page.getByRole("link", { name: "Open version", exact: true }).click();
+  await page.getByRole("button", { name: "Check app & iPhone" }).click();
+  await page
+    .getByRole("button", { name: "Re-sign with my Apple account" })
+    .click();
+
+  // Nothing has failed yet, so there is nothing to report.
+  await expect(page.getByText("Technical details")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    (window as any).__signInFailure = {
+      stage: "failed",
+      account: null,
+      selected_team: null,
+      challenge: null,
+      teams: [],
+      message:
+        "Apple account authentication or two-factor verification failed. Apple's sign-in response did not carry the password-verification fields this step needs.",
+      diagnostic:
+        "Failed to parse initial login response ← AuthWithMessage(-22320)",
+    };
+  });
+  await page.getByLabel("Apple account email").fill("local@example.invalid");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByRole("checkbox", { name: /I agree to authenticate/ })
+    .setChecked(true);
+  await page.getByRole("button", { name: "Sign in to Apple" }).click();
+
+  await expect(
+    page.getByText("did not carry the password-verification fields"),
+  ).toBeVisible();
+  // The detail is folded away until asked for: it is evidence, not advice.
+  const details = page.getByText("Failed to parse initial login response ←");
+  await expect(details).not.toBeVisible();
+  await page.getByText("Technical details").click();
+  await expect(details).toBeVisible();
+  await expect(page.getByText("AuthWithMessage(-22320)")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Copy diagnostics" }),
+  ).toBeVisible();
+});
+
 test("retained signed build requires review, records exact artifact, and survives restart", async ({
   page,
 }) => {

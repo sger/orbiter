@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { libraryPrepareProvisioning } from "../../ipc/commands";
 import { TextField } from "../../components/ui/TextField";
 import { Checkbox } from "../../components/ui/Checkbox";
@@ -101,6 +101,12 @@ export function Accounts({
     reason,
     command,
   } = useAccounts({ paused, deviceId, ipaPath, onPrepared, onStatus });
+  // Confirmation for the copy button, reset whenever the diagnostic changes so "Copied" can never
+  // describe a failure other than the one on screen.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setCopied(false);
+  }, [view.diagnostic]);
   useEffect(() => {
     onBusy?.(busy || registering || certBusy || provBusy);
   }, [busy, registering, certBusy, provBusy, onBusy]);
@@ -210,6 +216,33 @@ export function Accounts({
             ? view.message
             : "Apple sign-in is available in the desktop app."}
         </p>
+      )}
+      {/* Present only after a failure Orbiter could not classify further. The message above says
+          what to do; this says what happened, which is what makes an unrecognised failure
+          reportable instead of a dead end. It is always shown as selectable text as well as
+          copied, because a webview can refuse clipboard access and leaving a person with nothing
+          would defeat the point. */}
+      {desktop && view.stage === "failed" && view.diagnostic && (
+        <details className="diagnostic">
+          <summary>Technical details</summary>
+          <code>{view.diagnostic}</code>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(view.diagnostic ?? "")
+                .then(() => setCopied(true))
+                .catch(() => setCopied(false));
+            }}
+          >
+            {copied ? "Copied" : "Copy diagnostics"}
+          </button>
+          <p className="hint">
+            Names the step that failed and any numeric code Apple sent. Contains
+            no password, account address, or text from Apple.
+          </p>
+        </details>
       )}
       {view.challenge && (
         <div className="two-factor">
@@ -740,7 +773,9 @@ export function Accounts({
           Cancel sign-in
         </button>
       )}
-      {(statusError || error) && <p role="alert">{statusError || error}</p>}
+      {/* The action's own error first: the status poller runs every second, so a stale sentence
+          from it would otherwise sit on top of the failure a person just caused. */}
+      {(error || statusError) && <p role="alert">{error || statusError}</p>}
     </section>
   );
 }

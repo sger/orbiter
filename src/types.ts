@@ -108,6 +108,9 @@ export type AccountView = {
     numbers: { id: number; label: string }[];
   } | null;
   message: string;
+  /// A redacted technical summary of the last failure, present only when there was one. Absent
+  /// whenever sign-in has not failed, so its presence is what decides whether to offer it.
+  diagnostic?: string | null;
 };
 export type Certificate = {
   reused: boolean;
