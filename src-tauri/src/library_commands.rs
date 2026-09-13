@@ -205,11 +205,14 @@ pub async fn library_sign(
             orbiter_core::plan::WatchChoice::parse(&watch).label().into(),
             cleaned_marker.unwrap_or_default(),
         ).map_err(|e| format!("Signing completed, but saving it to the library failed: {e} The generated output has been retained."))?;
-        // The library is durable before removing this operation's staging output.
-        let opened = library.open(&artifact.id)?;
+        // The library is durable before removing this operation's staging output. `pin` is what
+        // is wanted here and `open` is not: both verify the managed copy's hash, but `open` also
+        // re-inspects the whole archive, and re-reading a 200 MB IPA that was just written to
+        // learn a path it already knows is a minute of nothing.
+        let (_, path, _lease) = library.pin(&artifact.id)?;
         let _ = std::fs::remove_file(&signed.path);
         let mut signed = signed;
-        signed.path = opened.path;
+        signed.path = path.to_string_lossy().into_owned();
         tracing::info!(operation = "signing", stage = "retained", artifact = %artifact.id);
         Ok(SavedSigned { signed, artifact })
     })

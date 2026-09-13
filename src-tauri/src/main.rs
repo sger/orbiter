@@ -194,9 +194,22 @@ async fn execute_install(
     });
     let current = owned.current.clone();
     let history = library.clone();
+    // Transfer progress arrives every 150 ms and the device reports its own percentage on top of
+    // that — a few thousand events for one install. Only a stage change is durable state worth
+    // recording, and asking the library about each tick would re-read and re-validate the whole
+    // manifest on the path that also delivers progress to the window.
+    let recorded = std::sync::Mutex::new(None::<job::Stage>);
     let result = tokio::spawn(async move {
         installation::execute(plan, control, location, move |mut status| {
-            if let Err(error) = history.update(&status) {
+            let changed = recorded
+                .lock()
+                .map(|mut held| {
+                    let changed = *held != Some(status.stage);
+                    *held = Some(status.stage);
+                    changed
+                })
+                .unwrap_or(true);
+            if changed && let Err(error) = history.update(&status) {
                 status.message.push_str(&format!(
                     " Installation history could not be saved: {error}"
                 ));
