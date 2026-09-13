@@ -3,7 +3,8 @@ export interface LibraryApp {
   id: string;
   identifier: string;
   name: string;
-  icon_data_url: string | null;
+  /// The icon's hash; its bytes are fetched separately and cached in the window.
+  icon_sha: string | null;
   added_unix: number;
 }
 export interface Artifact {

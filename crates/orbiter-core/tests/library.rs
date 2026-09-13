@@ -526,3 +526,81 @@ fn a_library_from_an_older_orbiter_opens_and_a_newer_one_is_refused() {
     fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     assert!(Library::new(dir.path().into()).snapshot().is_err());
 }
+
+/// An IPA whose main bundle declares a one-pixel PNG icon, so the icon path is exercised.
+fn with_icon(content: &str) -> tempfile::NamedTempFile {
+    let mut f = tempfile::NamedTempFile::new().unwrap();
+    let mut z = ZipWriter::new(&mut f);
+    let info = br#"<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>test.library</string><key>CFBundleName</key><string>Library Test</string><key>CFBundleExecutable</key><string>App</string><key>CFBundleIconFiles</key><array><string>Icon</string></array></dict></plist>"#;
+    let mut macho = vec![0; 56];
+    for (offset, value) in [
+        (0, 0xfeedfacf_u32),
+        (4, 0x100000c),
+        (16, 1),
+        (20, 24),
+        (32, 0x2c),
+        (36, 24),
+    ] {
+        macho[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let png: Vec<u8> = {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
+            .unwrap()
+    };
+    for (name, bytes) in [
+        ("Payload/A.app/Info.plist", info.as_slice()),
+        ("Payload/A.app/App", &macho),
+        ("Payload/A.app/Icon.png", &png),
+        ("Payload/A.app/content", content.as_bytes()),
+    ] {
+        z.start_file(name, SimpleFileOptions::default()).unwrap();
+        z.write_all(bytes).unwrap();
+    }
+    z.finish().unwrap();
+    f
+}
+
+#[test]
+fn an_icon_is_kept_beside_the_artifacts_and_never_inside_the_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let f = with_icon("one");
+    lib.import(f.path()).unwrap();
+
+    let app = lib.snapshot().unwrap().apps.pop().unwrap();
+    let sha = app.icon_sha.expect("the declared icon was read");
+    // A 2 MiB icon is ~2.8 MiB of base64. Storing that inline capped the library at around
+    // twenty apps and re-sent every icon on every refresh.
+    let raw = fs::read_to_string(dir.path().join("manifest.json")).unwrap();
+    assert!(!raw.contains("data:image/png"));
+    assert!(raw.contains(&sha));
+    assert!(
+        dir.path()
+            .join("icons")
+            .join(format!("{sha}.png"))
+            .is_file()
+    );
+
+    let restarted = Library::new(dir.path().into());
+    assert!(
+        restarted
+            .icon(&sha)
+            .unwrap()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+    // A missing or unreadable icon is a placeholder, never an error.
+    fs::remove_file(dir.path().join("icons").join(format!("{sha}.png"))).unwrap();
+    assert_eq!(restarted.icon(&sha).unwrap(), None);
+    assert!(restarted.icon("not-a-hash").is_err());
+
+    // Removing the app takes its icon with it.
+    let f2 = with_icon("one");
+    lib.import(f2.path()).unwrap();
+    let app_id = lib.snapshot().unwrap().apps[0].id.clone();
+    lib.remove(&app_id, None).unwrap();
+    assert!(!dir.path().join("icons").join(format!("{sha}.png")).exists());
+    assert!(lib.snapshot().unwrap().storage_warning.is_none());
+}

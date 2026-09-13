@@ -260,7 +260,7 @@ export function LibraryPage({
             </a>
           )}
           <div className="library-app-heading">
-            {app && <AppIcon src={app.icon_data_url} name={app.name} />}
+            {app && <AppIcon sha={app.icon_sha} name={app.name} />}
             <div>
               <h1 className="page-title" tabIndex={-1} title={app?.name}>
                 {app?.name ?? (appId ? "App details" : "IPAs")}
@@ -536,7 +536,7 @@ export function LibraryPage({
                     href={`#/ipas/${a.id}`}
                     key={a.id}
                   >
-                    <AppIcon src={a.icon_data_url} name={a.name} />
+                    <AppIcon sha={a.icon_sha} name={a.name} />
                     <div>
                       <h2>{a.name}</h2>
                       <p className="library-wrap">{a.identifier}</p>

@@ -4,6 +4,7 @@ use crate::{
     Report,
     installation::job::{JobStatus, Stage},
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -35,7 +36,13 @@ pub struct App {
     pub id: String,
     pub identifier: String,
     pub name: String,
-    pub icon_data_url: Option<String>,
+    /// The icon's own SHA-256; the bytes live beside the artifacts, not in this file.
+    ///
+    /// They used to be a base64 data URL stored inline. A single icon may be 2 MiB, which is
+    /// ~2.8 MiB of base64, against a 64 MiB manifest — so a library filled up at around twenty
+    /// apps, and every refresh re-sent every icon to the window.
+    #[serde(default)]
+    pub icon_sha: Option<String>,
     pub added_unix: i64,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -101,6 +108,8 @@ struct Manifest {
     attempts: Vec<Attempt>,
     #[serde(default)]
     pending_removals: Vec<String>,
+    #[serde(default)]
+    pending_icon_removals: Vec<String>,
 }
 impl Default for Manifest {
     fn default() -> Self {
@@ -112,6 +121,7 @@ impl Default for Manifest {
             devices: vec![],
             attempts: vec![],
             pending_removals: vec![],
+            pending_icon_removals: vec![],
         }
     }
 }
@@ -241,6 +251,14 @@ impl Library {
                 return Err("Invalid library artifact hash.".into());
             }
         }
+        if m.apps
+            .iter()
+            .filter_map(|a| a.icon_sha.as_deref())
+            .chain(m.pending_icon_removals.iter().map(String::as_str))
+            .any(|hash| !valid_hash(hash))
+        {
+            return Err("Invalid library icon hash.".into());
+        }
         let unique = |ids: Vec<&str>| {
             let count = ids.len();
             ids.into_iter()
@@ -310,6 +328,51 @@ impl Library {
         }
         Ok(self.root.join("artifacts").join(format!("{hash}.ipa")))
     }
+    fn icon_file(&self, hash: &str) -> Result<PathBuf> {
+        if !valid_hash(hash) {
+            return Err("Invalid library icon hash.".into());
+        }
+        Ok(self.root.join("icons").join(format!("{hash}.png")))
+    }
+    /// Save an icon's bytes under their own hash and return it. Identical icons share one file.
+    fn keep_icon(&self, data_url: &str) -> Result<String> {
+        let encoded = data_url
+            .strip_prefix("data:image/png;base64,")
+            .ok_or("Unsupported icon encoding.")?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|_| "Unreadable icon.".to_string())?;
+        let hash = format!("{:x}", Sha256::digest(&bytes));
+        let path = self.icon_file(&hash)?;
+        if path.exists() {
+            return Ok(hash);
+        }
+        let parent = path.parent().ok_or("Invalid library storage location.")?;
+        fs::create_dir_all(parent).map_err(|_| "Cannot create library icon storage.")?;
+        let mut temp =
+            tempfile::NamedTempFile::new_in(parent).map_err(|_| "Cannot write a library icon.")?;
+        temp.write_all(&bytes)
+            .and_then(|_| temp.flush())
+            .map_err(|_| "Cannot write a library icon.")?;
+        temp.persist(path)
+            .map_err(|_| "Cannot save a library icon.")?;
+        Ok(hash)
+    }
+    /// The icon bytes for a hash, as the data URL the window can render.
+    pub fn icon(&self, hash: &str) -> Result<Option<String>> {
+        let path = self.icon_file(hash)?;
+        // An icon is decoration. A missing or unreadable one is a placeholder, never an error.
+        let Ok(bytes) = fs::read(&path) else {
+            return Ok(None);
+        };
+        if bytes.len() > 4 * 1024 * 1024 {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )))
+    }
     pub fn snapshot(&self) -> Result<Snapshot> {
         self.snapshot_at(std::time::SystemTime::now())
     }
@@ -335,7 +398,7 @@ impl Library {
             Err(_) => return Err("Cannot read library storage usage.".into()),
         }
         Ok(Snapshot {
-            storage_warning: (!m.pending_removals.is_empty()).then(|| "Some requested file removals are still pending. Check disk permissions and restart Orbiter to retry cleanup.".into()),
+            storage_warning: (!m.pending_removals.is_empty() || !m.pending_icon_removals.is_empty()).then(|| "Some requested file removals are still pending. Check disk permissions and restart Orbiter to retry cleanup.".into()),
             storage_bytes,
             expiries,
             apps: m.apps,
@@ -375,8 +438,8 @@ impl Library {
         let app_id = if let Some(app) = m.apps.iter_mut().find(|a| a.identifier == main.identifier)
         {
             app.name = main.name.clone();
-            if report.icon_data_url.is_some() {
-                app.icon_data_url = report.icon_data_url.clone();
+            if let Some(icon) = &report.icon_data_url {
+                app.icon_sha = self.keep_icon(icon).ok();
             }
             app.id.clone()
         } else {
@@ -385,7 +448,10 @@ impl Library {
                 id: app_id.clone(),
                 identifier: main.identifier.clone(),
                 name: main.name.clone(),
-                icon_data_url: report.icon_data_url.clone(),
+                icon_sha: report
+                    .icon_data_url
+                    .as_deref()
+                    .and_then(|icon| self.keep_icon(icon).ok()),
                 added_unix: now(),
             });
             app_id
@@ -530,13 +596,16 @@ impl Library {
             crate::inspect(&path, &AtomicBool::new(false), |_| {}).map_err(|e| e.to_string())?;
         if artifact.source_id.is_none()
             && let Some(icon) = &report.icon_data_url
+            && let Ok(hash) = self.keep_icon(icon)
         {
             let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
             let mut m = self.read()?;
+            // Comparing two hashes rather than two multi-megabyte strings, which is what this
+            // was doing on every open.
             if let Some(app) = m.apps.iter_mut().find(|a| a.id == artifact.app_id)
-                && app.icon_data_url.as_ref() != Some(icon)
+                && app.icon_sha.as_deref() != Some(hash.as_str())
             {
-                app.icon_data_url = Some(icon.clone());
+                app.icon_sha = Some(hash);
                 self.save(&m)?;
             }
         }
@@ -628,7 +697,18 @@ impl Library {
                 }
             }
         } else {
+            // The app's icon goes with it, unless another app happens to have the same one.
+            let icon = m
+                .apps
+                .iter()
+                .find(|a| a.id == app_id)
+                .and_then(|a| a.icon_sha.clone());
             m.apps.retain(|a| a.id != app_id);
+            if let Some(icon) = icon
+                && !m.apps.iter().any(|a| a.icon_sha.as_deref() == Some(&icon))
+            {
+                m.pending_icon_removals.push(icon);
+            }
             m.artifacts.retain(|a| a.app_id != app_id);
             m.attempts.retain(|a| a.app_id != app_id);
         }
@@ -637,8 +717,26 @@ impl Library {
         self.finish_removals(&mut m)
     }
     fn finish_removals(&self, m: &mut Manifest) -> Result<()> {
-        if m.pending_removals.is_empty() {
+        if m.pending_removals.is_empty() && m.pending_icon_removals.is_empty() {
             return Ok(());
+        }
+        let mut icons = Vec::new();
+        for hash in &m.pending_icon_removals {
+            // A repeat import may have reintroduced the same icon after interrupted cleanup.
+            if m.apps.iter().any(|a| a.icon_sha.as_deref() == Some(hash)) {
+                continue;
+            }
+            match fs::remove_file(self.icon_file(hash)?) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // An icon is decoration; failing to delete one must not stop the cleanup that
+                // matters, so it is kept on the list and tried again next time.
+                Err(_) => icons.push(hash.clone()),
+            }
+        }
+        m.pending_icon_removals = icons;
+        if m.pending_removals.is_empty() {
+            return self.save(m);
         }
         for hash in &m.pending_removals {
             // A repeat import may have reintroduced these bytes after interrupted cleanup.

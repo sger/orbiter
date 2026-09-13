@@ -36,6 +36,15 @@ pub async fn library_expiry(
         .await
         .map_err(|_| "Library worker stopped.")?
 }
+/// One app icon's bytes. Fetched per hash and cached in the window, so a library of many apps
+/// does not re-send every icon on every refresh.
+#[tauri::command]
+pub async fn library_icon(sha: String, app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let library = storage(&app)?;
+    tokio::task::spawn_blocking(move || library.icon(&sha))
+        .await
+        .map_err(|_| "Library worker stopped.")?
+}
 #[tauri::command]
 pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<Opened, String> {
     let library = storage(&app)?;

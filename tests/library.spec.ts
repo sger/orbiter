@@ -218,6 +218,8 @@ async function mock(page: Page) {
             ) ?? null
           );
         }
+        if (cmd === "library_icon")
+          return (w.__icons ?? {})[args.sha] ?? null;
         if (cmd === "library_list") {
           if (w.__corrupt)
             throw "Library storage is corrupt. Restore the manifest.";
@@ -841,11 +843,12 @@ test("cached app icons appear in rows and details with a fallback for unreadable
   await mock(page);
   await imported(page);
   await page.evaluate(() => {
-    (window as any).__library.apps[0].icon_data_url =
+    const png =
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
-    (window as any).__workspaceIcon = (
-      window as any
-    ).__library.apps[0].icon_data_url;
+    // The manifest holds a hash; the bytes are fetched once per hash and cached in the window.
+    (window as any).__icons = { "icon-hash": png };
+    (window as any).__library.apps[0].icon_sha = "icon-hash";
+    (window as any).__workspaceIcon = png;
     window.dispatchEvent(new Event("library-changed"));
   });
   await expect(
@@ -957,11 +960,11 @@ test("an app that was never installed counts down from nothing", async ({
   await imported(page);
   // A saved file is a fact about this Mac. Counting down from it would claim an installation.
   await expect(page.locator(".renewal")).toHaveCount(0);
-  await expect(page.getByText("No successful installation recorded")).toHaveCount(
-    1,
-  );
   await page.getByRole("link", { name: "All apps" }).click();
   await expect(page.locator(".renewal")).toHaveCount(0);
+  await expect(
+    page.locator(".library-row"),
+  ).toContainText("No successful installation recorded");
 });
 
 test("a live install counts down quietly and an expired one is announced", async ({

@@ -135,6 +135,9 @@ export const libraryChanged = () =>
 /// Where the seven days stand for one saved build, or null when it was never installed.
 export const libraryExpiry = (artifactId: string, teamId: string | null) =>
   invoke<LibraryExpiry | null>("library_expiry", { artifactId, teamId });
+/// One app icon, by its hash. Null when the file is missing or unreadable.
+export const libraryIcon = (sha: string) =>
+  invoke<string | null>("library_icon", { sha });
 export const libraryList = () => invoke<LibrarySnapshot>("library_list");
 export const libraryImport = (path: string) =>
   invoke<Imported>("library_import", { path });
