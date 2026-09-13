@@ -604,3 +604,61 @@ fn an_icon_is_kept_beside_the_artifacts_and_never_inside_the_manifest() {
     assert!(!dir.path().join("icons").join(format!("{sha}.png")).exists());
     assert!(lib.snapshot().unwrap().storage_warning.is_none());
 }
+
+#[test]
+fn unreferenced_bytes_are_named_and_only_removed_when_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let f = fixture("one");
+    let imported = lib.import(f.path()).unwrap();
+    let kept = lib.open(&imported.artifact_id).unwrap().path;
+
+    // What an interrupted copy leaves behind: bytes under a valid name that nothing points at.
+    let stray = dir
+        .path()
+        .join("artifacts")
+        .join(format!("{}.ipa", "a".repeat(64)));
+    fs::write(&stray, b"unreferenced").unwrap();
+    // And something that is not Orbiter's to judge, which must survive either way.
+    let foreign = dir.path().join("artifacts").join("notes.txt");
+    fs::write(&foreign, b"not mine").unwrap();
+
+    let snapshot = lib.snapshot().unwrap();
+    assert_eq!(snapshot.unreferenced_bytes, 12);
+    // Startup cleanup finishes removals a person asked for. It does not sweep.
+    lib.recover(None).unwrap();
+    assert!(stray.exists());
+
+    let freed = lib.reclaim().unwrap();
+    assert_eq!(freed, 12);
+    assert!(!stray.exists());
+    assert!(foreign.exists());
+    assert!(std::path::Path::new(&kept).exists());
+    assert_eq!(lib.snapshot().unwrap().unreferenced_bytes, 0);
+    // Nothing left to reclaim is not a failure.
+    assert_eq!(lib.reclaim().unwrap(), 0);
+}
+
+#[test]
+fn an_import_that_cannot_be_recorded_leaves_no_bytes_behind() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let lib = Library::new(dir.path().into());
+    let first = fixture("one");
+    lib.import(first.path()).unwrap();
+    let before = lib.snapshot().unwrap().storage_bytes;
+
+    // The manifest write fails after the bytes are published.
+    let second = fixture("two");
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o500)).unwrap();
+    let result = lib.import(second.path());
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(result.is_err());
+
+    // An operation cleans up after its own failure, so it leaves no orphan for a person to
+    // wonder about — while bytes from an interrupted run still stay put until they are asked for.
+    let after = lib.snapshot().unwrap();
+    assert_eq!(after.storage_bytes, before);
+    assert_eq!(after.unreferenced_bytes, 0);
+    assert_eq!(after.artifacts.len(), 1);
+}

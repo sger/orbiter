@@ -138,6 +138,8 @@ export const libraryExpiry = (artifactId: string, teamId: string | null) =>
 /// One app icon, by its hash. Null when the file is missing or unreadable.
 export const libraryIcon = (sha: string) =>
   invoke<string | null>("library_icon", { sha });
+/// Delete managed files no record points at, returning the bytes freed.
+export const libraryReclaim = () => invoke<number>("library_reclaim");
 export const libraryList = () => invoke<LibrarySnapshot>("library_list");
 export const libraryImport = (path: string) =>
   invoke<Imported>("library_import", { path });

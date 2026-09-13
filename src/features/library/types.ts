@@ -79,6 +79,8 @@ export interface LibrarySnapshot {
   /// Longest-lived first within each app: the entry a screen leads with is the first for that app.
   expiries: LibraryExpiry[];
   storage_bytes: number;
+  /// Bytes no record points at. Reported, never deleted without being asked.
+  unreferenced_bytes: number;
   storage_warning?: string | null;
 }
 export interface Imported {

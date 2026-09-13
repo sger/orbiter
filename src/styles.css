@@ -2073,3 +2073,14 @@
     cursor: not-allowed;
   }
 }
+
+@layer components {
+  /* The storage line can now carry an action: reclaiming files an interrupted copy left behind. */
+  .library-storage {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+}

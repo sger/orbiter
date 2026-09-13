@@ -134,6 +134,9 @@ pub struct Snapshot {
     pub devices: Vec<Device>,
     pub attempts: Vec<Attempt>,
     pub storage_bytes: u64,
+    /// Bytes on disk that no record points at — left behind when a copy was interrupted. Counted
+    /// and named rather than deleted: Orbiter removes files somebody asked it to remove.
+    pub unreferenced_bytes: u64,
     pub storage_warning: Option<String>,
 }
 /// One successful installation and where its seven days stand.
@@ -209,12 +212,17 @@ impl Library {
     fn read(&self) -> Result<Manifest> {
         let path = self.manifest_path();
         if !path.exists() {
-            if self.root.join("artifacts").exists()
-                && fs::read_dir(self.root.join("artifacts"))
-                    .map_err(|_| "Cannot read library directory.")?
-                    .next()
-                    .is_some()
-            {
+            // Only files named the way this library names them count as "managed files remain".
+            // An import stages its copy in the same directory before touching the manifest, and a
+            // half-written temporary is not evidence that somebody lost their library.
+            let managed = match fs::read_dir(self.root.join("artifacts")) {
+                Ok(entries) => entries
+                    .filter_map(|entry| entry.ok())
+                    .any(|entry| managed_name(&entry.file_name())),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                Err(_) => return Err("Cannot read library directory.".into()),
+            };
+            if managed {
                 return Err("Library manifest is missing but managed files remain. Restore the manifest from a backup; files have not been removed.".into());
             }
             return Ok(Manifest::default());
@@ -382,6 +390,13 @@ impl Library {
         let m = self.read()?;
         let expiries = expiries(&m, now);
         let mut storage_bytes = 0;
+        let mut unreferenced_bytes = 0;
+        let kept: BTreeSet<&str> = m
+            .artifacts
+            .iter()
+            .filter(|a| !a.deleted)
+            .map(|a| a.sha256.as_str())
+            .collect();
         match fs::read_dir(self.root.join("artifacts")) {
             Ok(entries) => {
                 for entry in entries {
@@ -391,6 +406,10 @@ impl Library {
                         .map_err(|_| "Cannot read library file size.")?;
                     if metadata.is_file() {
                         storage_bytes += metadata.len();
+                        if !unreferenced(&entry.file_name(), &kept) {
+                            continue;
+                        }
+                        unreferenced_bytes += metadata.len();
                     }
                 }
             }
@@ -400,6 +419,7 @@ impl Library {
         Ok(Snapshot {
             storage_warning: (!m.pending_removals.is_empty() || !m.pending_icon_removals.is_empty()).then(|| "Some requested file removals are still pending. Check disk permissions and restart Orbiter to retry cleanup.".into()),
             storage_bytes,
+            unreferenced_bytes,
             expiries,
             apps: m.apps,
             artifacts: m.artifacts,
@@ -408,12 +428,16 @@ impl Library {
         })
     }
     pub fn import(&self, source: &Path) -> Result<Imported> {
+        // Copying, hashing and inspecting up to 2 GiB happens before the lock is taken. Holding
+        // it across all of that froze every other library call — including the list the window
+        // refreshes — for the length of the copy, and none of it touches the manifest: it writes
+        // one temporary file that nothing else can see until `publish` renames it.
+        let (temp, hash, report) = self.stage(source)?;
         let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
         let mut m = self.read()?;
         if !self.manifest_path().exists() {
             self.save(&m)?;
         }
-        let (temp, hash, report) = self.stage(source)?;
         if let Some(a) = m
             .artifacts
             .iter()
@@ -464,7 +488,20 @@ impl Library {
         };
         self.publish(temp, &hash)?;
         m.artifacts.push(artifact);
-        self.save(&m)?;
+        if let Err(error) = self.save(&m) {
+            // The bytes are on disk but nothing references them. Removing what this operation
+            // itself just published is an operation cleaning up after its own failure — not the
+            // sweep of unreferenced files that Orbiter deliberately never performs on its own.
+            if !m
+                .artifacts
+                .iter()
+                .any(|a| !a.deleted && a.sha256 == hash && a.id != result.artifact_id)
+                && let Ok(path) = self.file(&hash)
+            {
+                let _ = fs::remove_file(path);
+            }
+            return Err(error);
+        }
         Ok(result)
     }
     fn stage(&self, source: &Path) -> Result<(tempfile::NamedTempFile, String, Report)> {
@@ -759,6 +796,48 @@ impl Library {
         m.pending_removals.clear();
         self.save(m)
     }
+    /// Delete managed files no record points at, and say how many bytes went.
+    ///
+    /// Only ever on request. Startup cleanup finishes removals a person already asked for; bytes
+    /// left behind by an interrupted copy are reported and kept until someone says otherwise,
+    /// because a tool that deletes files nobody asked it to delete cannot be trusted with any.
+    pub fn reclaim(&self) -> Result<u64> {
+        let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
+        let m = self.read()?;
+        let kept: BTreeSet<&str> = m
+            .artifacts
+            .iter()
+            .filter(|a| !a.deleted)
+            .map(|a| a.sha256.as_str())
+            .collect();
+        let pins = PINS.lock().map_err(|_| "Library is unavailable.")?;
+        let mut freed = 0;
+        let entries = match fs::read_dir(self.root.join("artifacts")) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(_) => return Err("Cannot read library storage.".into()),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|_| "Cannot read library storage.")?;
+            if !unreferenced(&entry.file_name(), &kept) {
+                continue;
+            }
+            let path = entry.path();
+            if pins.contains_key(&path) || !path.is_file() {
+                continue;
+            }
+            let size = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+            match fs::remove_file(&path) {
+                Ok(()) => freed += size,
+                Err(_) => {
+                    return Err(
+                        "Some unreferenced files could not be removed. Check permissions.".into(),
+                    );
+                }
+            }
+        }
+        Ok(freed)
+    }
     pub fn device_tag(&self, udid: &str) -> Result<String> {
         let _lock = STORE.lock().map_err(|_| "Library is unavailable.")?;
         let m = self.read()?;
@@ -984,4 +1063,22 @@ fn expiries(m: &Manifest, now: std::time::SystemTime) -> Vec<Expiry> {
             .then(b.installed_unix.cmp(&a.installed_unix))
     });
     found
+}
+
+/// A managed artifact file whose hash no live record mentions. Anything not named `<sha256>.ipa`
+/// is not Orbiter's to judge and is left alone.
+fn unreferenced(name: &std::ffi::OsStr, kept: &BTreeSet<&str>) -> bool {
+    match managed_hash(name) {
+        Some(hash) => !kept.contains(hash),
+        None => false,
+    }
+}
+
+/// `<sha256>.ipa` — the only shape this library gives a managed file.
+fn managed_hash(name: &std::ffi::OsStr) -> Option<&str> {
+    let hash = name.to_str()?.strip_suffix(".ipa")?;
+    valid_hash(hash).then_some(hash)
+}
+fn managed_name(name: &std::ffi::OsStr) -> bool {
+    managed_hash(name).is_some()
 }

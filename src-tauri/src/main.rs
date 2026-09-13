@@ -469,6 +469,7 @@ fn main() {
             library_prepare_install,
             library_expiry,
             library_icon,
+            library_reclaim,
             library_prepare_provisioning,
             library_sign,
             account_status,

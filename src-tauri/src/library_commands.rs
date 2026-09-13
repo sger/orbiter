@@ -45,6 +45,22 @@ pub async fn library_icon(sha: String, app: tauri::AppHandle) -> Result<Option<S
         .await
         .map_err(|_| "Library worker stopped.")?
 }
+/// Delete managed files no record points at. Always on request; never on a timer or at startup.
+#[tauri::command]
+pub async fn library_reclaim(
+    app: tauri::AppHandle,
+    state: State<'_, Installations>,
+) -> Result<u64, String> {
+    let _gate = state
+        .gate
+        .clone()
+        .try_lock_owned()
+        .map_err(|_| "An installation operation is in progress. Wait before removing files.")?;
+    let library = storage(&app)?;
+    tokio::task::spawn_blocking(move || library.reclaim())
+        .await
+        .map_err(|_| "Library worker stopped.")?
+}
 #[tauri::command]
 pub async fn library_open(artifact_id: String, app: tauri::AppHandle) -> Result<Opened, String> {
     let library = storage(&app)?;

@@ -11,12 +11,14 @@ async function mock(page: Page) {
       attempts: [],
       expiries: [],
       storage_bytes: 0,
+      unreferenced_bytes: 0,
     };
     let data = JSON.parse(
       localStorage.getItem("test-library") ?? JSON.stringify(fresh),
     );
     // A snapshot saved before this field existed still has to open, exactly as a manifest does.
     data.expiries ??= [];
+    data.unreferenced_bytes ??= 0;
     const signedOut = {
       stage: "signed_out",
       account: null,
@@ -217,6 +219,12 @@ async function mock(page: Page) {
                 ),
             ) ?? null
           );
+        }
+        if (cmd === "library_reclaim") {
+          const freed = data.unreferenced_bytes;
+          data.unreferenced_bytes = 0;
+          save();
+          return freed;
         }
         if (cmd === "library_icon")
           return (w.__icons ?? {})[args.sha] ?? null;
@@ -1123,4 +1131,28 @@ test("the banner re-signs the build it is warning about", async ({ page }) => {
       watch: "undecided",
       marker: "test",
     });
+});
+
+test("files nothing points at are named and only removed when asked", async ({
+  page,
+}) => {
+  await mock(page);
+  await imported(page);
+  await page.getByRole("link", { name: "All apps" }).click();
+  await expect(page.getByRole("button", { name: /Reclaim/ })).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__library.unreferenced_bytes = 3 * 1024 * 1024;
+    window.dispatchEvent(new Event("library-changed"));
+  });
+  // Bytes an interrupted copy left behind are counted and named, never quietly deleted.
+  await expect(page.locator(".library-storage")).toContainText(
+    "3.0 MB not referenced by any saved version",
+  );
+  await page.getByRole("button", { name: "Reclaim unreferenced files" }).click();
+  await expect(page.locator(".library-storage")).not.toContainText(
+    "not referenced",
+  );
+  await expect(page.getByRole("button", { name: /Reclaim/ })).toHaveCount(0);
 });

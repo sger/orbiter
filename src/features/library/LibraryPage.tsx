@@ -11,6 +11,7 @@ import {
   libraryList,
   libraryImport,
   libraryRemove,
+  libraryReclaim,
   libraryChanged,
 } from "../../ipc/commands";
 import type { Artifact, Attempt, LibrarySnapshot } from "./types";
@@ -22,6 +23,7 @@ const empty: LibrarySnapshot = {
   attempts: [],
   expiries: [],
   storage_bytes: 0,
+  unreferenced_bytes: 0,
 };
 export const bytes = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 const date = (n: number) => new Date(n * 1000).toLocaleString();
@@ -61,6 +63,7 @@ export function LibraryPage({
     artifactId: string | null;
   } | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [reclaiming, setReclaiming] = useState(false);
   const importingRef = useRef(false);
   const busyRef = useRef(busy);
   busyRef.current = busy;
@@ -581,8 +584,39 @@ export function LibraryPage({
             onForget={forgetLegacy}
           />
           <p className="library-storage">
-            {data.apps.length} apps · {bytes(data.storage_bytes)} of managed
-            IPAs
+            <span>
+              {data.apps.length} apps · {bytes(data.storage_bytes)} of managed
+              IPAs
+              {data.unreferenced_bytes > 0 && (
+                <>
+                  {" · "}
+                  {bytes(data.unreferenced_bytes)} not referenced by any saved
+                  version
+                </>
+              )}
+            </span>
+            {/* Left behind when a copy was interrupted. Named and counted rather than deleted:
+                Orbiter removes files somebody asked it to remove, and this is the asking. */}
+            {data.unreferenced_bytes > 0 && (
+              <button
+                className="text-button"
+                disabled={busy || reclaiming}
+                onClick={async () => {
+                  setReclaiming(true);
+                  setError("");
+                  try {
+                    await libraryReclaim();
+                    libraryChanged();
+                  } catch (e) {
+                    setError(String(e));
+                  } finally {
+                    setReclaiming(false);
+                  }
+                }}
+              >
+                {reclaiming ? "Reclaiming…" : "Reclaim unreferenced files"}
+              </button>
+            )}
           </p>
         </>
       )}
