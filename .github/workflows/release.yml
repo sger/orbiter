@@ -84,14 +84,15 @@ jobs:
             ${{ steps.artifact.outputs.checksum }}
           retention-days: 14
 
-      # Only a tag publishes, and it publishes as a draft: the physical-device checks in
-      # docs/validation.md cannot run here, and nothing signs off on a build but a person.
+      # A tag publishes straight away. The physical-device checks in docs/validation.md still
+      # cannot run here, so what a green build establishes is that it compiles, passes every
+      # automated test, and bundles — not that it installs to a phone. Tag deliberately.
       #
-      # Pre-release, too, and that is about the software rather than the pipeline: the two-factor
-      # path has never run against Apple, installation interruption and recovery are unvalidated,
-      # and Windows is unverified. The flag says so where a version number cannot, and drops off a
+      # Pre-release, which is about the software rather than the pipeline: the two-factor path has
+      # never run against Apple, installation interruption and recovery are unvalidated, and
+      # Windows is unverified. The flag says so where a version number cannot, and drops off a
       # later tag without renumbering anything.
-      - name: Draft the release
+      - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
@@ -123,7 +124,6 @@ jobs:
           ```
           NOTES
           gh release create "${GITHUB_REF_NAME}" \
-            --draft \
             --prerelease \
             --title "Orbiter ${GITHUB_REF_NAME}" \
             --notes-file "$RUNNER_TEMP/notes.md" \
