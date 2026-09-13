@@ -1141,6 +1141,21 @@ impl Library {
         }
         Ok(tag(&m.salt, udid))
     }
+    /// Record an installation attempt before any bytes move.
+    ///
+    /// Written first so a successful install always has a row to report its outcome into; an
+    /// attempt with no record would leave the result nowhere to go. Copies the artifact's
+    /// identity, expiry and team onto the attempt rather than joining back to it, so history
+    /// survives the saved file being removed.
+    ///
+    /// Also remembers the phone under its derived tag, updating the name if it has changed. The
+    /// raw UDID is used to derive that tag and is never stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the artifact is no longer in the library or its bytes no longer match,
+    /// if the device identity is missing, if this attempt was already recorded — which would mean
+    /// a review being used twice — or if the manifest cannot be written.
     pub fn begin(&self, artifact: &Artifact, job_id: &JobId, udid: &str, name: &str) -> Result<()> {
         let _lock = self.lock()?;
         let mut m = self.read()?;
