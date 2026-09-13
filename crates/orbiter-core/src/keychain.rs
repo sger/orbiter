@@ -31,6 +31,7 @@ pub fn account(email: &str, team_id: &str) -> String {
 /// Nul-terminate an account name for the Objective-C shim.
 ///
 /// The shim reads a C string; the terminator is added here rather than relying on the caller.
+#[cfg(target_os = "macos")]
 fn terminated(account: &str) -> Vec<u8> {
     let mut bytes = account.as_bytes().to_vec();
     bytes.push(0);
