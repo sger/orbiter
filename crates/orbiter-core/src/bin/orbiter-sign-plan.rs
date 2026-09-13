@@ -1,5 +1,18 @@
 //! Read-only: prints what re-signing would change. It signs nothing and contacts no Apple service.
 use std::{path::PathBuf, sync::atomic::AtomicBool};
+/// Print what re-signing the given IPA under the given team would change.
+///
+/// Pure local computation: it signs nothing, writes nothing and contacts no Apple service. Useful
+/// for seeing which capabilities a team would lose, and what a Watch app would cost, before
+/// deciding anything.
+///
+/// # Exit status
+///
+/// `0` when a plan was produced, `1` when the IPA could not be inspected, `2` for wrong arguments.
+///
+/// # Panics
+///
+/// Panics only if a plan that was just built cannot be serialised.
 fn main() {
     let mut args = std::env::args().skip(1);
     let (Some(path), Some(team)) = (args.next(), args.next()) else {

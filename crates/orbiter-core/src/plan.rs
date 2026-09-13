@@ -127,6 +127,14 @@ fn suffix(team_id: &str) -> String {
     })
 }
 
+/// Rewrite one bundle identifier for the target team, preserving its relationship to the main app.
+///
+/// A nested bundle keeps the part of its identifier that sits under the main app's and is rebuilt
+/// beneath the rewritten one, so a Watch app or an extension still reads as belonging to its
+/// parent. An identifier unrelated to the main app is rewritten on its own.
+///
+/// Deterministic, because the same team must always produce the same identifiers: a weekly re-sign
+/// has to replace the tester's app rather than install a second copy beside it.
 fn rewrite_identifier(identifier: &str, main: &str, new_main: &str) -> String {
     let rewritten = match identifier.strip_prefix(main) {
         // Nested bundles are named under the main identifier; keep that relationship intact.
@@ -164,6 +172,11 @@ fn pinning_services(report: &Report) -> Vec<&'static str> {
     named
 }
 
+/// Whether a bundle of this kind needs an App ID reserved on the team.
+///
+/// Frameworks do not: they are signed but never provisioned. The distinction decides how much of a
+/// free team's ten-per-seven-days budget a plan would spend, which is why it is refused up front
+/// rather than discovered halfway through.
 fn consumes_app_id(kind: &str) -> bool {
     // Frameworks are signed with the app's identity but hold no App ID of their own.
     kind != "Framework"
@@ -262,6 +275,12 @@ fn decide(key: &str, target: &Target, new_identifier: &str) -> Capability {
     }
 }
 
+/// Every entitlement key a bundle carries, from its executable and its embedded profile together.
+///
+/// Both sources are merged because they answer different halves of the question: the profile says
+/// what was authorised, the executable says what was actually claimed, and a capability appearing
+/// in either has to be reckoned with. Sorted and deduplicated, so two plans for the same build
+/// list capabilities in the same order.
 fn entitlement_keys(bundle: &Bundle) -> Vec<String> {
     let mut keys: Vec<String> = bundle
         .slices
@@ -410,11 +429,13 @@ pub fn build(report: &Report, target: &Target) -> Plan {
 }
 
 #[cfg(test)]
+/// Checks what re-signing under another team would change, and what it refuses to decide alone.
 mod tests {
     use super::*;
     use crate::macho::Slice;
     use std::collections::BTreeMap;
 
+    /// One architecture slice carrying the given entitlement keys and values.
     fn slice(keys: &[(&str, &str)]) -> Slice {
         Slice {
             architecture: "arm64".into(),
@@ -432,6 +453,7 @@ mod tests {
             der_entitlements_present: false,
         }
     }
+    /// One bundle of the given kind, identifier and entitlements.
     fn bundle(path: &str, kind: &str, identifier: &str, slices: Vec<Slice>) -> Bundle {
         Bundle {
             path: path.into(),
@@ -448,6 +470,7 @@ mod tests {
             issues: vec![],
         }
     }
+    /// A report whose main app is the first bundle given.
     fn report(bundles: Vec<Bundle>) -> Report {
         Report {
             size_bytes: 1,
@@ -457,6 +480,7 @@ mod tests {
             icon_data_url: None,
         }
     }
+    /// A free personal team as the signing target, with the Watch app kept.
     fn personal() -> Target {
         Target {
             team_id: "ABCDE12345".into(),
@@ -466,6 +490,8 @@ mod tests {
     }
 
     #[test]
+    /// Every bundle is rewritten under the target team, and a nested bundle still reads as
+    /// belonging to its parent rather than becoming an unrelated identifier.
     fn identifiers_are_rewritten_and_keep_the_nesting_relationship() {
         let plan = build(
             &report(vec![
@@ -496,6 +522,8 @@ mod tests {
     }
 
     #[test]
+    /// The same team always yields the same identifiers, so a weekly re-sign replaces the
+    /// tester's app instead of installing a second copy beside it.
     fn the_same_team_always_produces_the_same_identifiers() {
         // A weekly re-sign must replace the tester's app, not install a second copy beside it.
         let ipa = || {
@@ -521,6 +549,9 @@ mod tests {
     }
 
     #[test]
+    /// A free team cannot carry push, universal links, Apple Pay or app groups, so each is
+    /// removed *and* stated as a consequence — losing one silently is what makes a build look
+    /// broken for no reason.
     fn personal_team_capabilities_are_removed_with_their_consequence() {
         let plan = build(
             &report(vec![bundle(
@@ -579,6 +610,8 @@ mod tests {
     }
 
     #[test]
+    /// A paid team keeps the capabilities a free one loses: the removals are a property of the
+    /// target team, not of re-signing.
     fn a_paid_team_keeps_capabilities_a_personal_team_cannot_carry() {
         let ipa = || {
             report(vec![bundle(
@@ -601,6 +634,8 @@ mod tests {
     }
 
     #[test]
+    /// An encrypted executable blocks the plan, and a Watch app blocks it until someone decides
+    /// what happens to it.
     fn unsignable_inputs_block_and_watch_apps_require_an_explicit_choice() {
         let mut encrypted = slice(&[]);
         encrypted.encrypted = true;
@@ -627,6 +662,8 @@ mod tests {
     }
 
     #[test]
+    /// The rewritten identifier is stated as a consequence, because a backend or a social SDK
+    /// that recognises the app by its bundle identifier will not recognise the signed build.
     fn the_rewritten_identifier_is_stated_as_something_services_will_not_recognise() {
         let plan = build(
             &report(vec![
@@ -652,6 +689,8 @@ mod tests {
     }
 
     #[test]
+    /// A Watch app is never removed silently and never kept silently: while the choice is open
+    /// the plan is blocked, and either decision becomes a stated consequence.
     fn a_watch_app_blocks_the_plan_until_a_person_chooses_what_happens_to_it() {
         let bundles = || {
             vec![
@@ -707,6 +746,8 @@ mod tests {
     }
 
     #[test]
+    /// An IPA needing more App IDs than a free team may register in seven days is refused before
+    /// anything is reserved, rather than halfway through spending the budget.
     fn the_personal_team_app_id_budget_blocks_oversized_ipas() {
         let mut bundles = vec![bundle(
             "Payload/App.app",
@@ -727,6 +768,8 @@ mod tests {
     }
 
     #[test]
+    /// With no team selected or no main identifier to rewrite, the plan blocks rather than
+    /// inventing a value and producing a build nobody asked for.
     fn a_missing_team_or_identifier_blocks_instead_of_inventing_one() {
         let plan = build(
             &report(vec![bundle("Payload/App.app", "Main app", "", vec![])]),

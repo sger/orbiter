@@ -1,3 +1,21 @@
+//! Reading an IPA and saying what is in it.
+//!
+//! Local inspection of an untrusted archive: the chosen file is opened read-only and every
+//! structure inside it is treated as hostile until bounded. Nothing is extracted to disk, no
+//! network is used, and no credential is touched — the one exception is app-icon conversion on
+//! macOS, which is described on [`inspect`].
+//!
+//! # Bounds
+//!
+//! Archive size, entry count, per-entry size, total expanded size, compression ratio, property
+//! list depth and size, and a shared read budget across the whole inspection. Each exists because
+//! an IPA is a file someone else produced.
+//!
+//! # What this does not claim
+//!
+//! Nothing here verifies a signature or a certificate chain. A profile is parsed, not trusted, and
+//! every finding says so.
+
 pub mod accounts;
 mod app_icon;
 pub mod application;
@@ -84,6 +102,14 @@ pub struct Finding {
     pub detail: String,
     pub bundle: Option<String>,
 }
+/// Stop at this boundary if cancellation was requested.
+///
+/// Called between archive entries and inside read loops, so cancellation is prompt without ever
+/// leaving a half-built report to be mistaken for a complete one.
+///
+/// # Errors
+///
+/// Returns [`Error::Cancelled`] when a stop has been asked for.
 fn check(cancel: &AtomicBool) -> Result<()> {
     if cancel.load(Ordering::Relaxed) {
         Err(Error::Cancelled)
@@ -91,6 +117,17 @@ fn check(cancel: &AtomicBool) -> Result<()> {
         Ok(())
     }
 }
+/// Parse a property list from untrusted bytes, under strict bounds.
+///
+/// The event stream is bounded *before* the recursive value builder ever sees it — depth, element
+/// counts, event count and total string and data size — because the builder is where a crafted
+/// plist would otherwise turn into unbounded recursion or allocation. An unbalanced document is
+/// rejected rather than partially accepted.
+///
+/// # Errors
+///
+/// Returns [`Error::Plist`] for anything oversized, too deep, malformed, unbalanced, or not a
+/// dictionary at the top level.
 pub(crate) fn parse_plist(b: &[u8]) -> Result<Dictionary> {
     if b.len() > 4 * 1024 * 1024 {
         return Err(Error::Plist);
@@ -127,14 +164,23 @@ pub(crate) fn parse_plist(b: &[u8]) -> Result<Dictionary> {
         .into_dictionary()
         .ok_or(Error::Plist)
 }
+/// Read one string value from a property list, or `None` if it is absent or another type.
 pub(crate) fn string(d: &Dictionary, k: &str) -> Option<String> {
     d.get(k).and_then(Value::as_string).map(str::to_owned)
 }
+/// Convert an entitlements dictionary into JSON, or an empty map when there is none.
+///
+/// Ordered, so two reports of the same build list entitlements in the same order and can be
+/// compared by eye.
 pub(crate) fn entitlements(v: Option<&Value>) -> BTreeMap<String, serde_json::Value> {
     v.and_then(Value::as_dictionary)
         .map(|d| d.iter().map(|(k, v)| (k.clone(), json_value(v))).collect())
         .unwrap_or_default()
 }
+/// Convert one property-list value to JSON, replacing anything non-textual with a placeholder.
+///
+/// Dates, binary data and other opaque values become a note rather than being rendered: an
+/// entitlements listing is read by a person, and a wall of base64 in it helps nobody.
 fn json_value(v: &Value) -> serde_json::Value {
     match v {
         Value::String(s) => s.clone().into(),
@@ -150,6 +196,20 @@ fn json_value(v: &Value) -> serde_json::Value {
     }
 }
 // Reject ZIP64/multi-volume archives and bound directory allocation before ZipArchive.
+/// Validate an archive's end-of-central-directory record before handing it to the ZIP reader.
+///
+/// Reads the tail directly to reject multi-volume and ZIP64 archives, to bound the declared entry
+/// count and directory size, and to check that the directory's offset and length actually meet its
+/// start. This runs first because the entry count decides how much the reader will allocate, and
+/// a crafted header must not be able to choose that number.
+///
+/// Returns the declared entry count, which the caller compares against what the reader finds.
+///
+/// # Errors
+///
+/// Returns [`Error::Zip`] for a malformed or multi-volume archive, [`Error::Limits`] when a
+/// declared count or size exceeds what inspection will attempt, and [`Error::Io`] if the tail
+/// cannot be read.
 fn preflight(f: &mut File, size: u64) -> Result<usize> {
     let n = size.min(65_557) as usize;
     f.seek(SeekFrom::End(-(n as i64))).map_err(|_| Error::Io)?;
@@ -181,6 +241,11 @@ fn preflight(f: &mut File, size: u64) -> Result<usize> {
     f.rewind().map_err(|_| Error::Io)?;
     Ok(u16at(10) as usize)
 }
+/// Whether an archive entry name is safe to reason about and to join onto a path.
+///
+/// Rejects absolute paths, traversal, Windows separators and drive-letter colons, control
+/// characters, and components ending in a space or dot — the last because those are silently
+/// normalised away on some filesystems, so two entries could become one file.
 pub(crate) fn safe_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= 4096
@@ -191,6 +256,19 @@ pub(crate) fn safe_name(n: &str) -> bool {
             .split('/')
             .all(|c| !c.is_empty() && c != "." && c != ".." && !c.ends_with([' ', '.']))
 }
+/// Read one archive entry into memory, bounded twice and charged against a shared budget.
+///
+/// The declared size is checked before decompression begins — that is the zip-bomb guard — and the
+/// accumulated size is checked again as bytes arrive, because a declared size is only a claim. The
+/// budget is shared across every read in one inspection, so no combination of individually legal
+/// entries can add up to an unbounded total.
+///
+/// Cancellation is honoured between blocks.
+///
+/// # Errors
+///
+/// Returns [`Error::Limits`] when the entry or the budget would be exceeded, [`Error::Zip`] if the
+/// entry is missing or corrupt, and [`Error::Cancelled`] if a stop was requested.
 fn read<R: Read + Seek>(
     z: &mut ZipArchive<R>,
     name: &str,
@@ -504,6 +582,20 @@ pub fn inspect(
         icon_data_url,
     })
 }
+/// Find and decode the main app's icon, or report that there is none.
+///
+/// Candidates are taken from the bundle's own declarations and tried largest-last-declared first,
+/// then by scale suffix. Only names inside the main bundle are considered, and only ones that pass
+/// [`safe_name`].
+///
+/// An icon that cannot be read — oversized, unreadable, or a format this decoder does not
+/// understand — moves on to the next candidate. It never fails the inspection: an icon is
+/// decoration, and an IPA with a broken one must still be inspectable and importable. Asset
+/// catalogs are not decoded, so an app whose icon lives only there has none here.
+///
+/// # Errors
+///
+/// Returns [`Error::Cancelled`] only. Every other failure yields `Ok(None)`.
 fn icon<R: Read + Seek>(
     z: &mut ZipArchive<R>,
     names: &BTreeSet<String>,
