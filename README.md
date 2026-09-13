@@ -49,6 +49,8 @@ Copy `target/release/bundle/macos/Orbiter.app` into Applications and open it. A 
 
 Original IPAs stay unchanged. Passwords are never saved. Re-signing can affect app capabilities, and Apple account limits still apply. Expiration dates do not confirm that an app is currently installed or working.
 
+You can also inject one or more `.dylib` files into the app at re-sign — they load at launch via `@executable_path/Frameworks` and run with the app's entitlements. Injection is opt-in and the plan states it as a consequence before you confirm; the original IPA is still never written to. See [docs/architecture.md](docs/architecture.md#dylib-injection).
+
 ## Development
 
 ```sh

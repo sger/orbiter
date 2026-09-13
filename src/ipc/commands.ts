@@ -70,11 +70,14 @@ export const prepareProvisioning = (
   path: string,
   acknowledged: boolean,
   watch: WatchChoice,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[] = [],
 ) =>
   invoke<Preparation>("account_prepare_provisioning", {
     path,
     acknowledged,
     watch,
+    dylibs,
   });
 
 // Re-signing. Produces a new IPA; the chosen one is only ever read.
@@ -84,8 +87,10 @@ export const signIpa = (
   /// Prefix for the signed app's display name; "" leaves every name alone. Rust decides what is
   /// usable, so whatever is typed here is sent as typed.
   marker: string,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[],
   progress: Channel<SigningProgress>,
-) => invoke<Signed>("account_sign_ipa", { path, watch, marker, progress });
+) => invoke<Signed>("account_sign_ipa", { path, watch, marker, dylibs, progress });
 
 // The seven-day clock. Reads a local file and a clock; never Apple, never the phone.
 export const renewalStatus = (
@@ -162,22 +167,28 @@ export const libraryPrepareProvisioning = (
   artifactId: string,
   acknowledged: boolean,
   watch: WatchChoice,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[] = [],
 ) =>
   invoke<Preparation>("library_prepare_provisioning", {
     artifactId,
     acknowledged,
     watch,
+    dylibs,
   });
 export const librarySign = (
   artifactId: string,
   watch: WatchChoice,
   marker: string,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[],
   progress: Channel<SigningProgress>,
 ) =>
   invoke<{ signed: Signed; artifact: Artifact }>("library_sign", {
     artifactId,
     watch,
     marker,
+    dylibs,
     progress,
   });
 
@@ -191,12 +202,15 @@ export const reviewPreparation = (
   deviceId: number,
   watch: WatchChoice,
   marker: string,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[] = [],
 ) =>
   invoke<PreparationReview>("library_review_preparation", {
     artifactId,
     deviceId,
     watch,
     marker,
+    dylibs,
   });
 export const executePreparation = (
   token: string,

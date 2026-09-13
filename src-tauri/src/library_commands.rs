@@ -240,6 +240,7 @@ pub async fn library_prepare_provisioning(
     artifact_id: String,
     acknowledged: bool,
     watch: String,
+    dylibs: Vec<String>,
     app: tauri::AppHandle,
 ) -> Result<orbiter_core::accounts::Preparation, Failure> {
     let artifact_id = ArtifactId::parse(&artifact_id)?;
@@ -249,6 +250,7 @@ pub async fn library_prepare_provisioning(
             &artifact_id,
             Acknowledgement::from_request(acknowledged),
             WatchChoice::parse(&watch),
+            dylibs.into_iter().map(std::path::PathBuf::from).collect(),
         )
         .await
         .map_err(Into::into)
@@ -272,6 +274,7 @@ pub async fn library_sign(
     artifact_id: String,
     watch: String,
     marker: String,
+    dylibs: Vec<String>,
     progress: Channel<orbiter_core::signer::Progress>,
     app: tauri::AppHandle,
 ) -> Result<Retained, Failure> {
@@ -282,7 +285,13 @@ pub async fn library_sign(
     });
     runtime(&app)?
         .signing()
-        .sign(&artifact_id, WatchChoice::parse(&watch), &marker, sink)
+        .sign(
+            &artifact_id,
+            WatchChoice::parse(&watch),
+            &marker,
+            dylibs.into_iter().map(std::path::PathBuf::from).collect(),
+            sink,
+        )
         .await
         .map_err(Into::into)
 }
@@ -295,6 +304,7 @@ pub async fn library_review_preparation(
     device_id: u32,
     watch: String,
     marker: String,
+    dylibs: Vec<String>,
     app: tauri::AppHandle,
 ) -> Result<orbiter_core::application::guided::PreparationReview, Failure> {
     runtime(&app)?
@@ -304,6 +314,7 @@ pub async fn library_review_preparation(
             device_id,
             WatchChoice::parse(&watch),
             &marker,
+            dylibs.into_iter().map(std::path::PathBuf::from).collect(),
         )
         .await
         .map_err(Into::into)

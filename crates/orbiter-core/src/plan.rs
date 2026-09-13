@@ -64,6 +64,9 @@ pub struct Target {
     pub team_id: String,
     pub kind: TeamKind,
     pub watch: WatchChoice,
+    /// File names of libraries to inject into the main app and load at launch. Empty for a plain
+    /// re-sign.
+    pub injected_dylibs: Vec<String>,
 }
 
 #[derive(Clone, Copy, Serialize, PartialEq, Eq, Debug)]
@@ -114,6 +117,8 @@ pub struct Plan {
     /// Runtime consequences of the plan as a whole, for acknowledgement.
     pub consequences: Vec<String>,
     pub app_ids_required: usize,
+    /// Libraries injected into the main app, by file name. Empty for a plain re-sign.
+    pub injected_dylibs: Vec<String>,
 }
 
 /// Deterministic per-team suffix: the same team always produces the same identifiers, so a weekly
@@ -415,6 +420,14 @@ pub fn build(report: &Report, target: &Target) -> Plan {
                 .into(),
         );
     }
+    if !target.injected_dylibs.is_empty() {
+        consequences.push(format!(
+            "{} added librar{} injected into the app and loaded at launch: {}. The executable no longer matches its author's build, the injected code runs with the app's entitlements, and the result is not App-Store installable.",
+            target.injected_dylibs.len(),
+            if target.injected_dylibs.len() == 1 { "y is" } else { "ies are" },
+            target.injected_dylibs.join(", "),
+        ));
+    }
 
     Plan {
         team_id: target.team_id.clone(),
@@ -425,6 +438,7 @@ pub fn build(report: &Report, target: &Target) -> Plan {
         blockers,
         consequences,
         app_ids_required,
+        injected_dylibs: target.injected_dylibs.clone(),
     }
 }
 
@@ -486,6 +500,7 @@ mod tests {
             team_id: "ABCDE12345".into(),
             kind: TeamKind::Personal,
             watch: WatchChoice::Sign,
+            injected_dylibs: Vec::new(),
         }
     }
 
@@ -543,6 +558,7 @@ mod tests {
                 team_id: "ZZZZZ99999".into(),
                 kind: TeamKind::Personal,
                 watch: WatchChoice::Sign,
+                injected_dylibs: Vec::new(),
             },
         );
         assert_ne!(first.new_main_identifier, other.new_main_identifier);
@@ -627,6 +643,7 @@ mod tests {
                 team_id: "PAID123456".into(),
                 kind: TeamKind::Paid,
                 watch: WatchChoice::Sign,
+                injected_dylibs: Vec::new(),
             },
         );
         assert_eq!(paid.bundles[0].capabilities[0].action, Action::Keep);
@@ -715,6 +732,7 @@ mod tests {
                 team_id: "ABCDE12345".into(),
                 kind: TeamKind::Personal,
                 watch: WatchChoice::Undecided,
+                injected_dylibs: Vec::new(),
             },
         );
         // Nothing is registered while the choice is open: App IDs are spent from a weekly budget.
@@ -726,6 +744,7 @@ mod tests {
                 team_id: "ABCDE12345".into(),
                 kind: TeamKind::Personal,
                 watch: WatchChoice::Remove,
+                injected_dylibs: Vec::new(),
             },
         );
         // The Watch app and everything nested inside it go together.
@@ -740,6 +759,7 @@ mod tests {
                 team_id: "ABCDE12345".into(),
                 kind: TeamKind::Personal,
                 watch: WatchChoice::Sign,
+                injected_dylibs: Vec::new(),
             },
         );
         assert_eq!(signed.app_ids_required, 3);
@@ -777,6 +797,7 @@ mod tests {
                 team_id: String::new(),
                 kind: TeamKind::Personal,
                 watch: WatchChoice::Sign,
+                injected_dylibs: Vec::new(),
             },
         );
         assert_eq!(plan.blockers.len(), 2);

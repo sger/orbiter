@@ -86,6 +86,9 @@ struct Pending {
     udid: String,
     device_id: u32,
     watch: WatchChoice,
+    /// Absolute paths of libraries to inject, carried from review so the acknowledged plan and the
+    /// signed build agree on exactly what is added.
+    dylibs: Vec<std::path::PathBuf>,
     created: Instant,
     _lease: crate::library::Lease,
 }
@@ -129,6 +132,7 @@ impl SigningService {
         device_id: u32,
         watch: WatchChoice,
         marker: &str,
+        dylibs: Vec<std::path::PathBuf>,
     ) -> OperationResult<PreparationReview> {
         let _gate = self.accounts.operation()?;
         self.discard_preparation(None)?;
@@ -145,6 +149,13 @@ impl SigningService {
         let (udid, _) = crate::installation::verified_identity(device_id).await?;
         let (generation, mut target) = self.accounts.signing_context()?;
         target.watch = watch;
+        target.injected_dylibs = dylibs
+            .iter()
+            .filter_map(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .collect();
         let report = tokio::task::spawn_blocking(move || {
             crate::inspect(&path, &std::sync::atomic::AtomicBool::new(false), |_| {})
         })
@@ -180,6 +191,7 @@ impl SigningService {
                 udid,
                 device_id,
                 watch,
+                dylibs,
                 created: Instant::now(),
                 _lease: lease,
             });
@@ -338,7 +350,12 @@ impl SigningService {
                 let (_, path, _lease) = self.source(&pending.review.artifact_id).await?;
                 let prepared = self
                     .accounts
-                    .prepare_provisioning_under_gate(path, consents.provisioning, pending.watch)
+                    .prepare_provisioning_under_gate(
+                        path,
+                        consents.provisioning,
+                        pending.watch,
+                        pending.dylibs.clone(),
+                    )
                     .await?;
                 if !prepared.plan.blockers.is_empty() {
                     return Err(OperationError::new(
@@ -373,6 +390,7 @@ impl SigningService {
                 &pending.review.artifact_id,
                 pending.watch,
                 &pending.review.marker,
+                pending.dylibs.clone(),
                 progress,
             )
             .await
@@ -420,6 +438,7 @@ mod tests {
                 team_id: "TEAM".into(),
                 kind: TeamKind::Personal,
                 watch: WatchChoice::Remove,
+                injected_dylibs: Vec::new(),
             },
         );
         Pending {
@@ -437,6 +456,7 @@ mod tests {
             udid: "private-identity".into(),
             device_id: 1,
             watch: WatchChoice::Remove,
+            dylibs: Vec::new(),
             created: Instant::now(),
             _lease: lease,
         }

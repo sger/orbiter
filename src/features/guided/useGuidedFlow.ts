@@ -31,6 +31,8 @@ export function useGuidedFlow(
   accountIdentity: string,
   watch: WatchChoice,
   marker: string,
+  /// Absolute paths of libraries to inject into the app; empty for a plain re-sign.
+  dylibs: string[] = [],
 ) {
   const [stage, setStage] = useState<FlowStage>("choose");
   const [busy, setBusy] = useState(false);
@@ -86,7 +88,7 @@ export function useGuidedFlow(
     setStage((current) =>
       ["prepare", "review"].includes(current) ? "account" : current,
     );
-  }, [accountIdentity, watch, marker, clearPlan, clearReview]);
+  }, [accountIdentity, watch, marker, dylibs, clearPlan, clearReview]);
   useEffect(
     () => () => {
       generation.current++;
@@ -260,6 +262,7 @@ export function useGuidedFlow(
         deviceId,
         watch,
         marker,
+        dylibs,
       );
       if (epoch !== generation.current) {
         void discardPreparation(next.token);

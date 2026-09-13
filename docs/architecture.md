@@ -183,8 +183,9 @@ Order of work:
 2. Remove every bundle the plan left out, shallowest first, so a removed Watch app takes its extensions and frameworks with it and is reported once.
 3. Rewrite identifiers.
 4. Install one profile per bundle that holds an App ID.
-5. Sign from the inside out.
-6. Repackage with the file permissions on disk, so executables stay executable.
+5. Inject any chosen libraries (see below), before anything is signed.
+6. Sign from the inside out.
+7. Repackage with the file permissions on disk, so executables stay executable.
 
 Identifier rewriting is **keyed, not valued**: only keys holding bundle identifiers are rewritten — `CFBundleIdentifier` and anything ending in `BundleIdentifier`, at any depth. That moves every cross-reference between bundles (`WKCompanionAppBundleIdentifier`, `WKAppBundleIdentifier`, `NSExtension` attributes) and nothing else. Replacing by value was tried and produced builds iOS refused to install, because an identifier can also be the name of a file on disk. `NSExtensionPointIdentifier` is excluded for the same reason — it names one of Apple's extension points, not a bundle. Matches are whole strings. The bundle's own `CFBundleIdentifier` is then set outright, since iOS refuses a bundle signed for an identifier its Info.plist does not claim.
 
@@ -202,6 +203,14 @@ A free team has no certificates page at developer.apple.com. When its one slot i
 
 **The name marker.** The signed main app can carry a short marker before its display name, on by default, so a tester who still has the company build installed can tell two identical icons apart. A prefix, because the Home Screen truncates the end. `signer::marker` decides what is usable — trimmed, control characters dropped, bounded — so the rule holds wherever the value comes from. Only `CFBundleDisplayName`, and only on the main app: `CFBundleName` is filename-adjacent, and rewriting it produced a build iOS refused. A bundle with no name is left without one, and re-signing weekly does not stack markers.
 
+## Dylib injection
+
+Injection is opt-in: you choose one or more `.dylib` files at re-sign, or none. When you do, the plan carries it as a stated consequence — the executable no longer matches its author's build, the injected code runs with the app's entitlements, and the result is not App-Store installable — acknowledged with every other consequence before signing. Nothing is injected silently.
+
+Each library is copied into the main app's `Frameworks/`, and the main executable gains an `LC_LOAD_DYLIB` command naming `@executable_path/Frameworks/<name>.dylib`, so it loads at launch without depending on an `LC_RPATH`. `macho::add_load_dylib` writes the command into the header padding between the load-command list and the first section — `ncmds` and `sizeofcmds` grow, no segment or section file offset moves, and a fat binary's slice table stays exact. It refuses rather than corrupt: an encrypted slice, or one whose padding is too small, fails the run. Injecting a path already loaded is a no-op, so re-signing an injected build never stacks a second command.
+
+Injection happens between profile install and signing, so the added libraries and the modified executable are both covered by the signatures. Each library is signed with the tester's identity — no entitlements of its own — just before the enclosing `.app` seals it.
+
 ## Device log capture
 
 `diagnostics.rs` streams the iPhone's system log over the same usbmuxd transport, to answer one question: why did a screen in the re-signed build fail?
@@ -212,7 +221,9 @@ A capture stops when asked, after five minutes, or after 500 matching lines, and
 
 The signed build and its source are normally installed side by side and their processes share a name, so the filter is given both identifiers: a line naming the superseded one and not this one is dropped. The rewritten identifier contains the original as a substring, so this build's own lines survive.
 
-**What it cannot show:** a failure inside a `WKWebView`. Web content errors, blocked requests and JavaScript exceptions never reach the system log. A development-signed build carries `get-task-allow`, so Safari's Web Inspector can attach and show them directly — which makes the re-signed build the more diagnosable of the two.
+The panel can narrow what it kept to the lines iOS marked `<Error>` or `<Fault>`, so a single failure stands out from the RunningBoard and lifecycle noise that names the app on every launch. The filter reads the severity from the line text, since the capture carries no separate field for it.
+
+**What it cannot show:** a failure inside a `WKWebView`. Web content errors, blocked requests and JavaScript exceptions never reach the system log. A development-signed build carries `get-task-allow`, so Safari's Web Inspector can attach and show them directly — which makes the re-signed build the more diagnosable of the two. It shows the system and framework messages *about* the app (launch, assertions, entitlement and keychain errors), but the app's own `NSLog`/`os_log` output may not reach this relay at all — modern iOS routes those into the unified log, read with Console.app. So the absence of an injected library's own log line here is not evidence it did not run; confirm early code with an observable effect or the unified log, not this capture.
 
 ## Interface
 

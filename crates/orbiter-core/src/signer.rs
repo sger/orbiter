@@ -482,6 +482,8 @@ pub fn sign(
     // A short word put in front of the main app's display name, so a tester with the company
     // build already installed can tell the two icons apart. `None` leaves every name alone.
     marker: Option<&str>,
+    // Libraries to inject into the main app and load at launch. Empty for a plain re-sign.
+    dylibs: &[PathBuf],
     cancel: &AtomicBool,
     mut progress: impl FnMut(Progress),
 ) -> Result<Signed, String> {
@@ -493,6 +495,7 @@ pub fn sign(
         profiles,
         identity,
         marker,
+        dylibs,
         cancel,
         &mut progress,
         &mut log,
@@ -503,6 +506,55 @@ pub fn sign(
         }
         Err(error) => Err(log.failed(error)),
     }
+}
+
+/// Copy each library into the app's `Frameworks/` and add a load command for it to the main
+/// executable, returning the copied files in order so the caller can sign each one before the app
+/// is sealed. Writes only inside `app_dir`; the source libraries are read, never written. The
+/// executable is written once, after every command is added, so its header padding is spent in a
+/// single pass.
+///
+/// # Errors
+///
+/// A library without a file name, an unreadable `Info.plist` or executable, a copy that fails, or
+/// an executable no load command can be added to (encrypted, or without room in its header) — each
+/// names what went wrong rather than leaving a half-injected build.
+fn place_dylibs(app_dir: &Path, dylibs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let value = plist::Value::from_file(app_dir.join("Info.plist"))
+        .map_err(|_| "The main app's Info.plist could not be read for injection.".to_string())?;
+    let executable = value
+        .as_dictionary()
+        .and_then(|info| info.get("CFBundleExecutable"))
+        .and_then(plist::Value::as_string)
+        .ok_or_else(|| "The main app declares no executable to inject into.".to_string())?
+        .to_string();
+    let frameworks = app_dir.join("Frameworks");
+    fs::create_dir_all(&frameworks)
+        .map_err(|_| "A Frameworks directory could not be created for injection.".to_string())?;
+    let executable_path = app_dir.join(&executable);
+    let mut binary = fs::read(&executable_path)
+        .map_err(|_| "The main app's executable could not be read for injection.".to_string())?;
+    let mut placed = Vec::new();
+    for dylib in dylibs {
+        let name = dylib
+            .file_name()
+            .ok_or_else(|| "An injected library has no file name.".to_string())?
+            .to_string_lossy()
+            .into_owned();
+        let target = frameworks.join(&name);
+        fs::copy(dylib, &target)
+            .map_err(|_| format!("{name} could not be copied into the build."))?;
+        binary = crate::macho::add_load_dylib(
+            &binary,
+            &format!("@executable_path/Frameworks/{name}"),
+            false,
+        )
+        .map_err(|_| format!("{name} could not be linked into the executable."))?;
+        placed.push(target);
+    }
+    fs::write(&executable_path, &binary)
+        .map_err(|_| "The injected executable could not be written.".to_string())?;
+    Ok(placed)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -525,6 +577,7 @@ fn run(
     profiles: &[ProfileOutcome],
     identity: &Identity,
     marker: Option<&str>,
+    dylibs: &[PathBuf],
     cancel: &AtomicBool,
     progress: &mut impl FnMut(Progress),
     log: &mut Log,
@@ -609,6 +662,29 @@ fn run(
             "{} expires {}",
             bundle.new_identifier, profile.expires
         ));
+    }
+
+    // Injection happens here, after identifiers and profiles are settled and before anything is
+    // signed: the added libraries and the load commands added to the main executable must both be
+    // covered by the signatures written in the next stage, never bolted on after.
+    if !dylibs.is_empty() {
+        let app = plan
+            .bundles
+            .iter()
+            .find(|bundle| bundle.identifier == plan.main_identifier)
+            .ok_or_else(|| "The main app to inject into could not be found.".to_string())?;
+        cancelled(cancel)?;
+        let placed = place_dylibs(&root.join(&app.path), dylibs)?;
+        // Each library is signed now, so the app's signature seals it already valid below.
+        let signer = UnifiedSigner::new(settings(&identity, None)?);
+        for library in &placed {
+            cancelled(cancel)?;
+            let name = library.file_name().unwrap_or_default().to_string_lossy();
+            signer.sign_path_in_place(library).map_err(|error| {
+                format!("{name} could not be signed. {}", signing_failure(&error))
+            })?;
+            log.note(format!("injected {name}"));
+        }
     }
 
     log.stage(STAGES[3]);
@@ -772,6 +848,50 @@ mod tests {
     use super::*;
     use crate::plan::{BundlePlan, TeamKind};
 
+    /// A 64-bit Mach-O with one `__TEXT` section starting at 256, leaving header padding an
+    /// injected load command can land in — enough like a real executable for `place_dylibs`.
+    fn injectable_executable() -> Vec<u8> {
+        let mut b = vec![0u8; 512];
+        for (o, v) in [
+            (0, 0xfeedfacf_u32),
+            (4, 0x100000c),
+            (16, 1),
+            (20, 152),
+            (32, 0x19),
+            (36, 152),
+        ] {
+            b[o..o + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        b[96..100].copy_from_slice(&1_u32.to_le_bytes()); // one section
+        b[152..156].copy_from_slice(&256_u32.to_le_bytes()); // section file offset
+        b
+    }
+
+    #[test]
+    /// Each chosen library is copied into the app's `Frameworks/` and the executable gains a load
+    /// command for it, so the app loads it at launch. The returned paths are what the signer signs.
+    fn injection_places_libraries_and_links_the_executable() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let root = dir.path();
+        let app = root.join("Payload/App.app");
+        write_named_bundle(root, "Payload/App.app", "com.company.app", Some("App"));
+        fs::write(app.join("App"), injectable_executable()).expect("the executable");
+        let source = root.join("tweak.dylib");
+        fs::write(&source, b"library bytes").expect("a source library");
+
+        let placed = place_dylibs(&app, &[source]).expect("injection succeeds");
+
+        assert_eq!(placed, vec![app.join("Frameworks/tweak.dylib")]);
+        assert_eq!(
+            fs::read(app.join("Frameworks/tweak.dylib")).unwrap(),
+            b"library bytes"
+        );
+        let binary = fs::read(app.join("App")).unwrap();
+        assert!(crate::macho::inspect(&binary).is_ok());
+        let install = b"@executable_path/Frameworks/tweak.dylib";
+        assert!(binary.windows(install.len()).any(|w| w == install));
+    }
+
     /// One planned bundle with the given path, old and new identifiers.
     fn bundle(path: &str, identifier: &str, new_identifier: &str, app_id: bool) -> BundlePlan {
         BundlePlan {
@@ -796,6 +916,7 @@ mod tests {
             bundles,
             blockers,
             consequences: Vec::new(),
+            injected_dylibs: Vec::new(),
         }
     }
 
