@@ -53,9 +53,14 @@ const MAX_MANIFEST: u64 = 64 * 1024 * 1024;
 const MAX_ATTEMPTS_PER_APP: usize = 200;
 const MAX_ATTEMPTS: usize = 2_000;
 type Result<T> = std::result::Result<T, String>;
+/// The current time as seconds since the epoch, for record timestamps.
 fn now() -> i64 {
     crate::renewal::now_unix(std::time::SystemTime::now())
 }
+/// A fresh record identifier.
+///
+/// Random rather than derived: an identifier is what history is attributed to, so two records must
+/// never collide and a re-import must never resurrect the identity of something removed.
 fn id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -143,6 +148,10 @@ struct Manifest {
     pending_icon_removals: Vec<String>,
 }
 impl Default for Manifest {
+    /// An empty library at the current schema, with a fresh device salt.
+    ///
+    /// The salt is generated once and kept for the life of the library: it is what makes a device
+    /// tag stable across restarts and meaningless outside this library.
     fn default() -> Self {
         Self {
             schema: SCHEMA,
@@ -293,9 +302,31 @@ impl Library {
             shared: Arc::default(),
         }
     }
+    /// Where this library's metadata lives.
     fn manifest_path(&self) -> PathBuf {
         self.root.join("manifest.json")
     }
+    /// Read and validate the manifest.
+    ///
+    /// Checks far more than JSON validity: the schema version, the salt, every hash's shape, that
+    /// record identities are unique, and that every relationship resolves — an artifact to its
+    /// app, a signed build to a real original, an attempt to both an artifact and a device. A
+    /// library whose records contradict each other is reported rather than used, because acting on
+    /// it would attribute history to the wrong build.
+    ///
+    /// A missing manifest with no managed files is an empty library; a missing manifest *with*
+    /// managed files is an error, because that is a lost manifest rather than a new library, and
+    /// silently starting over would look like every saved build had vanished.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message for an oversized, unreadable, malformed or internally inconsistent
+    /// manifest, and for one written by a newer Orbiter — which is refused rather than loaded and
+    /// stripped of fields this build does not know.
+    ///
+    /// # Concurrency
+    ///
+    /// Callers hold the metadata lock; this does not take it.
     fn read(&self) -> Result<Manifest> {
         let path = self.manifest_path();
         if !path.exists() {
@@ -392,6 +423,21 @@ impl Library {
         }
         Ok(m)
     }
+    /// Replace the manifest atomically.
+    ///
+    /// Writes a temporary file in the same directory, flushes it, `fsync`s it, and renames it over
+    /// the old one — so a crash leaves either the previous manifest or the new one, never a
+    /// half-written file. The size is checked before the rename, so a manifest that has outgrown
+    /// its bound is refused rather than written and then found unreadable.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the directory cannot be created or written, if encoding fails, or if
+    /// the result would exceed the manifest size limit.
+    ///
+    /// # Concurrency
+    ///
+    /// Callers hold the metadata lock; this does not take it.
     fn save(&self, m: &Manifest) -> Result<()> {
         fs::create_dir_all(&self.root)
             .map_err(|_| "Cannot create library storage. Check disk space and permissions.")?;
@@ -417,12 +463,23 @@ impl Library {
             .map_err(|_| "Cannot commit library metadata. Check permissions.")?;
         Ok(())
     }
+    /// Where the managed IPA with this content hash lives.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a hash that is not 64 hex characters, so a value from a record can never be joined
+    /// onto a path as something other than a hash.
     fn file(&self, hash: &str) -> Result<PathBuf> {
         if !valid_hash(hash) {
             return Err("Invalid library artifact hash.".into());
         }
         Ok(self.root.join("artifacts").join(format!("{hash}.ipa")))
     }
+    /// Where the icon with this content hash lives.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a hash that is not 64 hex characters.
     fn icon_file(&self, hash: &str) -> Result<PathBuf> {
         if !valid_hash(hash) {
             return Err("Invalid library icon hash.".into());
@@ -468,10 +525,26 @@ impl Library {
             base64::engine::general_purpose::STANDARD.encode(bytes)
         )))
     }
+    /// Everything the library holds, as of now. See [`Self::snapshot_at`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the manifest cannot be read or storage cannot be listed.
     pub fn snapshot(&self) -> Result<Snapshot> {
         self.snapshot_at(std::time::SystemTime::now())
     }
     /// The clock is a parameter so a test can stand on a day boundary; nothing else passes one.
+    /// Everything the library holds, with expiry standings computed against `now`.
+    ///
+    /// The clock is a parameter so a test can stand on a day boundary; production callers use
+    /// [`Self::snapshot`]. Also counts storage in use and bytes no record points at.
+    ///
+    /// Icons are deliberately absent: they are fetched per hash through [`Self::icon`], so a
+    /// refresh does not re-send megabytes that have not changed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the manifest cannot be read or the storage directory cannot be listed.
     pub fn snapshot_at(&self, now: std::time::SystemTime) -> Result<Snapshot> {
         let _lock = self.lock()?;
         let m = self.read()?;
@@ -514,6 +587,28 @@ impl Library {
             attempts: m.attempts,
         })
     }
+    /// Copy a local IPA into the library and record it as a saved version.
+    ///
+    /// The source file is only ever read. Bytes decide identity: an identical import returns the
+    /// existing version and repairs a damaged managed copy along the way, while different bytes are
+    /// a new version even when the version and build labels match.
+    ///
+    /// # Ordering
+    ///
+    /// Copying, hashing and inspecting all happen *before* the metadata lock is taken, so a
+    /// multi-gigabyte import does not block the rest of the library. Bytes are published first and
+    /// the manifest second; if the manifest write fails, the bytes this operation published are
+    /// removed — an operation cleaning up after its own failure, which is not the same as sweeping
+    /// files nobody asked about.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the file is missing, unreadable, larger than 2 GiB, not a valid IPA,
+    /// has no usable bundle identifier, or if the library cannot be written.
+    ///
+    /// # Concurrency
+    ///
+    /// Takes the metadata lock for the manifest half only. Blocking: call it off the async runtime.
     pub fn import(&self, source: &Path) -> Result<Imported> {
         // Copying, hashing and inspecting up to 2 GiB happens before the lock is taken. Holding
         // it across all of that froze every other library call — including the list the window
@@ -591,6 +686,16 @@ impl Library {
         }
         Ok(result)
     }
+    /// Copy a source IPA into a private temporary file, hash it, and inspect the copy.
+    ///
+    /// The copy is hashed and inspected rather than the original, so what is recorded describes
+    /// exactly the bytes the library will keep even if the source changes afterwards. The
+    /// temporary file lives in the managed directory so publication is a rename on one filesystem.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the source is missing, is not a regular file, exceeds 2 GiB, grows
+    /// past that during the copy, cannot be flushed, or is not a valid IPA.
     fn stage(&self, source: &Path) -> Result<(tempfile::NamedTempFile, String, Report)> {
         let metadata = fs::metadata(source)
             .map_err(|_| "IPA is missing or unreadable. Choose a readable IPA.")?;
@@ -617,6 +722,15 @@ impl Library {
             .map_err(|e| e.to_string())?;
         Ok((temp, hash, report))
     }
+    /// Move a staged copy into place under its content hash.
+    ///
+    /// A destination that already exists and still hashes correctly is left alone — identical
+    /// bytes need no write, and rewriting them would churn a file another operation may be reading.
+    /// A destination another operation holds a lease on is refused outright.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the artifact is in use, or if the rename fails.
     fn publish(&self, temp: tempfile::NamedTempFile, hash: &str) -> Result<()> {
         let dest = self.file(hash)?;
         // Avoid replacing an artifact currently in use. Identical valid bytes need no write.
@@ -630,6 +744,21 @@ impl Library {
             .map_err(|_| "Cannot save managed IPA. Check disk space and permissions.")?;
         Ok(())
     }
+    /// Take a saved version for use, verifying its bytes and holding it against deletion.
+    ///
+    /// Re-hashes the managed copy before returning: a file that changed on disk is refused rather
+    /// than handed over, which is what makes a review's binding to exact bytes meaningful. The
+    /// returned [`Lease`] must be held for as long as the path is used; dropping it releases the
+    /// file.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the artifact is unknown or removed, or if the managed copy is missing
+    /// or no longer matches its recorded hash.
+    ///
+    /// # Concurrency
+    ///
+    /// Takes the metadata lock, then the lease table. Blocking: hashing reads the whole file.
     pub fn pin(&self, artifact_id: &ArtifactId) -> Result<(Artifact, PathBuf, Lease)> {
         let _lock = self.lock()?;
         let m = self.read()?;
@@ -670,6 +799,14 @@ impl Library {
     ) -> Result<Option<Expiry>> {
         self.expiry_at(artifact_id, team_tag, std::time::SystemTime::now())
     }
+    /// Where the seven days stand for one saved build, against a given clock.
+    ///
+    /// The clock is a parameter so a test can stand on a day boundary; production callers use
+    /// [`Self::expiry`]. `team_tag` is an already-derived tag, never a raw team identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the manifest cannot be read.
     pub fn expiry_at(
         &self,
         artifact_id: &ArtifactId,
@@ -717,6 +854,20 @@ impl Library {
         }
         Ok(self.import(path)?.artifact_id)
     }
+    /// Verify a saved version and describe it, including a fresh inspection report.
+    ///
+    /// Opening an original also refreshes the app's cached icon, which is how an app whose icon
+    /// could not be read at import time acquires one later.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the artifact is unknown, removed, or no longer matches its hash, or if
+    /// the archive cannot be inspected.
+    ///
+    /// # Concurrency
+    ///
+    /// Takes the metadata lock twice — once through [`Self::pin`] and once for the icon write-back
+    /// — with the inspection between them, so neither is held across the slow part.
     pub fn open(&self, artifact_id: &ArtifactId) -> Result<Opened> {
         let (artifact, path, _lease) = self.pin(artifact_id)?;
         let report =
@@ -742,6 +893,23 @@ impl Library {
             path: path.to_string_lossy().into_owned(),
         })
     }
+    /// Keep a freshly signed build as a new version beside the original it came from.
+    ///
+    /// Records the source it was made from, the team it was signed for, and the Watch and marker
+    /// choices that produced it — so a saved build says what it actually is rather than what was
+    /// selected on screen afterwards. Expiry is taken from the signing result in both forms.
+    ///
+    /// The generated file is staged, hashed, inspected and published exactly as an import is; the
+    /// caller's own output file is untouched and remains theirs to remove.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the source is unknown, removed, or is itself a signed build; if the
+    /// generated file cannot be read or is not a valid IPA; or if the manifest cannot be written.
+    ///
+    /// # Concurrency
+    ///
+    /// Takes the metadata lock. Blocking: it copies and hashes the whole output.
     pub fn retain_signed(
         &self,
         source_id: &ArtifactId,
@@ -771,6 +939,25 @@ impl Library {
         self.save(&m)?;
         Ok(artifact)
     }
+    /// Remove one saved version, or an entire app with its history.
+    ///
+    /// Removing a version tombstones that original and the signed builds made from it while
+    /// keeping their installation history; removing an app removes its records outright.
+    /// **Nothing is uninstalled from any phone.**
+    ///
+    /// Bytes shared with a record that is staying are never deleted, and a file another operation
+    /// holds a lease on refuses the whole removal rather than being taken from under it.
+    ///
+    /// # Ordering
+    ///
+    /// The person's decision is committed to the manifest *before* any bytes are deleted, so a
+    /// failure leaves files present and a pending cleanup to retry rather than records pointing at
+    /// files that are gone.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the app or version is not in this library, if an artifact is in use, or
+    /// if the manifest cannot be written.
     pub fn remove(&self, app_id: &AppId, artifact_id: Option<&ArtifactId>) -> Result<()> {
         let _lock = self.lock()?;
         let mut m = self.read()?;
@@ -843,6 +1030,19 @@ impl Library {
         self.save(&m)?;
         self.finish_removals(&mut m)
     }
+    /// Delete the files a person already asked to remove, and clear them from the pending list.
+    ///
+    /// Only ever finishes work someone requested — it is not a sweep, and bytes left behind by an
+    /// interrupted copy are untouched. A hash reintroduced by a later import is skipped, so a
+    /// re-import cannot be undone by cleanup that was queued before it.
+    ///
+    /// An icon that cannot be deleted stays on the list and is retried; it must not stop the
+    /// removal that matters.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if a managed IPA is still leased, if a deletion fails, or if the manifest
+    /// cannot be written.
     fn finish_removals(&self, m: &mut Manifest) -> Result<()> {
         if m.pending_removals.is_empty() && m.pending_icon_removals.is_empty() {
             return Ok(());
@@ -924,6 +1124,15 @@ impl Library {
         }
         Ok(freed)
     }
+    /// The stable, library-local identity for a phone.
+    ///
+    /// A salted hash of the UDID. The raw identifier is used to compute it and is never stored, so
+    /// the library can recognise the same phone across sessions without recording which phone it
+    /// is — and a tag from one library means nothing in another.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the manifest cannot be read or the salt cannot be established.
     pub fn device_tag(&self, udid: &str) -> Result<RememberedDeviceId> {
         let _lock = self.lock()?;
         let m = self.read()?;
@@ -982,6 +1191,18 @@ impl Library {
         });
         self.save(&m)
     }
+    /// Record an installation's stage change.
+    ///
+    /// Only durable transitions are written: byte progress is transient, and a status naming the
+    /// stage already recorded is ignored. A terminal outcome is never overwritten, so a late
+    /// message cannot turn a recorded failure into a success.
+    ///
+    /// A status for an attempt this library does not hold is ignored rather than treated as an
+    /// error — it belongs to something else.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the manifest cannot be read or written.
     pub fn update(&self, status: &JobStatus) -> Result<()> {
         let _lock = self.lock()?;
         let mut m = self.read()?;
@@ -1026,9 +1247,22 @@ impl Library {
         self.finish_removals(&mut m)
     }
 }
+/// Whether a string is a SHA-256 digest in the form this library writes.
+///
+/// Checked before any hash is joined onto a path, so a value from a record cannot become something
+/// other than a filename.
 fn valid_hash(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit())
 }
+/// SHA-256 of a file, read in bounded blocks.
+///
+/// Uses `symlink_metadata`, so a symlink is refused rather than followed out of the managed
+/// directory. The size is bounded both before and during the read.
+///
+/// # Errors
+///
+/// Returns a message if the path is missing, is not a regular file, exceeds the size limit, or
+/// cannot be read.
 fn hash_file(path: &Path) -> Result<String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|_| "Managed IPA is missing or unreadable. Import the original again.")?;
@@ -1054,6 +1288,11 @@ fn hash_file(path: &Path) -> Result<String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
+/// Derive a library-local device identity from its salt and a phone's UDID.
+///
+/// Salt and identifier are separated by a nul byte so two different pairs cannot hash to the same
+/// value by concatenating differently. The result is one-way: it recognises a phone without
+/// recording which phone it is.
 fn tag(salt: &str, udid: &str) -> RememberedDeviceId {
     let mut hash = Sha256::new();
     hash.update(salt);
@@ -1061,6 +1300,15 @@ fn tag(salt: &str, udid: &str) -> RememberedDeviceId {
     hash.update(udid);
     RememberedDeviceId::new(format!("{:x}", hash.finalize()))
 }
+/// Build an artifact record from an inspection report.
+///
+/// Expiry is taken from the profile that expires first, in both its displayable and epoch forms
+/// from that same profile — so the date shown and the date counted can never describe different
+/// bundles.
+///
+/// # Errors
+///
+/// Returns a message if the report has no main app.
 fn from_report(report: &Report, app_id: AppId, hash: String) -> Result<Artifact> {
     let main = report
         .bundles
@@ -1095,6 +1343,10 @@ fn from_report(report: &Report, app_id: AppId, hash: String) -> Result<Artifact>
     })
 }
 
+/// The team tag recorded against one installation attempt, if it has one.
+///
+/// An attempt of an unsigned original has none: the expiry came from the imported profile, and the
+/// team is not Orbiter's to claim.
 fn attempt_team<'a>(m: &'a Manifest, attempt_id: &JobId) -> Option<&'a str> {
     m.attempts
         .iter()
@@ -1166,6 +1418,9 @@ fn managed_hash(name: &std::ffi::OsStr) -> Option<&str> {
     let hash = name.to_str()?.strip_suffix(".ipa")?;
     valid_hash(hash).then_some(hash)
 }
+/// Whether a filename is one this library gave a managed artifact.
+///
+/// Anything else in the directory is not Orbiter's to judge and is left strictly alone.
 fn managed_name(name: &std::ffi::OsStr) -> bool {
     managed_hash(name).is_some()
 }
