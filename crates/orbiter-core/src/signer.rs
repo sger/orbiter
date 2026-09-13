@@ -51,10 +51,12 @@ struct Log {
 }
 
 impl Log {
+    /// Begin a stage, recording it so a failure can say where it happened.
     fn stage(&mut self, stage: &'static str) {
         self.stage = stage;
         self.lines.push(stage.to_string());
     }
+    /// Add an indented detail under the current stage.
     fn note(&mut self, line: String) {
         self.lines.push(format!("  {line}"));
     }
@@ -108,6 +110,14 @@ pub fn refusal(plan: &Plan, profiles: &[ProfileOutcome], has_identity: bool) -> 
     None
 }
 
+/// Stop here if cancellation was requested.
+///
+/// Checked between bundles and around long file operations. Cancelling leaves the work directory
+/// to be removed and the original IPA untouched; nothing partially signed escapes.
+///
+/// # Errors
+///
+/// Returns a message when a stop has been asked for.
 fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
         Err("Signing cancelled. The original IPA is unchanged.".into())
@@ -226,6 +236,14 @@ fn prune(root: &Path, plan: &Plan) -> Result<Vec<String>, String> {
     Ok(removed)
 }
 
+/// Find every bundle directory under a root, ordered so a child is signed before its parent.
+///
+/// A bundle is a directory with a direct `Info.plist`. The order matters: a parent's signature
+/// covers its children, so signing a parent first would be invalidated the moment a child changed.
+///
+/// # Errors
+///
+/// Returns a message if the tree cannot be walked.
 fn collect_bundle_directories(
     root: &Path,
     dir: &Path,
@@ -333,6 +351,16 @@ fn mark(dictionary: &mut plist::Dictionary, marker: &str) {
     );
 }
 
+/// Rewrite one bundle's `Info.plist` for the target team.
+///
+/// Sets the bundle's own identifier outright — a build whose plist disagreed with the plan would be
+/// signed for an identifier it does not claim, and iOS would refuse it — and rewrites every
+/// cross-reference to another bundle by key rather than by value. Optionally marks the display
+/// name; see [`mark`].
+///
+/// # Errors
+///
+/// Returns a message if the plist is missing, unreadable, or cannot be written back.
 fn rewrite_info(
     path: &Path,
     identifier: &str,
@@ -400,6 +428,15 @@ pub struct SigningIdentity {
 }
 
 impl SigningIdentity {
+    /// Load this Mac's private key and Apple's certificate into a usable signing identity.
+    ///
+    /// The private key is held in memory for the run and is never written anywhere but the
+    /// Keychain it came from.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message if the key or certificate cannot be decoded, saying nothing about their
+    /// contents.
     pub fn new(identity: &Identity) -> Result<Self, String> {
         use apple_codesign::cryptography::InMemoryPrivateKey;
         let encoded = crate::certificates::encode_key(&identity.key)?;
@@ -469,6 +506,18 @@ pub fn sign(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Do the signing: extract, prune, rewrite, provision, sign inside-out, repackage.
+///
+/// Works entirely inside a private directory. The chosen IPA is opened read-only and the output is
+/// a uniquely named file this run owns, so nothing existing is ever overwritten.
+///
+/// Entitlements are never chosen here: each bundle gets exactly what Apple's own profile grants it.
+/// Deciding them locally would mean signing a build with permissions the profile does not carry,
+/// which iOS refuses at install time with nothing useful to say.
+///
+/// # Errors
+///
+/// Returns a message naming the stage it failed in — "it did not work" is not a diagnosis.
 fn run(
     ipa: &Path,
     out_dir: &Path,
@@ -697,6 +746,11 @@ fn repackage(
     Ok(())
 }
 
+/// Collect every regular file under a directory, for repackaging.
+///
+/// # Errors
+///
+/// Returns a message if the tree cannot be walked.
 fn collect_files(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), String> {
     for entry in fs::read_dir(dir)
         .map_err(|_| "The signed build could not be read.".to_string())?
@@ -713,10 +767,12 @@ fn collect_files(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), String> {
 }
 
 #[cfg(test)]
+/// Checks what signing refuses, what it rewrites, and what it must leave alone.
 mod tests {
     use super::*;
     use crate::plan::{BundlePlan, TeamKind};
 
+    /// One planned bundle with the given path, old and new identifiers.
     fn bundle(path: &str, identifier: &str, new_identifier: &str, app_id: bool) -> BundlePlan {
         BundlePlan {
             path: path.into(),
@@ -729,6 +785,7 @@ mod tests {
         }
     }
 
+    /// A plan over the given bundles and blockers.
     fn plan(bundles: Vec<BundlePlan>, blockers: Vec<String>) -> Plan {
         Plan {
             team_id: "ABCDE12345".into(),
@@ -742,6 +799,7 @@ mod tests {
         }
     }
 
+    /// A downloaded profile for one identifier, expiring well in the future.
     fn profile(identifier: &str) -> ProfileOutcome {
         ProfileOutcome {
             identifier: identifier.into(),
@@ -753,6 +811,8 @@ mod tests {
     }
 
     #[test]
+    /// Signing is refused without a certificate, with an unresolved blocker, or with any
+    /// App-ID-bearing bundle missing its profile — each with a message naming what is missing.
     fn signing_is_refused_without_a_certificate_a_signable_plan_or_every_profile() {
         let one = plan(
             vec![bundle(
@@ -777,6 +837,12 @@ mod tests {
     }
 
     #[test]
+    /// Identifiers are matched as whole strings under identifier-bearing keys only.
+    ///
+    /// This is the bug that shipped: a framework whose identifier equalled its executable name had
+    /// `CFBundleExecutable` and `CFBundleName` rewritten too, leaving the plist pointing at a file
+    /// that did not exist. Cross-references like `WKCompanionAppBundleIdentifier` must travel;
+    /// filename-adjacent keys must not.
     fn identifiers_are_replaced_whole_and_cross_references_travel_with_them() {
         let mut map = BTreeMap::new();
         map.insert(
@@ -845,10 +911,14 @@ mod tests {
         );
     }
 
+    /// A bundle directory with just an identifier in its plist.
     fn write_bundle(root: &Path, path: &str, identifier: &str) {
         write_named_bundle(root, path, identifier, None);
     }
 
+    /// A bundle directory whose display name, name and executable all share one string.
+    ///
+    /// The shape that caused the identifier-rewriting bug, so a test can prove it stays fixed.
     pub(super) fn write_named_bundle(
         root: &Path,
         path: &str,
@@ -867,12 +937,14 @@ mod tests {
         plist::to_file_binary(dir.join("Info.plist"), &info).expect("Info.plist");
     }
 
+    /// Read one bundle's `Info.plist` back from disk.
     pub(super) fn info(root: &Path, path: &str) -> plist::Dictionary {
         plist::Value::from_file(root.join(path).join("Info.plist"))
             .expect("Info.plist")
             .into_dictionary()
             .expect("dictionary")
     }
+    /// One string value from a plist, or `None` if it is absent or another type.
     pub(super) fn text(d: &plist::Dictionary, key: &str) -> Option<String> {
         d.get(key)
             .and_then(plist::Value::as_string)
@@ -880,6 +952,8 @@ mod tests {
     }
 
     #[test]
+    /// A bundle the plan omitted is removed along with everything nested inside it, and reported
+    /// once rather than once per buried bundle.
     fn bundles_the_plan_left_out_are_removed_with_everything_inside_them() {
         let root = tempfile::tempdir().expect("working directory");
         write_bundle(root.path(), "Payload/App.app", "com.company.app");
@@ -910,6 +984,8 @@ mod tests {
     }
 
     #[test]
+    /// A bundle's own identifier is set outright, even when its plist claimed something else: a
+    /// build signed for an identifier it does not claim is one iOS refuses.
     fn the_bundles_own_identifier_is_set_even_when_its_plist_disagrees() {
         let root = tempfile::tempdir().expect("working directory");
         write_bundle(root.path(), "Payload/App.app", "com.stale.identifier");
@@ -932,6 +1008,8 @@ mod tests {
     }
 
     #[test]
+    /// An archive containing traversal or absolute paths is refused before extraction, so a
+    /// crafted IPA cannot write outside the working directory.
     fn an_archive_with_unsafe_paths_is_refused_rather_than_written_to_disk() {
         let root = tempfile::tempdir().expect("working directory");
         let archive = root.path().join("bad.ipa");
@@ -950,6 +1028,8 @@ mod tests {
     }
 
     #[test]
+    /// Repackaging preserves permissions: an executable that came out non-executable would install
+    /// and then refuse to launch, with nothing on screen to explain it.
     fn repackaging_keeps_the_executable_bit_so_ios_can_run_the_binary() {
         let root = tempfile::tempdir().expect("working directory");
         let payload = root.path().join("tree/Payload/App.app");
@@ -982,10 +1062,12 @@ mod tests {
 }
 
 #[cfg(test)]
+/// Checks that a signing failure says where it happened.
 mod log_tests {
     use super::*;
 
     #[test]
+    /// A failure names the stage it occurred in, because "signing failed" is not a diagnosis.
     fn a_failure_says_which_stage_it_happened_in() {
         let mut log = Log::default();
         log.stage(STAGES[3]);
@@ -996,11 +1078,14 @@ mod log_tests {
 }
 
 #[cfg(test)]
+/// Checks the display-name marker: what it accepts, and what it must never touch.
 mod marker_tests {
     use super::tests::{info, text, write_named_bundle};
     use super::*;
 
     #[test]
+    /// A marker is trimmed, stripped of control characters and bounded; nothing usable is no
+    /// marker rather than an empty prefix and a stray space.
     fn a_marker_is_cleaned_or_refused() {
         assert_eq!(marker("test").as_deref(), Some("test"));
         assert_eq!(marker("  test  ").as_deref(), Some("test"));
@@ -1018,6 +1103,9 @@ mod marker_tests {
     }
 
     #[test]
+    /// Only the main app's `CFBundleDisplayName` changes. `CFBundleName` and `CFBundleExecutable`
+    /// are filename-adjacent — rewriting one of those is what produced a build iOS refused — and a
+    /// nested bundle has no icon anyone sees.
     fn only_the_main_app_is_marked_and_only_its_display_name() {
         let root = tempfile::tempdir().expect("working directory");
         write_named_bundle(
@@ -1073,6 +1161,7 @@ mod marker_tests {
     }
 
     #[test]
+    /// Signing the same build weekly does not stack markers into "test test test Stoiximan".
     fn re_signing_every_week_does_not_stack_markers() {
         let root = tempfile::tempdir().expect("working directory");
         write_named_bundle(
@@ -1097,6 +1186,8 @@ mod marker_tests {
     }
 
     #[test]
+    /// A bundle with no display name is left without one: inventing a name would put the marker on
+    /// the Home Screen where the app's own name belongs.
     fn a_nameless_bundle_is_left_nameless() {
         let root = tempfile::tempdir().expect("working directory");
         write_named_bundle(root.path(), "Payload/App.app", "com.company.app", None);
@@ -1116,6 +1207,8 @@ mod marker_tests {
     }
 
     #[test]
+    /// A bundle carrying only `CFBundleName` is marked through a new display name, and keeps the
+    /// original short name untouched.
     fn a_bundle_with_only_a_short_name_is_marked_without_losing_it() {
         let root = tempfile::tempdir().expect("working directory");
         let dir = root.path().join("Payload/App.app");
