@@ -82,6 +82,11 @@ fn tidy(line: &str) -> String {
     }
 }
 
+/// Where the local device daemon listens.
+///
+/// Always the machine's own socket. Any environment variable naming a remote daemon is ignored:
+/// a device log is streamed from a phone plugged into *this* Mac, and honouring a redirect would
+/// send a capture request somewhere a person did not choose.
 fn address() -> UsbmuxdAddr {
     // The same narrow, local-only transport discovery and installation use.
     #[cfg(unix)]
@@ -94,10 +99,21 @@ fn address() -> UsbmuxdAddr {
     }
 }
 
+/// Replace a transport error with one sentence about what to do.
+///
+/// The underlying error is deliberately discarded rather than formatted: it can carry pairing and
+/// address detail, and none of it helps someone whose phone is locked.
 fn connection_error(_: IdeviceError) -> String {
     "Cannot read the iPhone's log. Unlock it, check trust and the USB cable, and try again.".into()
 }
 
+/// Open a connection to one attached phone for log streaming.
+///
+/// # Errors
+///
+/// Fails if the device daemon is unreachable, if no attached device has that number, or if the
+/// phone is locked or untrusted — all reported as the same actionable sentence, since the fix is
+/// the same and the difference would only leak pairing detail.
 async fn provider(device_id: u32) -> Result<UsbmuxdProvider, String> {
     let mut mux = address().connect(0).await.map_err(connection_error)?;
     let raw = mux
@@ -184,10 +200,13 @@ pub async fn capture(
 }
 
 #[cfg(test)]
+/// Checks that a capture keeps only lines about the build it was asked about.
 mod tests {
     use super::*;
 
     #[test]
+    /// A capture with no subject is refused. Streaming a whole phone's log and calling it a
+    /// diagnosis of one app would be both useless and a privacy problem.
     fn a_capture_needs_to_know_which_app_it_is_about() {
         assert!(refusal(&[]).is_some());
         assert!(refusal(&["   ".to_string()]).is_some());
@@ -195,6 +214,8 @@ mod tests {
     }
 
     #[test]
+    /// Lines mentioning the signed build are kept; every other line the device emits is counted
+    /// and discarded rather than retained.
     fn only_lines_about_the_app_are_kept_and_the_rest_of_the_device_is_not() {
         let subjects = vec!["com.example.app.ab12".to_string(), "Example".to_string()];
         let superseded = vec!["com.example.app".to_string()];
@@ -225,6 +246,8 @@ mod tests {
     }
 
     #[test]
+    /// A line naming only the superseded identifier is dropped: with both builds installed, the
+    /// capture must describe the one that was just signed.
     fn the_company_build_installed_beside_this_one_is_not_mistaken_for_it() {
         let subjects = vec!["com.example.app.ab12".to_string(), "Example".to_string()];
         let superseded = vec!["com.example.app".to_string()];
@@ -243,6 +266,8 @@ mod tests {
     }
 
     #[test]
+    /// A kept line is bounded before it is forwarded, so one enormous log line cannot become the
+    /// whole capture.
     fn a_kept_line_is_trimmed_rather_than_stored_whole() {
         assert_eq!(tidy("ready\n\u{0}"), "ready");
         let long = "x".repeat(MAX_LINE + 50);

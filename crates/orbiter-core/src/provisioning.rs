@@ -57,6 +57,10 @@ pub fn at_personal_limit(devices: usize) -> Option<String> {
     })
 }
 
+/// Wrap a team identifier in the shape Apple's client expects.
+///
+/// Carries the identifier and nothing else — no name, no membership — so a request cannot include
+/// account detail that was not needed to make it.
 fn team(team_id: &str) -> DeveloperTeam {
     DeveloperTeam {
         name: None,
@@ -122,10 +126,14 @@ pub async fn register(
 }
 
 #[cfg(test)]
+/// Checks that every remote mutation is refused until it is acknowledged, and that Apple's own
+/// answers are reported rather than guessed at.
 mod tests {
     use super::*;
 
     #[test]
+    /// Registering a device needs a session, a chosen team and an acknowledgement, and says which
+    /// one is missing rather than failing generically.
     fn registration_is_refused_until_it_is_acknowledged_on_a_chosen_team() {
         assert!(refusal(true, true, false).is_some_and(|m| m.contains("Sign in")));
         assert!(refusal(true, false, true).is_some_and(|m| m.contains("Select the signing team")));
@@ -137,6 +145,8 @@ mod tests {
     }
 
     #[test]
+    /// A free team's device allowance being full is reported before anything is sent, so the
+    /// refusal costs nothing and names the limit.
     fn the_personal_team_device_limit_is_reported_before_writing() {
         assert!(at_personal_limit(PERSONAL_DEVICE_LIMIT - 1).is_none());
         let full = at_personal_limit(PERSONAL_DEVICE_LIMIT).expect("limit reached");
@@ -144,6 +154,8 @@ mod tests {
     }
 
     #[test]
+    /// Reserving app identifiers needs its own acknowledgement: ten per seven days, and an
+    /// identifier no other team can ever reuse.
     fn provisioning_is_refused_until_the_identifier_budget_is_acknowledged() {
         assert!(app_id_refusal(true, true, false).is_some_and(|m| m.contains("Sign in")));
         assert!(
@@ -156,6 +168,8 @@ mod tests {
     }
 
     #[test]
+    /// Only capabilities Apple actually enabled are reported, and a key with no established
+    /// meaning is shown as unnamed rather than given a guessed label.
     fn only_capabilities_apple_enabled_are_reported_and_unknown_keys_are_not_invented() {
         let mut features = plist::Dictionary::new();
         features.insert("APG3427HIY".into(), plist::Value::Boolean(true));
@@ -176,6 +190,7 @@ mod tests {
     }
 
     #[test]
+    /// A team request carries the identifier and nothing about the account behind it.
     fn the_team_request_carries_only_the_team_identifier() {
         let team = team("T8B3X5UL5W");
         assert_eq!(team.team_id, "T8B3X5UL5W");
@@ -204,6 +219,11 @@ pub fn app_id_refusal(
 }
 
 /// Apple's opaque feature identifiers, for the few whose meaning is documented by use.
+/// A readable name for a capability key Apple reports, or the key itself when it has none.
+///
+/// Only keys whose meaning is established by use are named. Anything else is shown as it came
+/// back: inventing a friendly label for an unknown capability would be claiming to know what it
+/// does.
 fn feature_label(key: &str) -> &'static str {
     match key {
         "APG3427HIY" => "App groups",
@@ -301,6 +321,10 @@ pub async fn ensure_app_id(
 }
 
 /// Capabilities Apple reports as enabled, as labels. Apple decides these, not the plan.
+/// The capabilities Apple reports as *enabled* on an app identifier, as labels.
+///
+/// Apple decides these, not the plan. A capability reported as disabled is omitted rather than
+/// listed as absent, so the result is only ever a statement of what is there.
 fn enabled_capabilities(app_id: &AppId) -> Vec<String> {
     let mut labels: Vec<String> = app_id
         .features

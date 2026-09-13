@@ -61,6 +61,15 @@ pub fn refusal(acknowledged: bool, team_selected: bool, signed_in: bool) -> Opti
 }
 
 /// Encode a key for the Keychain. PKCS#8 DER: the same encoding Apple's own tools use.
+/// Encode a private signing key as PKCS#8 DER for storage.
+///
+/// The result is [`zeroize::Zeroizing`], so the encoded private key is wiped when dropped rather
+/// than left in freed memory.
+///
+/// # Errors
+///
+/// Fails if the key cannot be encoded, which would mean a malformed key rather than a storage
+/// problem.
 pub fn encode_key(key: &RsaPrivateKey) -> Result<zeroize::Zeroizing<Vec<u8>>, String> {
     key.to_pkcs8_der()
         .map(|document| zeroize::Zeroizing::new(document.as_bytes().to_vec()))
@@ -68,6 +77,11 @@ pub fn encode_key(key: &RsaPrivateKey) -> Result<zeroize::Zeroizing<Vec<u8>>, St
 }
 
 /// Decode a key read back from the Keychain.
+/// Read a private signing key back from PKCS#8 DER.
+///
+/// # Errors
+///
+/// Fails if the bytes are not a well-formed key. The message says nothing about their contents.
 pub fn decode_key(bytes: &[u8]) -> Result<RsaPrivateKey, String> {
     use rsa::pkcs8::DecodePrivateKey;
     RsaPrivateKey::from_pkcs8_der(bytes)
@@ -75,12 +89,28 @@ pub fn decode_key(bytes: &[u8]) -> Result<RsaPrivateKey, String> {
 }
 
 /// Generate a signing key on this Mac. Blocking and CPU-bound, so callers run it off the runtime.
+/// Generate a new private signing key on this Mac.
+///
+/// The private half never leaves this machine: only a certificate signing request derived from it
+/// is sent to Apple.
+///
+/// # Errors
+///
+/// Fails if the system random source is unavailable.
 pub fn generate_key() -> Result<RsaPrivateKey, String> {
     RsaPrivateKey::new(&mut rand::rng(), KEY_BITS)
         .map_err(|_| "A signing key could not be generated on this Mac.".to_string())
 }
 
 /// PKCS#10 request for `key`. The subject carries no account, device, or company information.
+/// Build the PKCS#10 certificate signing request Apple is asked to sign.
+///
+/// Carries the public key and a fixed subject, and deliberately no account address, team name,
+/// device identifier or machine name — none of it is needed, and a CSR is a durable record.
+///
+/// # Errors
+///
+/// Fails if the request cannot be built or encoded.
 pub fn certificate_request(key: &RsaPrivateKey) -> Result<String, String> {
     let pem = key
         .to_pkcs8_pem(LineEnding::LF)
@@ -99,6 +129,11 @@ pub fn certificate_request(key: &RsaPrivateKey) -> Result<String, String> {
 }
 
 /// Find a certificate Apple already holds for this key, so a rerun writes nothing.
+/// Find the certificate Apple issued for this exact key, if the team already holds one.
+///
+/// Matched by the public key inside the certificate rather than by name or date: names are not
+/// unique and a certificate issued for a different key is useless for signing, however it is
+/// labelled. This is what lets a rerun reuse a slot instead of spending another.
 fn matching(key: &RsaPrivateKey, certificates: &[DevelopmentCertificate]) -> Option<Vec<u8>> {
     let ours = key.to_public_key().to_pkcs1_der().ok()?;
     certificates.iter().find_map(|certificate| {
@@ -109,6 +144,10 @@ fn matching(key: &RsaPrivateKey, certificates: &[DevelopmentCertificate]) -> Opt
 }
 
 /// Whether `haystack` contains `needle`. The issued certificate embeds the requested public key.
+/// Whether `needle` appears anywhere in `haystack`.
+///
+/// Used to look for an encoded public key inside a certificate's bytes. An empty needle never
+/// matches, so a failure to encode cannot read as a match against everything.
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     needle.len() <= haystack.len()
         && haystack
@@ -116,6 +155,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
+/// Wrap a team identifier in the shape Apple's client expects, carrying nothing else.
 fn team(team_id: &str) -> DeveloperTeam {
     DeveloperTeam {
         name: None,
@@ -207,6 +247,11 @@ pub async fn withdraw_all(
     ))
 }
 
+/// Whether Apple refused because the team already holds all the certificates it may.
+///
+/// Recognised so the interface can offer the one thing that resolves it — withdrawing the existing
+/// certificate — rather than showing a refusal with no way forward. A free personal team has a
+/// single slot, and there is no portal page to free it from.
 fn limit_reached(error: &rootcause::Report) -> bool {
     error.iter_reports().any(|cause| {
         matches!(
@@ -311,11 +356,15 @@ pub async fn ensure(
 }
 
 #[cfg(test)]
+/// Checks that a certificate is only ever requested deliberately, and that the request discloses
+/// nothing about the account or the machine.
 mod tests {
     use super::*;
     use rsa::traits::PublicKeyParts;
 
     #[test]
+    /// Requesting a certificate needs a session, a chosen team and an acknowledgement: a free
+    /// team has very few slots and spending one can leave it unable to issue another.
     fn a_certificate_request_is_refused_until_its_cost_is_acknowledged() {
         assert!(refusal(true, true, false).is_some_and(|m| m.contains("Sign in")));
         assert!(refusal(true, false, true).is_some_and(|m| m.contains("Select the signing team")));
@@ -325,6 +374,8 @@ mod tests {
     }
 
     #[test]
+    /// The signing request contains the public key and a fixed subject — no email address, team
+    /// name, device identifier or machine name.
     fn the_request_carries_this_key_and_no_account_or_device_information() {
         // Generating a real 2048-bit key is slow but this is the only place it is exercised.
         let key = generate_key().expect("key");
@@ -338,6 +389,8 @@ mod tests {
     }
 
     #[test]
+    /// An existing certificate is recognised by the key inside it rather than by its name, so a
+    /// rerun reuses the team's slot instead of spending another.
     fn an_existing_certificate_is_matched_by_the_key_it_certifies() {
         let key = generate_key().expect("key");
         let public = key.to_public_key().to_pkcs1_der().expect("public key");

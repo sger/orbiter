@@ -46,6 +46,11 @@ pub(crate) fn address() -> UsbmuxdAddr {
         UsbmuxdAddr::TcpSocket(std::net::SocketAddr::from(([127, 0, 0, 1], 27015)))
     }
 }
+/// Turn a transport error into a state a person can act on and one sentence saying how.
+///
+/// The underlying error is classified and then discarded rather than formatted: it can carry
+/// pairing material and addresses, and "unlock the phone and tap Trust" is the whole of what is
+/// useful.
 fn failure(error: &IdeviceError) -> (DeviceState, &'static str) {
     match error {
         IdeviceError::DeviceLocked => (
@@ -62,6 +67,14 @@ fn failure(error: &IdeviceError) -> (DeviceState, &'static str) {
         ),
     }
 }
+/// List the iPhones attached to this Mac and how usable each one is.
+///
+/// Read-only: it reports what the local daemon sees and which pairings already exist. It pairs
+/// nothing and contacts no Apple service. Never fails — an unreachable daemon is reported through
+/// `service_available`, because "nothing is plugged in" and "this Mac cannot see phones" are
+/// different answers.
+///
+/// Each device is probed independently, so one locked phone does not hide the others.
 pub async fn discover() -> Discovery {
     let result = timeout(Duration::from_secs(3), async {
         let mut mux = address().connect(0).await?;
@@ -118,6 +131,10 @@ pub async fn discover() -> Discovery {
         message: None,
     }
 }
+/// Read one string property from a phone, or `None` if it is absent or not a string.
+///
+/// Absence is ordinary rather than an error: the report says what is known and leaves the rest
+/// blank instead of refusing to describe a device at all.
 async fn value(client: &mut LockdownClient, key: &str) -> Option<String> {
     client
         .get_value(Some(key), None)
@@ -126,6 +143,16 @@ async fn value(client: &mut LockdownClient, key: &str) -> Option<String> {
         .as_string()
         .map(str::to_owned)
 }
+/// Fill in one device's name, model, iOS version and pairing state.
+///
+/// Uses the existing pairing record and never creates one: discovery must not cause a Trust
+/// prompt on someone's phone. The UDID is used to address the device and is not copied into the
+/// report.
+///
+/// # Errors
+///
+/// Returns the transport's error, which the caller classifies through [`failure`] rather than
+/// showing.
 async fn probe(raw: &UsbmuxdDevice, out: &mut Device) -> Result<(), IdeviceError> {
     let provider = raw.to_provider(address(), "Orbiter");
     let mut client = LockdownClient::connect(&provider).await?;
@@ -147,9 +174,12 @@ async fn probe(raw: &UsbmuxdDevice, out: &mut Device) -> Result<(), IdeviceError
     Ok(())
 }
 #[cfg(test)]
+/// Checks that device states are actionable, errors are redacted, and discovery stays local.
 mod tests {
     use super::*;
     #[test]
+    /// Every state a device can be reported in comes with a sentence saying what to do about it,
+    /// rather than only naming the problem.
     fn actionable_states() {
         assert_eq!(failure(&IdeviceError::DeviceLocked).0, DeviceState::Locked);
         assert_eq!(
@@ -158,6 +188,8 @@ mod tests {
         );
     }
     #[test]
+    /// A transport error never reaches the report: the classified state and its fixed sentence do,
+    /// so pairing detail cannot leak into something a person pastes into an issue.
     fn errors_are_redacted() {
         let (_, msg) = failure(&IdeviceError::UnexpectedResponse(
             "secret-device-identifier".into(),
@@ -165,6 +197,8 @@ mod tests {
         assert!(!msg.contains("secret-device-identifier"));
     }
     #[test]
+    /// Discovery always uses this machine's own device daemon, even when the environment names a
+    /// remote one: a phone on someone else's desk is not a device this Mac may enumerate.
     fn ignores_remote_daemon_environment() {
         match address() {
             #[cfg(unix)]
